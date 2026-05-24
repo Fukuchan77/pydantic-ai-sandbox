@@ -97,7 +97,10 @@ source = ["src/pydantic_ai_sandbox"]
 branch = true
 
 [tool.coverage.report]
-# Baseline only — Req 7.7 raises this once trends stabilise (tracked in T12.1).
-fail_under = 0
+# Initial floor (PDCA Act 2026-05-24): measured 98% across 50 unit tests; floor
+# set to measured−5pt = 93 to absorb noise from upcoming watsonx/Anthropic/Bedrock
+# stubs being replaced (Spec 002-multi-provider). Plan R-6 ratchet adds +5pt per
+# Req-implementation task; raise this together with each provider-impl task.
+fail_under = 93
 show_missing = true
 skip_covered = false
