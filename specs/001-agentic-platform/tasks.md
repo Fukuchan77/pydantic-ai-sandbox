@@ -136,7 +136,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `get_model()` を Plan §2.2/§2.3 の契約で実装する。`ollama` のみ実体実装、他 3 provider は `NotImplementedError` の stub。Req 2.6 の "constructor は I/O しない" を守るため、Ollama 実装も `OpenAIChatModel` 構築までで HTTP は agent.run まで遅延する。
 
-- [ ] (P) **4.1** `tests/unit/test_factory_dispatch.py` を作成する
+- [x] (P) **4.1** `tests/unit/test_factory_dispatch.py` を作成する
   - `get_model("ollama")` が `pydantic_ai.models.Model` インスタンスを返すこと (型 assert のみ、I/O は別 task で検査)
   - `get_model("watsonx")` / `get_model("anthropic")` / `get_model("bedrock")` が `NotImplementedError` を raise し、メッセージに provider 名と "002-multi-provider" 等の後続 spec ヒントを含むこと
   - `get_model("unknown")` が `ValueError` を raise すること
@@ -145,14 +145,14 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 3.3
   - _Requirements:_ 2.1, 2.3, 2.4, 2.5
 
-- [ ] (P) **4.2** `tests/unit/test_factory_ollama_no_io.py` を作成する
+- [x] (P) **4.2** `tests/unit/test_factory_ollama_no_io.py` を作成する
   - `httpx.Client.send` / `httpx.AsyncClient.send` を `monkeypatch` で例外を上げる stub に差し替えた状態で `get_model("ollama")` が成功すること
   - 何らかの方法で送信回数 0 を assert (例: `unittest.mock.MagicMock` を `OllamaProvider` の `http_client` 引数に注入し `assert_not_called`)
   - _Boundary:_ tests/unit/test_factory_ollama_no_io.py
   - _Depends:_ 3.3
   - _Requirements:_ 2.6
 
-- [ ] **4.3** `llm/factory.py`、`llm/__init__.py`、`llm/providers/{__init__,ollama,watsonx,anthropic,bedrock}.py` を実装する
+- [x] **4.3** `llm/factory.py`、`llm/__init__.py`、`llm/providers/{__init__,ollama,watsonx,anthropic,bedrock}.py` を実装する
   - `factory.py`: `_MVP_STUB_PROVIDERS = frozenset({"watsonx","anthropic","bedrock"})` を定数公開し、`get_model(provider: str | None = None)` を実装する
   - `providers/ollama.py::_build_ollama(settings)`: `OpenAIChatModel(model_name=settings.ollama_model_name, provider=OllamaProvider(base_url=settings.ollama_base_url, api_key=settings.ollama_api_key))`
   - `providers/{watsonx,anthropic,bedrock}.py`: それぞれ `_build_*(settings) -> Never:` 形で `NotImplementedError("Provider '<name>' is not implemented in MVP; tracked in 002-multi-provider")` を raise する
@@ -163,6 +163,12 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
 
 ### Implementation Notes
+
+- Pyright strict treats every leading-underscore name as module-private and flags `reportPrivateUsage` on cross-module imports. The spec mandates `_build_*` and `_MVP_STUB_PROVIDERS` (plan.md §2.3 / §2.4), so the resolution is two-pronged: each provider module declares `__all__ = ["_build_*"]` to silence `reportUnusedFunction`, and `factory.py` (plus the dispatch test) carries inline `# pyright: ignore[reportPrivateUsage]` with a single shared rationale comment. Net result: zero strict-mode errors without weakening `pyproject.toml` (Constitution V).
+- `_build_ollama` uses `str(settings.ollama_base_url)` to hand `OllamaProvider` a plain string — `HttpUrl` carries a trailing slash but `OllamaProvider` accepts either form. Defensive `if settings.ollama_model_name is None: raise TypeError` is unreachable in practice (Settings' validator gates it for `LLM_PROVIDER=ollama`) but stays in case T4.1's contract is tightened to allow constructor-time provider injection ahead of Settings validation.
+- T4.2's no-I/O proof patches `httpx.{Client, AsyncClient}.send` rather than the OpenAI client surface. Trapping at the transport layer catches every possible egress route; if the OpenAI SDK ever moves to a different transport, the test fails loudly rather than silently passing.
+- The factory's `"fallback"` branch is a deliberate `NotImplementedError` placeholder — the alternative (falling through to the unknown-provider `ValueError`) would mislead operators into thinking they typed the env var wrong. T5.4 replaces this branch with `_build_fallback(settings)`; the boundary contract there forbids touching any other branch.
+- Detail in `pdca/do.md` (2026-05-24 Task 4).
 
 ---
 

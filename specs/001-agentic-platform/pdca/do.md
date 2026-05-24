@@ -331,3 +331,129 @@ raising=False)` で全件クリアしてから override を適用するため、
 T3.1 → 1.1, 1.2, 4.5 ·
 T3.2 → 1.1, 1.2, 4.5 ·
 T3.3 → 1.1, 1.2, 1.4, 4.5
+
+---
+
+## 2026-05-24 — Task 4: ModelFactory ディスパッチと Ollama provider 実装
+
+**Scope**: `get_model()` の env-driven dispatch 実装。`ollama` のみ実体
+(`OpenAIChatModel` + `OllamaProvider`)、`watsonx`/`anthropic`/`bedrock` は
+follow-up spec へ誘導する `NotImplementedError` stub。`fallback` は T5.4
+までプレースホルダ。Req 2.6 の "constructor は I/O しない" 不変条件を
+契約テストで物理的に固定する。
+
+### What was done
+
+| Sub-task | Files                                                                                                                                                                                                  | Outcome                                                                                                                                                                                                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4.1      | `tests/unit/test_factory_dispatch.py`                                                                                                                                                                  | 5 ケース: ollama→Model、stub 3 種で `NotImplementedError` + 後続 spec ヒント (parametrize)、unknown→`ValueError`、引数なしで `Settings.llm_provider` を経由、`_MVP_STUB_PROVIDERS` の語彙ロック。Settings は `_seat_ollama_settings` ヘルパで lru_cache に種付け、各テストで `finally: get_settings.cache_clear()` を徹底。 |
+| 4.2      | `tests/unit/test_factory_ollama_no_io.py`                                                                                                                                                              | `httpx.Client.send` / `httpx.AsyncClient.send` を `_NetworkAccessError` 投擲版に monkeypatch し、`get_model("ollama")` が成功する (= 無 I/O) ことを assert。OpenAI SDK 内部実装に依存せず transport 層で罠を張る方針。                                                                                                          |
+| 4.3      | `src/pydantic_ai_sandbox/llm/__init__.py`, `llm/factory.py`, `llm/providers/__init__.py`, `llm/providers/{ollama,watsonx,anthropic,bedrock}.py`                                                          | `get_model()` で env→Model の 1:1 dispatch。`_MVP_STUB_PROVIDERS = frozenset({"watsonx","anthropic","bedrock"})` を `__all__` 公開。`_build_ollama` は `str(HttpUrl)` 経由で `OllamaProvider(base_url=..., api_key=...)` を組み、`OpenAIChatModel(model_name=..., provider=...)` を返す。3 stub は `Never` 型で provider 名 + `002-multi-provider` 文言の `NotImplementedError` を raise。 |
+
+### RED→GREEN trace (Constitution I)
+
+> **Note (retrospective)**: 本節は `/sdd-validate-impl Task 4` で「Task 2/3 と
+> 同型の RED→GREEN 節が欠落」と検出された LOW 指摘の修正として、依存チェーン
+> (`_Depends:_ 4.1, 4.2 → 4.3`) と test ファイルの import 表面から検証可能な
+> 事実のみで再構成した。観測当時の pytest 生ログは保全されていないため、
+> 再現可能性は (a) 並列タスクの `(P)` マーカ、(b) 各テストの import 行、
+> (c) `_build_*` を提供する src 側不在時の collection 失敗仕様、の 3 点を
+> 根拠とする。後続タスク (T5–T12) は同節を contemporaneous に書く。
+
+1. T4.1 / T4.2 は `(P)` 並列タスクとして T4.3 より先に着地する設計
+   (tasks.md の依存宣言: `4.3 _Depends:_ 4.1, 4.2`)。
+   `tests/unit/test_factory_dispatch.py:30-33` は
+   `from pydantic_ai_sandbox.llm import get_model` /
+   `from pydantic_ai_sandbox.llm.factory import _MVP_STUB_PROVIDERS` を
+   import するため、`src/pydantic_ai_sandbox/llm/` 不在状態で
+   `uv run pytest tests/unit/test_factory_dispatch.py` を走らせると
+   pytest collection 段で `ModuleNotFoundError: No module named
+   'pydantic_ai_sandbox.llm'` を返して **RED**。
+   `tests/unit/test_factory_ollama_no_io.py:31-32` も同経路で同 import を
+   保有しており、collection 失敗の語彙は同一。
+2. T4.3 で `src/pydantic_ai_sandbox/llm/{__init__,factory}.py` と
+   `llm/providers/{__init__,ollama,watsonx,anthropic,bedrock}.py` の 7 ファイル
+   を投入 → 同テスト群を再走 → **8 / 8 PASSED** (dispatch 7 + no-io 1) で **GREEN**。
+3. `mise run check` で 4 ゲート (lint / format / typecheck / test) 全 green。
+   全テスト合計 19 / 19 passed (T2.x の 2 + T3.2 の 9 + T4.1 の 7 + T4.2 の 1)。
+
+### Errors and root causes
+
+1. **Pyright strict が `_build_*` / `_MVP_STUB_PROVIDERS` の cross-module
+   import を `reportPrivateUsage` で叩いた + 各 provider 関数が
+   `reportUnusedFunction` で flag された**。
+   - **Root cause**: 命名は spec mandate (plan.md §2.3 / §2.4) で
+     leading underscore を要求。Pyright strict は `_` 名を module-private
+     と解釈し、別モジュールから参照すると警告する。さらに provider 関数
+     は呼出側 (`factory.py`) でしか参照されないため、自モジュール内で
+     未使用扱いとなる。
+   - **Fix**: 二段構え。(a) 各 provider モジュールに `__all__ = ["_build_*"]`
+     を宣言して `reportUnusedFunction` を解消、`__all__` を介してその
+     名前が "module の公開面" であることを pyright に伝える。
+     (b) `factory.py` の import 行 (および test の import) に
+     `# pyright: ignore[reportPrivateUsage]` を付与し、共通 rationale
+     コメントで「leading underscore は人間向けシグナル、`__all__`
+     経由で正式公開されている」旨を明記。Constitution V (don't weaken
+     local config) を守りつつ spec 命名を維持。
+2. **ruff `SIM300 (Yoda condition detected)` が
+   `_MVP_STUB_PROVIDERS == frozenset(...)` を flag した**。
+   - **Root cause**: ruff の SIM300 は UPPER_SNAKE_CASE 名を「定数 ≒ literal」
+     として扱い、左辺が literal だと Yoda と判定する。(通常 Yoda は
+     `LITERAL == var`、ruff の解釈は逆方向にも機能している。)
+   - **Fix**: 期待値を `expected = frozenset({...})` にバインドして
+     `assert expected == _MVP_STUB_PROVIDERS` の順に書き換え。読みやすさ
+     を犠牲にしないまま rule を満たす。
+3. **ruff `TC002 (Move third-party import pytest into a type-checking block)`
+   が test_factory_ollama_no_io.py で発火した**。
+   - **Root cause**: 当該テストは `pytest.MonkeyPatch` を **annotation**
+     としてしか使わず、`pytest.raises` 等の runtime API は呼ばない。
+     `from __future__ import annotations` 下では annotation が文字列化
+     されるため、TC002 は型注釈のみの import を `TYPE_CHECKING` 化せよ
+     と要求する。
+   - **Fix**: `import pytest` を `if TYPE_CHECKING:` ブロックへ移動。
+4. **ruff `RUF100 (Unused noqa: ANN401)`** — `# noqa: ANN401` を予防的に
+   付けたが、`ANN` ルール群はそもそも `pyproject.toml` で select されて
+   おらず冗長だった。**Fix**: `# noqa` を撤去。
+5. **ruff `I001 (import block un-sorted)`** が factory.py で連鎖発火 →
+   `ruff check --fix` が複数行 import 形式 (`from ... import (\n    name, # ignore\n)`) に
+   再フォーマット。**Fix**: 自動適用を採用。コメント付き `# pyright: ignore`
+   は複数行 import の方が読みやすいので結果オーライ。
+
+### What was learned
+
+- **Spec の underscore 命名 vs pyright strict の衝突は今後も再来する**。
+  T5.4 の `_build_fallback` でも同じ `__all__ + # pyright: ignore` パターン
+  で対応する。Constitution に "spec mandates underscore naming for
+  package-private helpers; resolve via `__all__` + targeted ignore" を
+  運用ノート化する価値がある。
+- **`Never` 戻り型 stub は契約テスト側で大きな価値**。実装ファイルが
+  「呼ぶと爆ぜる」ことが型レベルで保証されるため、factory の dispatch
+  分岐に `_build_watsonx(settings)  # Never returns` と書いても pyright
+  は落ちない。stub にも署名対称性 (`settings: Settings`) を持たせたのは
+  T5.4 の `_build_fallback` が再帰的に `get_model(member)` を呼ぶ際の
+  シグネチャ均質性に効く。
+- **transport 層で罠を張る no-I/O テスト戦略は OpenAI SDK 内部実装に
+  非依存**。`httpx.{Client, AsyncClient}.send` を monkeypatch するだけで
+  Pydantic AI / OpenAI / 任意の HTTP ライブラリ全てに通用する。
+  T11.1 の integration テストでは逆に send が呼ばれる (= I/O が起きる)
+  ことが期待値なので、本テストとミラー関係になっている。
+- **`get_model` が lru_cache を持たない設計判断は意図的**。Settings 側で
+  既に lru_cache が効いているので Model 自体のキャッシュは agent
+  ライフサイクル単位 (= FastAPI Depends の lifetime) に任せる方が
+  テスト観点でクリーン (test 毎に `get_settings.cache_clear()` だけで
+  リセット可能)。
+
+### Verification
+
+```text
+mise run lint       → All checks passed!
+mise run format     → 14 files already formatted
+mise run typecheck  → 0 errors, 0 warnings, 0 informations
+mise run test       → 19 passed (config 9 + dispatch 7 + no-io 1 + model-id-guard 2)
+```
+
+### Requirements covered
+
+T4.1 → 2.1, 2.3, 2.4, 2.5 ·
+T4.2 → 2.6 ·
+T4.3 → 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
