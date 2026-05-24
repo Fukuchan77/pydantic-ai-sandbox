@@ -420,7 +420,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 実 Ollama (`granite4.1:8b`) に対して `POST /chat` を end-to-end で叩く。`RUN_INTEGRATION_OLLAMA=1` ガードでローカル / CI 双方で skip 既定。Req 6.2 の "V2 Agent + 構造化出力 → 実バックエンド" を立証する唯一の test。
 
-- [ ] **11.1** `tests/integration/__init__.py` と `tests/integration/test_ollama_chat_e2e.py` を作成する
+- [x] **11.1** `tests/integration/__init__.py` と `tests/integration/test_ollama_chat_e2e.py` を作成する
   - `pytest.importorskip` ではなく `pytest.mark.skipif(os.environ.get("RUN_INTEGRATION_OLLAMA") != "1", reason="...")` で gate
   - 起動時に `OLLAMA_BASE_URL` が応答しない場合は test を fail させる (skip ではなく fail; CI lane の前提なので)
   - `POST /chat` で 200 と `ChatResponse` 構造を確認し、`sources` が空 list でなく文字列を含むこと (search_kb stub の返却)
@@ -430,6 +430,13 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 3.5, 6.2, 10.3
 
 ### Implementation Notes
+
+- 既存の test 群が `pytest-asyncio` auto モードと同一プロセス上で動くため、integration test 冒頭で `get_settings.cache_clear()` + `get_chat_agent.cache_clear()` の **二段クリア** が必須。前段の unit test が `settings_factory(LLM_PROVIDER='ollama', OLLAMA_MODEL_NAME='dummy-...')` で打ち込んだダミー値が `Settings` lru_cache に残留すると、本テストが operator 提供の本物の `OLLAMA_BASE_URL` ではなく `http://localhost:11434` (default HttpUrl) かつ `dummy-ollama-model` で接続を試みて silent misroute する。整合性を保つには両 lru_cache を必ず順序を守ってクリアし、その後 `get_settings()` を再呼び出しする。
+- `_require_ollama_reachable()` は `pytest.skip` ではなく `pytest.fail` を呼ぶ。これは tasks.md T11.1 の "skip ではなく fail; CI lane の前提" 指示の literal 実装で、`RUN_INTEGRATION_OLLAMA=1` という gate そのものが「operator が integration lane にコミットした」signal であるため、daemon 不在を skip 表示すると lane summary が誤って green に見える。`OLLAMA_BASE_URL=http://127.0.0.1:1` を強制した手動検証で `ConnectError → pytest.fail` 経路が実発火することを確認済み (Connection refused → 1 failed)。
+- `httpx.get(timeout=5.0)` を採用 (ruff `S113` が timeout 必須を要求)。`httpx.RequestError` は `ConnectError` / `TimeoutException` / `ReadError` を含む base class で、daemon 不在系の典型エラーを 1 catch で網羅できる。`HTTPStatusError` は別系統 (response があった上での 4xx/5xx) で、`response.status_code != 200` の分岐で別途扱う設計。
+- 検証用プロンプトを **日本語** で書き、`search_kb ツールを呼び出して 'pydantic-ai-v2' を調べ、その結果を踏まえて簡潔に答えてください。` と明示的にツール起動を要求する。granite4.1:8b は中サイズモデルで tool-call decision にバラツキがあるため、prompt level でツール起動意図を強く誘導しないと `sources` が空になる failure mode が支配的になる。これは spec.md "agent instructions in 日本語" と整合 (CLAUDE.md `language: ja`)。
+- `with TestClient(app):` 形式で TestClient を構築し、lifespan startup phase (`get_settings()` → `configure_observability()` → 条件付き `_build_fallback()` → routes 登録) を **明示的に走らせる**。T8/T9 系の unit test は lifespan を bypass する `TestClient(app)` (without `with`) を使うが、integration test は production 起動経路の literal シミュレーションを目的とするため lifespan の execution を契約に含める。
+- 実 Ollama daemon が手元にない環境では本テストは default lane で skip (gate 未設定) され、`mise run test:integration` でも env 未指定なら同じ skip 経路を辿る。**真の GREEN 観測 (本物の granite4.1:8b への round-trip 成功)** は CI lane (T12.3) または operator が `ollama serve` + `ollama pull granite4.1:8b` を実施した端末でのみ観測可能。本タスク完了時点での実観測は (a) default lane skip / (b) `RUN_INTEGRATION_OLLAMA=1` + 不到達 URL での fail-fast / (c) 4 ゲート集約 `mise run check` 全 green の 3 条件で、契約面の RED-GREEN-REFACTOR は完結している。
 
 ---
 
