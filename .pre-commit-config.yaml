@@ -1,0 +1,94 @@
+# Pre-commit configuration for pydantic-ai-sandbox.
+# Plan §4.3 / Spec Req 1.5, 7.6, 8.1, 8.2, 8.3.
+#
+# Default stage (runs on every `git commit`):
+#   * ruff check                — lint, security (S = flake8-bandit), complexity, docstrings, naming
+#   * ruff format --check       — formatting consistency
+#   * pyright                   — strict type-check against Python 3.14
+#   * gitleaks                  — secret scanning (Req 9.3)
+#   * forbid-hardcoded-model-ids — local pygrep guard (Req 1.5, Plan AD-4)
+#
+# Manual stage (`mise run pre-commit:manual`, also invoked by CI per Req 8.4):
+#   * pytest      — full unit + integration suite
+#   * pip-audit   — dependency CVE scan
+#
+# `bandit` is intentionally absent: ruff's `S` rule set (enabled in pyproject.toml)
+# is a Py3-complete superset of flake8-bandit for this project's surface area
+# (see Spec Q3 amendment / research.md "bandit 非導入の根拠").
+
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
+repos:
+  # --------------------------------------------------------------------------
+  # Default stage: lint / format / type-check / model-ID guard.
+  # Hooks below use `language: system` so they invoke the project's pinned
+  # dev-deps (uv-managed) rather than re-downloading separate copies. This
+  # keeps `mise run check` and `pre-commit run` byte-identical.
+  # --------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (lint; S/C90/D/N/T20)
+        language: system
+        entry: uv run ruff check
+        types: [python]
+
+      - id: ruff-format-check
+        name: ruff format --check
+        language: system
+        entry: uv run ruff format --check
+        types: [python]
+
+      - id: pyright
+        name: pyright (strict, py3.14)
+        language: system
+        entry: uv run pyright
+        types: [python]
+        pass_filenames: false
+        require_serial: true
+
+      # Mirror of tests/unit/test_no_hardcoded_model_ids.py::FORBIDDEN_MODEL_ID_LITERALS.
+      # Both guards intentionally share the same vocabulary; update them in
+      # lockstep whenever a new banned literal must be added. The runtime test
+      # is the source of truth — the regex below is a re-serialisation.
+      - id: forbid-hardcoded-model-ids
+        name: forbid-hardcoded-model-ids (Req 1.5)
+        language: pygrep
+        entry: '(granite4\.1:8b|claude-sonnet-4-6|claude-haiku-4-5-20251001-v1:0|llama3\.2-vision:11b|granite-4-h-small)'
+        types: [python]
+        # tests/** is exempt because the runtime test must reference these
+        # literals as data. src/**/config.py is reserved as a future home for
+        # documented env-default values that should never embed real model IDs.
+        exclude: '^(tests/.*|src/.*/config\.py)$'
+
+  # --------------------------------------------------------------------------
+  # Default stage: secret scanning (Req 9.3).
+  # gitleaks is a Go binary, so we use the upstream repo with a pinned rev
+  # rather than `language: system` — keeps the developer machine free of an
+  # extra system-level install.
+  # --------------------------------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  # --------------------------------------------------------------------------
+  # Manual stage: heavy gates excluded from the default commit path (Req 8.3,
+  # NFR-7). CI runs these via `mise run pre-commit:manual` (Req 8.4).
+  # --------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (manual stage)
+        language: system
+        entry: uv run pytest
+        pass_filenames: false
+        stages: [manual]
+
+      - id: pip-audit
+        name: pip-audit (manual stage)
+        language: system
+        entry: uv run pip-audit
+        pass_filenames: false
+        stages: [manual]
