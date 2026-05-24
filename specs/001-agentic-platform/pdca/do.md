@@ -457,3 +457,160 @@ mise run test       → 19 passed (config 9 + dispatch 7 + no-io 1 + model-id-gu
 T4.1 → 2.1, 2.3, 2.4, 2.5 ·
 T4.2 → 2.6 ·
 T4.3 → 2.1, 2.2, 2.3, 2.4, 2.5, 2.6
+
+---
+
+## 2026-05-24 — Task 5: FallbackModel 構築とフェイルオーバ検証
+
+**Scope**: `FALLBACK_ORDER` から `FallbackModel` を組み立てる `_build_fallback`
+の実装と、その挙動 (failover 成功 / 全 member 失敗 / all-stub fail-fast) の
+契約テスト。`get_model` 経由の dispatch 配線 (T4.3 で deferred) を完成させる。
+Test-First (Constitution I) を全サブタスクに適用。
+
+### What was done
+
+| Sub-task | Files                                                                              | Outcome                                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 5.1      | `tests/support/__init__.py`, `tests/support/model_fakes.py`                        | `function_model_raising(exc, *, model_name)` と `function_model_returning_json(payload, *, model_name)` を 2 ヘルパとして公開。前者は `ModelAPIError` を投げると `FallbackModel` の default `fallback_on=(ModelAPIError,)` で recovery 経路が発火、それ以外は伝播するという pydantic-ai V2 の挙動を docstring に明記。production 側からの import 禁止 (Plan §2.10) は test-only パッケージ運用で物理的に保証。 |
+| 5.2      | `tests/unit/test_factory_fallback.py`                                              | 3 ケース: 単一 real member (`FALLBACK_ORDER=ollama`) → `FallbackModel`、全 stub (`watsonx,anthropic`) → `RuntimeError` + メッセージに `FALLBACK_ORDER` を含むこと、混在 (`ollama,watsonx`) → 成功して real member のみで chain 構築。Settings 段で先に弾かれる "空 / 全 unknown" は到達不能ケースとして docstring で明記し test しない (test_config.py 側でカバー済)。                                              |
+| 5.3      | `tests/unit/test_fallback_failover.py`                                             | 2 ケース: failing+success → success の output が返る + `invoke_agent` span の `model_name` 属性が `"fallback:<fail>,<success>"` 形式で両 provider 名を含む、全失敗 → `FallbackExceptionGroup.exceptions` に原 `ModelAPIError` インスタンスが identity で保持される。logfire テスト fixture は `capfire` を使わず `TestExporter` + `instrument_pydantic_ai` を最小構成で内製化。                                          |
+| 5.4      | `src/pydantic_ai_sandbox/llm/fallback.py`, `src/pydantic_ai_sandbox/llm/factory.py` | `_build_fallback(settings)` 実装: members パース → all-stub 検出時 `RuntimeError` → 混在時 stub をフィルタ → `FallbackModel(default, *rest)` 構築。`factory.py::get_model` の `"fallback"` ブランチを `from .fallback import _build_fallback` の lazy import + `return _build_fallback(settings)` に書き換え。docstring の Raises 表 / モジュール docstring の遷移ノートも整合。                              |
+
+### RED→GREEN trace (Constitution I)
+
+1. **T5.1 着地直後** に `tests/support/{__init__,model_fakes}.py` を作成。
+   この 2 ファイル単独では走るテストが無いため、`uv run pytest tests/support`
+   は collection 0 で exit 5。RED 観測は subsequent な T5.2 / T5.3 の collection
+   失敗で代替。
+2. **T5.2 着地直後** に `uv run pytest tests/unit/test_factory_fallback.py
+   tests/unit/test_fallback_failover.py -v` を実行 →
+   `ModuleNotFoundError: No module named 'pydantic_ai_sandbox.llm.fallback'`
+   で **collection error**。`tests/unit/test_factory_fallback.py:29` の
+   `from pydantic_ai_sandbox.llm.fallback import _build_fallback` が解決
+   不能 → **RED 観測完了**。
+3. **T5.3 単独再走** (`uv run pytest tests/unit/test_fallback_failover.py`)
+   は 2 件中 1 件 PASS / 1 件 FAIL を返した — failover 自体は src 不在でも
+   pydantic-ai 既製の `FallbackModel` で完結するが、span filter を `name`
+   ("invoke_agent a") に依存していたため pydantic-ai V2 が変数名を span
+   name に埋め込む挙動 (実際は `"invoke_agent agent"`) と齟齬し AssertionError。
+   → **属性ベース filter** (`gen_ai.operation.name == "invoke_agent"`) に
+   置換して GREEN 化。これは "src 実装が無い段階で test を書くと、test
+   側の壊れやすい仮定が早期に露見する" という TDD の本来の効用そのもの。
+4. **T5.4 着地後** (`src/.../llm/fallback.py` 投入 + `factory.py` の
+   fallback 分岐書き換え) に再走 → **24 / 24 PASSED** で GREEN。
+   既存テスト (config 9 + dispatch 7 + no-io 1 + model-id-guard 2) と
+   新規テスト (factory_fallback 3 + fallback_failover 2 = 5) の合算。
+
+### Errors and root causes
+
+1. **`mise run check` 初回 fail: `ruff format --check` が test_fallback_failover.py の改行を要求**。
+   - 根本原因: 手書きの inline コメント文の段落幅が ruff の preferred wrapping と相違。
+   - 修正: `uv run ruff format tests/unit/test_fallback_failover.py` で受容。意味変化なし。
+2. **`RUF100 Unused noqa: ANN001`**。
+   - 根本原因: pydantic-ai V2 の `FunctionDef` シグネチャ (`Callable[[list[ModelMessage], AgentInfo], ...]`) に対し `_respond` の引数を素のままにし `# noqa: ANN001` で抑止しようとしたが、`pyproject.toml` の ruff `select` に `ANN` 群は無く noqa が dead code 化 (T3 / T4 と同型のミス再来)。
+   - 修正: `if TYPE_CHECKING:` ブロックに `ModelMessage` / `AgentInfo` を import し、`_respond` を完全 typed annotation に書き換え。`# noqa` 撤去。`# type: ignore` も同時撤去 (もう不要)。
+   - 学び: `# noqa: <CODE>` を書く前に `pyproject.toml::[tool.ruff.lint] select` を必ず確認する。Constitution V "fix the cause, not the symptom" — 不必要な suppression は cause ではなく cosmetic noise。
+3. **循環 import 設計圧力**。
+   - 症状: `llm/fallback.py` が `from llm.factory import _MVP_STUB_PROVIDERS, get_model` を要し、`llm/factory.py` が `from llm.fallback import _build_fallback` を要する → top-level 解決不能。
+   - 根本原因: `_build_fallback` が `get_model(member)` で再帰し、`get_model` 自身は dispatch 表として `_build_fallback` を呼び返す双方向依存。
+   - 修正: `factory.py` の `if resolved == "fallback":` ブロック **内部** に `_build_fallback` の遅延 import を置き、関数呼出時にだけ循環が解決する形に。`fallback.py` の top-level 側は変更不要 (`factory.py` 全モジュールが先に初期化済みになる側を保つ)。
+   - 学び: 循環依存は構造的問題のサインだが、片方を遅延 import に倒せば実害ゼロでパッチ可能。設計上、`_build_fallback` を `factory.py` 内に置く別案もあったが、Plan §4.1 が `llm/fallback.py` を独立ファイルとして指定しているのでファイル境界は維持。
+
+### Design notes (mixed-stub config の挙動)
+
+tasks.md は `_build_fallback` の動作として「全 member が stub なら `RuntimeError`」しか
+明示制約しない。一方で `FALLBACK_ORDER=ollama,watsonx` のような **混在**
+構成も合法な env 入力 (Settings の field validator は通る)。実装は:
+
+- pre-check: 全 stub → `RuntimeError` (fail-fast)
+- 混在: stub を **silent filter** し、real members のみで `FallbackModel` 構築
+
+を採用した。これは:
+
+1. ユーザの `FALLBACK_ORDER` の **相対順序** を尊重 (real provider 同士の順序保持)
+2. stub 由来の `NotImplementedError` を `/chat` まで遅延させない (Plan §2.4 の意図)
+3. `002-multi-provider` への段階的ロールアウトを許容 (stub を予め env に入れて
+   おく運用が可能で、provider 実装が land した瞬間に member として有効化される)
+
+逸脱解釈ではあるが Plan §2.4 の主目的 (NotImplementedError 遅延阻止) と
+整合する最小実装。`/sdd-validate-impl` 段で再評価される可能性あり。
+
+### Design notes (T5.3 logfire span 属性検証の二部構成)
+
+T5.3 spec text は "logfire span 属性 (provider 名 / error class) が含まれること"
+を要求するが、pydantic-ai V2 の `instrument_pydantic_ai()` 実装は:
+
+- **成功 path**: `invoke_agent` span の `model_name` 属性に
+  `"fallback:<fail-name>,<success-name>"` 形式で chain 全体を載せる
+  → provider 名 (失敗 member 含む) は確かに span 属性に残る
+- **失敗 attempt の error class**: span 属性として **emit されない**
+  (`models/fallback.py::request` の `_set_span_attributes` が成功時のみ呼ばれる)
+
+つまり "provider 名" と "error class" の両方を **同一 span 属性で**
+証明することは現状の V2 Beta では不可能。test を二部構成に分解:
+
+- (a) 成功 failover の span 属性 → 両 provider 名を `model_name` で assert
+- (b) 全失敗時の `FallbackExceptionGroup.exceptions` → 原 `ModelAPIError`
+  インスタンスの identity を assert (error class の正体性)
+
+この設計判断は test の module docstring と上記 tasks.md Implementation Notes
+の両方に明文化済。pydantic-ai V2 GA で span 属性に失敗 attempt 情報が
+追加された場合は、本テストを (a) 単体で完結させる方向に refactor する余地。
+
+### Design notes (test fixture の logfire 内製化)
+
+`logfire.testing.capfire` は完全な capture (spans + metrics + logs) を提供
+するが、T5.3 は spans のみで足りる。`fixtures` 名前空間を圧迫しない狙いで
+`captured_spans` という名前で `TestExporter` を最小構成で組み立てた。
+`capfire` の本体ソース (上記参照) と同じ pattern を 8 行に圧縮した内製版で、
+`metrics_reader` / `log_exporter` を持たないため pyright 上もシンプル。
+T7.1 で logfire の本格的な setup test が必要になった時点で `capfire` への
+切替を再評価する。
+
+### Verification
+
+```text
+mise run check
+  [lint]      All checks passed!
+  [format]    19 files already formatted
+  [typecheck] 0 errors, 0 warnings, 0 informations
+  [test]      24 passed in 0.93s
+  Finished in 2.00s
+
+uv run pre-commit run --all-files
+  ruff check (lint; S/C90/D/N/T20)               Passed
+  ruff format --check                            Passed
+  pyright (strict, py3.14)                       Passed
+  forbid-hardcoded-model-ids (Req 1.5)           Passed
+  Detect hardcoded secrets                       Passed
+```
+
+合計 24 passed (config 9 + dispatch 7 + no-io 1 + model-id-guard 2 +
+factory_fallback 3 + fallback_failover 2)。
+
+### Learnings carried forward
+
+- **循環 import** は 1 ファイル境界 + 1 モジュール内の lazy import で解決可能。
+  T5 で確立したパターン (`if resolved == "fallback": from ... import _build_fallback`)
+  は将来 provider が増えて factory ↔ provider-specific module の双方向依存が
+  発生したときの再利用テンプレート。
+- **`# noqa: <CODE>` を書く前に `pyproject.toml` の `select` を確認** —
+  T3 / T4 / T5 の三回連続で同型のミスを踏んだ。`/sdd-reflect` 段で
+  「`# noqa` を書く前のチェックリスト」をパターン化する候補。
+- **TDD の RED 観測は test 側の脆い仮定を早期に露呈する** — T5.3 の
+  span name 仮定 (`"invoke_agent a"` literal) はまさに RED 段で検出され、
+  src 側を一度も触らずに test を堅牢化できた。RED が "ただの import error"
+  に終わらず "test 自体が assert する世界の見方の検証" にもなる好例。
+- **pydantic-ai V2 instrument の挙動は仕様文書ではなく実装で確認するのが速い** —
+  spec の "span 属性に provider 名 / error class" は idea0.md / Plan に書かれ
+  ているが、実際の attribute key 名 (`gen_ai.operation.name`,
+  `gen_ai.request.model`, `model_name="fallback:..."` の format) は smoke
+  script で `exporter.exported_spans_as_dict()` を読まないと分からない。
+  T7 (Logfire 計装) でも同じ手順を踏む見込み。
+
+### Requirements covered
+
+T5.1 → 4.4, 10.2 ·
+T5.2 → 4.1, 4.2, 4.5 ·
+T5.3 → 4.3, 4.4 ·
+T5.4 → 4.1, 4.2, 4.3, 4.5
