@@ -92,14 +92,14 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `Settings` を実装し、起動前に全環境変数を型付きで取り込むことで Req 1.1/1.2/1.4 と Req 4.5 の "構文・名前集合検証" 段を成立させる。`get_settings()` は `lru_cache` シングルトンで提供する (Plan §2.1)。
 
-- [ ] **3.1** `tests/conftest.py` に共有 fixture (`settings_factory`) を準備する
+- [x] **3.1** `tests/conftest.py` に共有 fixture (`settings_factory`) を準備する
   - `settings_factory(**overrides)` は `monkeypatch` で env を差し替えてから `Settings()` を構築して返すヘルパ
   - `app_with_overrides` fixture の skeleton を用意 (中身は task 8/9 で拡張するため最小実装に留める)
   - _Boundary:_ tests/conftest.py
   - _Depends:_ 1.1
   - _Requirements:_ 1.1, 1.2, 4.5
 
-- [ ] **3.2** `tests/unit/test_config.py` を作成する
+- [x] **3.2** `tests/unit/test_config.py` を作成する
   - 正常系: `LLM_PROVIDER=ollama` + 必須 var で `Settings` が成功し、`llm_provider` が `Literal` に正規化されること
   - 異常系: `LLM_PROVIDER=ollama` のとき `OLLAMA_MODEL_NAME` 欠落で fail-fast (`ValidationError` でメッセージに変数名を含む) — Req 1.2
   - 異常系: `LLM_PROVIDER=fallback` で `FALLBACK_ORDER=""` または未知 provider のみ → Settings 構築時に `ValueError` (Req 4.5 構文段)
@@ -110,7 +110,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 3.1
   - _Requirements:_ 1.1, 1.2, 4.5
 
-- [ ] **3.3** `src/pydantic_ai_sandbox/config.py` と `src/pydantic_ai_sandbox/__init__.py` を実装する
+- [x] **3.3** `src/pydantic_ai_sandbox/config.py` と `src/pydantic_ai_sandbox/__init__.py` を実装する
   - `Settings(BaseSettings)`: Plan §2.1 で列挙された属性を持つ `frozen=True` モデル。`llm_provider: Literal["ollama","watsonx","anthropic","bedrock","fallback"]`
   - field validator: `LLM_PROVIDER=ollama` のとき `ollama_model_name` を必須化、`LLM_PROVIDER=fallback` のとき `fallback_order` を空・未知 provider のみで弾く
   - `get_settings() -> Settings` を `functools.lru_cache(maxsize=1)` で提供
@@ -121,6 +121,14 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 1.1, 1.2, 1.4, 4.5
 
 ### Implementation Notes
+
+- Task spec text says "ValueError" for the FALLBACK_ORDER and unknown-LLM_PROVIDER cases, but Pydantic v2 wraps validator-raised `ValueError` into `pydantic.ValidationError` (which is **not** a subclass of `ValueError` in v2). Tests therefore assert on `ValidationError` and inspect the message; the validator code itself raises `ValueError` so the wrap-up path is exercised. Documented inline in `tests/unit/test_config.py`.
+- The Settings frozen test mutates via attribute assignment which surfaces a `ValidationError` ("Instance is frozen") under pydantic v2's frozen-model semantics — same exception class as the construction failures, which keeps the test imports tight.
+- `LLMProvider` Literal alphabet is locked by `test_llm_provider_literal_alphabet_is_authoritative`; T4.3 dispatch and T5.4 fallback resolver MUST update this Literal in the same change set when adding a provider, or the test fires.
+- `tests/conftest.py` clears the full `_MANAGED_ENV_KEYS` set before every `settings_factory()` call so an ambient developer `.env` cannot pollute outcomes — passing `KEY=None` to the factory is the explicit "leave unset" affordance (vs. omitting the kwarg entirely).
+- `app_with_overrides` is a deliberate skip-on-use skeleton (raises `pytest.skip` if any test consumes it before T8.2/T9 lands the body) so the fixture name is reserved without hiding unimplemented surface behind a passing no-op.
+- `uv sync` alone does NOT register a freshly created `src/<pkg>/` editable install when no `[build-system]` is declared (hatchling default kicks in only after explicit install); ran `uv pip install -e .` once to seat it, after which all subsequent `uv run` commands resolved imports correctly.
+- 詳細は `pdca/do.md` (2026-05-24 Task 3) を参照。
 
 ---
 

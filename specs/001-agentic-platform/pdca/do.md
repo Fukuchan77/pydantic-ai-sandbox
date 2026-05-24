@@ -196,3 +196,138 @@ T3.3 で `src/pydantic_ai_sandbox/config.py` が誕生する時点で、env-defa
 
 T2.1 → 1.5, 9.6 ·
 T2.2 → 1.5, 7.6, 8.1, 8.2, 8.3
+
+---
+
+## 2026-05-24 — Task 3: Settings (config layer)
+
+**Scope**: pydantic-settings ベースの `Settings` を `frozen=True` で実装し、
+`get_settings()` を `lru_cache` シングルトンで提供する (Plan §2.1)。
+Test-First (Constitution I) を適用 — RED → GREEN → quality gates の順。
+
+### What was done
+
+| Sub-task | Files                                  | Outcome                                                                                                                                                                                                                                              |
+| -------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1      | `tests/conftest.py`                    | `_MANAGED_ENV_KEYS` (20 keys, mirrors `.env.example`) を一元管理し、`settings_factory(monkeypatch)` が clear-then-set パターンで Settings を構築するヘルパを公開。`SettingsFactory` を `Protocol` で型付け (pyright strict 通過)。`app_with_overrides` は `pytest.skip` で T8.2/T9 までガード。 |
+| 3.2      | `tests/unit/test_config.py`            | 9 件のテスト: ollama happy-path / Literal alphabet lock / OLLAMA_MODEL_NAME 必須 / unknown LLM_PROVIDER / FALLBACK_ORDER 空 / FALLBACK_ORDER 全 unknown / FALLBACK_ORDER 単一 known / LOGFIRE_TOKEN 任意 / `get_settings` lru_cache 同一性。                       |
+| 3.3      | `src/pydantic_ai_sandbox/{__init__,config}.py` | `LLMProvider` Literal、`_KNOWN_FALLBACK_MEMBERS` frozenset、`Settings(BaseSettings, frozen=True)` + `model_validator(mode="after")` で provider 別 fail-fast、`get_settings = lru_cache(maxsize=1)`。`__init__.py` は `__version__` のみ公開。            |
+
+### RED→GREEN trace (Constitution I)
+
+1. `tests/conftest.py` と `tests/unit/test_config.py` 着地直後に
+   `uv run pytest tests/unit/test_config.py -v` を実行 →
+   `ImportError ... ModuleNotFoundError: No module named 'pydantic_ai_sandbox'`
+   で **conftest 段の collection が落ちる RED 状態を観測** (src/ がまだ存在しないため意図通り)。
+2. `src/pydantic_ai_sandbox/{__init__,config}.py` を作成 → `uv pip install -e .` で
+   editable install を seat → 再走で **9 passed in 0.02s** (GREEN)。
+3. `mise run check` で 4 ゲート (lint / format / typecheck / test) 全 green。
+   テスト総数 11/11 passed (T2.x の 2 件 + T3.2 の 9 件)。
+
+### Errors and root causes
+
+1. **`uv sync` 直後の編集 import が失敗 (`ModuleNotFoundError: No module named 'pydantic_ai_sandbox'`)**
+   - 症状: `src/pydantic_ai_sandbox/` を新規作成し `uv sync` を走らせても
+     pytest の conftest が `from pydantic_ai_sandbox.config import Settings` を解決できなかった。
+   - 根本原因: `pyproject.toml` に `[build-system]` セクションが無く、uv が
+     hatchling default をフォールバックで使用している状態。`uv sync` は
+     既にインストール済みの editable をスキップするが、**初回の editable
+     install は別途トリガが必要**。`Resolved 153 packages in 5ms / Checked 147
+     packages in 34ms` というログは "ロックファイルとの差分は無い" を意味し、
+     "プロジェクト本体を register した" を意味しない。
+   - 修正: `uv pip install -e .` を 1 回実行 → `Built pydantic-ai-sandbox @
+     file://...; Installed 1 package; + pydantic-ai-sandbox==0.1.0` を確認。
+     symptom (import error) ではなく cause (editable install seat 不在)
+     を直す方針 (Constitution V "fix the cause, not the symptom")。
+   - 再発防止: `mise.toml` の `setup` task は既に `uv sync` を含むが、
+     `uv sync` 単体では src 構造の初期化を保証しない。後続 `/sdd-reflect`
+     で `setup = "uv sync && uv pip install -e ."` 化を検討する候補
+     (現状 `uv sync` の挙動はバージョン間で変動余地があり、明示的な
+     editable install を含めるほうが robust)。
+
+2. **`uv run ruff format --check .` が初回失敗** — `tests/conftest.py` の docstring 改行スタイルが ruff format 既定とズレ。
+   - 根本原因: 手書きの multi-line docstring が ruff の preferred wrapping に合わなかった。
+   - 修正: `uv run ruff format tests/conftest.py` を 1 回受け入れ。差分は文字列の改行位置のみで意味は変わらない。
+
+3. **`RUF100 Unused noqa directive (non-enabled: ARG001)`**
+   - 根本原因: `pyproject.toml` の ruff `select` に `ARG` 群が含まれていない (現状の rule set は `E,W,F,I,B,UP,RUF,S,A,SIM,T20,D,N,C4,C90,TCH`)。
+     `ARG001` (Unused function argument) は無効なので `# noqa: ARG001` 自体が dead code。
+   - 修正: コメントを通常の説明コメント (`# used for env-clearing side-effect; clear cache below.`)
+     に置き換え。`ARG` を rule set に追加するか否かは別議論 (本タスクの境界外)。
+
+### Verification
+
+```text
+mise run check
+  [lint] All checks passed!
+  [format] 5 files already formatted
+  [typecheck] 0 errors, 0 warnings, 0 informations
+  [test] 11 passed in 0.02s
+  Finished in 1.29s
+```
+
+`uv pip install -e .` の出力:
+
+```text
+Resolved 116 packages in 980ms
+Building pydantic-ai-sandbox @ file:///Users/Shared/codes/pydantic-ai-sandbox
+   Built pydantic-ai-sandbox @ file:///Users/Shared/codes/pydantic-ai-sandbox
+Prepared 1 package in 748ms
+Installed 1 package in 1ms
+ + pydantic-ai-sandbox==0.1.0 (from file:///Users/Shared/codes/pydantic-ai-sandbox)
+```
+
+### Design notes (validator semantics と Pydantic v2 の wrap-up 挙動)
+
+タスク仕様文には「FALLBACK_ORDER の異常時に `ValueError`」「LLM_PROVIDER=foobar
+で `ValueError`」と書かれているが、Pydantic v2 では:
+
+- `@model_validator(mode="after")` 内で `raise ValueError(...)` →
+  `pydantic.ValidationError` に **wrap される**
+- `pydantic.ValidationError` は `ValueError` の subclass では **ない** (v1 と異なる)
+
+したがって `pytest.raises(ValueError)` ではキャッチできない。テストは
+**全件 `pytest.raises(ValidationError)` で書き、`str(exc.value)` に変数名や
+不正値が含まれることを assert** する形にした。validator 側のコードは
+`raise ValueError(msg)` のままなので wrap-up 経路は実コードでも踏まれる。
+このセマンティクス差は `tests/unit/test_config.py` の module docstring と
+`tasks.md` Task 3 Implementation Notes の双方に明文化済み。
+
+### Design notes (Literal alphabet lock as drift sentinel)
+
+`test_llm_provider_literal_alphabet_is_authoritative` は
+`get_type_hints(Settings)["llm_provider"]` から Literal 引数を取り出し、
+正準 5 要素集合との一致を assert する。これは T4.3 の `ModelFactory` ディスパッチ
+表 (`ollama` / `watsonx` / `anthropic` / `bedrock` / `fallback` の 5 分岐 +
+unknown) と T5.4 の `_KNOWN_FALLBACK_MEMBERS` (4 要素集合) の **両方が
+Literal alphabet と lockstep であることを保証する語彙アンカー** として機能する。
+将来 provider を追加するときに、Literal 更新を忘れたら本テストが赤化し、
+忘れずに更新した場合は次に T4 / T5 のディスパッチ表との整合検査が後続する。
+
+### Design notes (`_MANAGED_ENV_KEYS` と環境隔離)
+
+`tests/conftest.py` の `_MANAGED_ENV_KEYS` は `.env.example` (T1.3) の変数集合
+ミラー。`settings_factory()` 呼び出し時に毎回 `monkeypatch.delenv(key,
+raising=False)` で全件クリアしてから override を適用するため、開発者の
+シェル環境や `.env` の残留値が test 結果に流入しない。`KEY=None` 渡しは
+"その変数は明示的に未設定" を意味し、kwarg 省略 (= デフォルト適用) と
+区別する。これにより "LOGFIRE_TOKEN 未設定でも Settings 成立" のような
+"absent" を要件で問うテストを誤魔化さず書ける。
+
+### Learnings carried forward
+
+- `uv sync` は editable install を初期化しない。`src/<pkg>/` を新規作成
+  した直後は `uv pip install -e .` を 1 回踏む必要がある。`mise run setup`
+  に組み込む案は `/sdd-reflect` 段で検討 (本タスク境界外なので推奨に留める)。
+- Pydantic v2 の validator-raises-ValueError → wrap-into-ValidationError
+  は仕様文と実コードの間でセマンティクス調停が必要なポイント。
+  以後の `Settings` 追加 (T4–T7 の env 取り込みなど) でも同じ経路を踏む。
+- `Literal` alphabet をテスト側で固定しておくと provider 追加時に
+  Drift 検出が必ず火を吹く。Literal を持つコンポーネント (T6.3 の
+  `ChatResponse` など) には同型の lock test を添えるのが定石になりそう。
+
+### Requirements covered
+
+T3.1 → 1.1, 1.2, 4.5 ·
+T3.2 → 1.1, 1.2, 4.5 ·
+T3.3 → 1.1, 1.2, 1.4, 4.5
