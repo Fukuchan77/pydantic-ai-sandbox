@@ -614,3 +614,140 @@ T5.1 → 4.4, 10.2 ·
 T5.2 → 4.1, 4.2, 4.5 ·
 T5.3 → 4.3, 4.4 ·
 T5.4 → 4.1, 4.2, 4.3, 4.5
+
+---
+
+## 2026-05-24 Task 6 — Schemas + ChatAgent (V2 Beta API 表面)
+
+### Plan
+
+- T6.1 / T6.2 を **並列で先に RED** → schemas (T6.3) → agents.chat_agent
+  (T6.4) の順で GREEN 化。`build_chat_agent` は `agents/__init__.py`
+  経由で公開、`search_kb` はモジュールトップレベル定義 + コンストラクタ
+  `tools=[search_kb]` 登録の二段で実装する方針 (理由: T6.1 が
+  `inspect.signature(search_kb)` で関数本体を直接 introspect するため
+  クロージャ化を避ける)。
+- TDD discipline: tests を書き、`uv run pytest` で `ModuleNotFoundError`
+  を観測した後でのみ src 側を触る。
+
+### Do
+
+#### RED → GREEN サイクル
+
+1. `tests/unit/test_chat_agent_tool.py` (4 tests) と
+   `tests/unit/test_chat_agent_v2_surface.py` (5 tests) を先に書き、
+   `pytest` で `ModuleNotFoundError: No module named
+   'pydantic_ai_sandbox.agents'` を観測 (RED 状態確認済み)。
+2. `schemas/__init__.py` + `schemas/chat.py` を実装 — `ChatRequest.message`
+   は `min_length=1` で空文字列を 422 段階で弾く、`ChatResponse.sources`
+   は `default_factory=list` で「ツール未呼出時にも構造妥当」な空配列を
+   許容。
+3. `agents/__init__.py` + `agents/chat_agent.py` を実装 — `search_kb`
+   をモジュールトップレベルに、`build_chat_agent` は `Agent[None,
+   ChatResponse](model=..., output_type=ChatResponse, instructions=...,
+   deps_type=type(None), tools=[search_kb])` で構築。
+4. 9/9 tests PASS、ただし pyright で 12 件のエラー残存 — 即座に対処へ。
+
+#### 詰まりポイント
+
+##### Pyright trap 1: `Agent[None, ChatResponse]` だけでは overload 不一致
+
+エラー:
+```
+Argument of type "type[object]" cannot be assigned to parameter
+"deps_type" of type "type[None]" in function "__init__"
+```
+
+`Agent.__init__` の `deps_type` 既定値が **`<class 'object'>`** で、
+これは `Agent[None, ...]` 型引数 `AgentDepsT=None` (≡ `type[None]`) と
+整合しない。`uv run python -c "import inspect; from pydantic_ai import
+Agent; print(inspect.signature(Agent.__init__))"` で実シグネチャを確認:
+```
+deps_type: 'type[AgentDepsT]' = <class 'object'>
+```
+
+→ プロダクション (`build_chat_agent`) と V2 surface テスト 4 箇所すべてで
+**`deps_type=type(None)` を明示**追加。`output_type=ChatResponse` も
+既定値 `str` を上書きしないと overload に合致しないため既に明示済み。
+これで pyright strict 0 errors。
+
+##### Pyright trap 2: `from __future__ import annotations` で signature 評価が文字列のまま
+
+T6.1 の最初の実装で
+`inspect.signature(search_kb).parameters[name].annotation == "RunContext[None]"`
+(文字列) となり `get_origin(annotation) or annotation` が文字列にフォール
+バック。`origin is RunContext` が常に False で 2 件失敗。
+
+`agents/chat_agent.py` の冒頭が `from __future__ import annotations`
+(PEP 563) なので、`inspect.signature` は raw 文字列を返す。**
+`typing.get_type_hints(search_kb)` 経由で評価**すれば実型に解決される。
+テスト docstring に「PEP-563 評価」の理由を残し、将来同型のミスを防ぐ。
+
+##### Pyright trap 3: `@agent.tool` 装飾対象が "未使用" 扱い
+
+T6.2 の `stub_tool` は登録のみで戻り値を読まないため
+`reportUnusedFunction` が発火。**`# pyright: ignore[reportUnusedFunction]`
+を行内で局所抑制** + 抑制理由コメント (Constitution V "ungrounded
+ignore" 禁止に対応)。プロダクション側は `tools=[search_kb]` 形式で
+発生せず、抑制はテスト側 1 箇所のみに閉じている。
+
+##### Pyright trap 4: `_callable` 内の `typing.cast` が冗長
+
+最初に書いた `_callable(obj: object) -> Callable[..., object]` 内で
+`return typing.cast("Callable[..., object]", obj)` が
+`reportUnnecessaryCast` を発火 (`assert callable(obj)` で既に narrow
+済みのため)。そもそも `search_kb` は型付き関数オブジェクトなので
+`inspect.signature(search_kb)` を直接渡せば `_callable` ヘルパ自体が
+不要 → ヘルパごと削除。テストコードの surface area が縮んだ副次効果も
+あり。
+
+#### 検証
+
+`mise run check`: lint / format / typecheck / test 全 4 ゲート PASS。
+合計 33 passed (T1-T5 既存 24 + T6 新規 9)。
+
+### Check (test 結果と learnings)
+
+#### Test results
+
+| Task | Test file | Tests | Status |
+| ---- | --------- | ----- | ------ |
+| T6.1 | tests/unit/test_chat_agent_tool.py | 4 | ✅ |
+| T6.2 | tests/unit/test_chat_agent_v2_surface.py | 5 | ✅ |
+| T6.3 | (no dedicated test; consumed by T6.1/T6.2/T6.4) | — | — |
+| T6.4 | (covered by T6.1/T6.2 above) | — | — |
+
+#### Learnings carried forward
+
+- **`Agent` の generic 型引数を書くなら `deps_type=type(None)` を必ず明示** —
+  既定値 `object` は `Agent[None, ...]` の overload と合致しないため
+  pyright strict で必ず落ちる。プロダクションに `Agent[None, OutT]` を
+  書くたびに発生するパターン。Task 9.3 (chat ルート) や Task 11.1
+  (E2E) の `Agent` 構築でも同じ予防策が要る。
+- **`from __future__ import annotations` 配下の関数を `inspect.signature`
+  で読むときは `typing.get_type_hints` を必ず噛ませる** — 生 annotation
+  が文字列のまま `get_origin` を当てると常に `None` が返って silent
+  pass の温床になる。テスト側に PEP-563 を理解した防御を入れないと、
+  「test が green だけど実は何も見ていなかった」事故になる。
+- **`@agent.tool` は副作用デコレータ** — 登録は agent 内部に向くので
+  pyright の使用追跡が透けない。プロダクションは `tools=[fn]` 形式で
+  避けるのが綺麗で、テストでデコレータ経路を踏むときだけ局所抑制を
+  使う。本タスクはまさにこの選び分けで pyright を黙らせた。
+- **TestModel.last_model_request_parameters.function_tools が公式の
+  ツール内省窓口** — pydantic-ai V2 docs (`docs/toolsets.md`) が
+  `[t.name for t in test_model.last_model_request_parameters.function_tools]`
+  を例示。`agent.toolsets` / `agent._function_toolset` の peek より
+  上位安定。Task 9.1 / 9.2 (chat エンドポイントテスト) でも同 surface
+  を使う見込み。
+- **モジュールトップレベル `search_kb` + `tools=[search_kb]` 登録**は
+  「テストの import 可能性」と「プロダクション登録経路」を一致させる
+  最小セットアップ。`@agent.tool` をクロージャ内で使うと `inspect.signature`
+  の対象が消える/別物になるため、本パターンは将来ツールが増えたときの
+  テンプレートとして再利用する。
+
+#### Requirements covered
+
+T6.1 → 3.3, 6.3 ·
+T6.2 → 6.4 ·
+T6.3 → 3.1, 3.2 ·
+T6.4 → 3.3, 6.3, 6.4

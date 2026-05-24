@@ -224,21 +224,21 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `ChatRequest` / `ChatResponse` と、それを `output_type` に取る `ChatAgent` を Plan §2.5/§2.6 で定義する。Req 6.4 のため V2 Beta API 表面 (Agent constructor, `@agent.tool`, `agent.override`, `result.output`) を test で直接拘束する。
 
-- [ ] (P) **6.1** `tests/unit/test_chat_agent_tool.py` を作成する
+- [x] (P) **6.1** `tests/unit/test_chat_agent_tool.py` を作成する
   - `build_chat_agent(model=test_model)` が返す Agent に少なくとも 1 つのツールが登録されていること (Pydantic AI V2 の `agent.tools` または同等 API で確認)
   - `search_kb` ツールが `RunContext` 引数を受け取り `list[str]` を返すシグネチャであること
   - _Boundary:_ tests/unit/test_chat_agent_tool.py
   - _Depends:_ 4.3
   - _Requirements:_ 3.3, 6.3
 
-- [ ] (P) **6.2** `tests/unit/test_chat_agent_v2_surface.py` を作成する
+- [x] (P) **6.2** `tests/unit/test_chat_agent_v2_surface.py` を作成する
   - `pydantic_ai.Agent` をフルパスで import し、`Agent(model=..., output_type=ChatResponse)` 構築・`@agent.tool` 装飾子・`agent.override(model=...)` コンテキスト・`result.output` アクセスの 4 表面を assert する
   - V2 API がリネーム/削除された場合に test が壊れて検出できることを目的とする (Req 6.5 の前段)
   - _Boundary:_ tests/unit/test_chat_agent_v2_surface.py
   - _Depends:_ 4.3
   - _Requirements:_ 6.4
 
-- [ ] **6.3** `src/pydantic_ai_sandbox/schemas/__init__.py` と `src/pydantic_ai_sandbox/schemas/chat.py` を実装する
+- [x] **6.3** `src/pydantic_ai_sandbox/schemas/__init__.py` と `src/pydantic_ai_sandbox/schemas/chat.py` を実装する
   - `ChatRequest(BaseModel)`: `message: str` (最低 1 文字)
   - `ChatResponse(BaseModel)`: `answer: str`, `sources: list[str] = Field(default_factory=list)` (Req 3.2 の構造化フィールド)
   - Google docstring を付与
@@ -246,7 +246,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 6.1
   - _Requirements:_ 3.1, 3.2
 
-- [ ] **6.4** `src/pydantic_ai_sandbox/agents/__init__.py` と `src/pydantic_ai_sandbox/agents/chat_agent.py` を実装する
+- [x] **6.4** `src/pydantic_ai_sandbox/agents/__init__.py` と `src/pydantic_ai_sandbox/agents/chat_agent.py` を実装する
   - `build_chat_agent(model: Model | None = None) -> Agent[None, ChatResponse]`
   - `model` 省略時は `get_model()` で解決
   - `search_kb(ctx: RunContext, query: str) -> list[str]` を `@agent.tool` で登録 (MVP は固定文字列を返す stub で十分)
@@ -257,6 +257,13 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 3.3, 6.3, 6.4
 
 ### Implementation Notes
+
+- `Agent[None, ChatResponse](...)` の **`deps_type=type(None)` 明示が pyright strict で必須**。`Agent.__init__` の既定値は `deps_type=<class 'object'>` で、これは `Agent[None, ...]` の型引数 `AgentDepsT=None` と整合しない (`type[object]` is not assignable to `type[None]`)。プロダクション (`build_chat_agent`) と V2 表面テストの両方で同じ修正を適用済み。`output_type=ChatResponse` 側は既定値 `str` を上書きして overload に合致させる必要がある。
+- `search_kb` を **モジュールトップレベル**に置き、`Agent(..., tools=[search_kb])` で登録する設計を採用。`@agent.tool` を `build_chat_agent` のクロージャ内で使う案も検討したが、T6.1 の `inspect.signature(search_kb)` テストが import 可能な参照点を必要とするため棄却。トップレベル定義 + コンストラクタ側登録だと、テスト用シグネチャ検査と本番の登録経路が同じ関数オブジェクトを共有でき、片側だけが書き換わる drift を構造的に防げる。
+- `from __future__ import annotations` 配下の関数では `inspect.signature(...).parameters[name].annotation` が **文字列**で返る。T6.1 の RunContext / `list[str]` 検査は `typing.get_type_hints(search_kb)` 経由で実評価する必要があり、`get_origin` を生 annotation に当てると常に `None` が返って silent pass する罠がある。テスト docstring に「PEP-563 評価」の理由を明記済み。
+- `TestModel.last_model_request_parameters.function_tools` が pydantic-ai V2 公式ドキュメント (`docs/toolsets.md`) のツール内省窓口。`agent.toolsets` / `agent._function_toolset` を直接 peek する案より上位の安定性を持つため、T6.1 / T6.2 双方でこの surface を使用。
+- `@agent.tool` は **副作用デコレータ**として agent に関数を登録するだけで戻り値を直接消費しないため、pyright strict の `reportUnusedFunction` が誤検知する。T6.2 の `stub_tool` には行内 `# pyright: ignore[reportUnusedFunction]` で局所抑制 (理由コメント付き)。プロダクション側は `tools=[search_kb]` 形式のため発生せず、抑制はテスト側のみに閉じている。
+- 詳細は `pdca/do.md` (2026-05-24 Task 6) を参照。
 
 ---
 
