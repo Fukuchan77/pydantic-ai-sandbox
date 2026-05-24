@@ -5,7 +5,7 @@
   "phase": "tasks-generated",
   "language": "ja",
   "created": "2026-05-24T07:05:48Z",
-  "updated": "2026-05-24T20:15:00Z",
+  "updated": "2026-05-24T22:30:00Z",
   "amendments": [
     {
       "date": "2026-05-24T19:10:00Z",
@@ -24,6 +24,12 @@
       "scope": "T10.2 boundary 整合 — tests/conftest.py 追記",
       "summary": "/sdd-validate-impl Task 10 で検出された WARNING (boundary out-of-bounds) を解消。T10.2 実装で T9.3 Implementation Notes が前方宣言した `tests/conftest.py::app_with_overrides` からの `app.include_router(chat_router)` 撤去を実施したが、T10.2 の `_Boundary:_` 宣言が `src/pydantic_ai_sandbox/main.py` のみで、conftest 編集が未列挙だった。tasks.md の T10.2 `_Boundary:_` に `tests/conftest.py` を追加し、carry-over 操作を 1 行の説明文として明文化。設計契約と実態の literal 整合を回復。",
       "affected_artifacts": ["tasks.md"]
+    },
+    {
+      "date": "2026-05-24T22:30:00Z",
+      "scope": "T5.4 mixed-stub silent-drop の正式仕様化 + カバレッジ ratchet 起動 + mise run setup 改善",
+      "summary": "/sdd-reflect の Next Actions を実 Action 化。(1) T5.4 の mixed-stub 挙動 (例: FALLBACK_ORDER=ollama,watsonx で stub を黙って除外し real のみで FallbackModel を構築) を、ユーザ承認のもと『最小逸脱解釈』から『正式仕様』に格上げ。tasks.md T5.4 Implementation Notes の文言を更新し、契約は既存の test_build_fallback_skips_stub_members_when_real_members_remain が固定。Req 4.4 の挙動範囲はこの判断で確定。(2) Req 7.7 のカバレッジ ratchet を起動: 実測 98% に対し fail_under = 93 (実測−5pt) を pyproject.toml に設定。CI workflows/ci.yml が既に pytest --cov を実行する構成のため、PR 段階で閾値割れが検出される。(3) mise.toml [tasks.setup] に `uv pip install -e .` を追加し、editable install を初回 bootstrap で seat させる (PDCA Act Mistake-2 carry-over)。",
+      "affected_artifacts": ["tasks.md", "pyproject.toml", "mise.toml", "specs/001-agentic-platform/pdca/act.md"]
     }
   ],
   "description": "Pydantic AI V2 (Beta) × FastAPI × マルチプロバイダ Agentic AI 基盤。本番想定では安定版を採用しつつ、Pydantic AI V2 のローカル検証構築を前提とする。ruff/pyright によるリント・フォーマット・型チェック、pytest による品質確保、pre-commit による自動実行、定期セキュリティスキャンを含む。詳細設計は specs/inputs/idea0.md を参照。",

@@ -27,8 +27,12 @@ description = "Aggregate quality gate (Constitution V, Req 7.5)."
 depends = ["lint", "format", "typecheck", "test"]
 
 [tasks.setup]
-description = "Bootstrap a fresh checkout: sync dependencies and install pre-commit hooks."
-run = "uv sync && uv run pre-commit install"
+# `uv sync` resolves the lock file but does NOT seat the editable install of
+# this package — `from pydantic_ai_sandbox import ...` would fail in tests
+# until `uv pip install -e .` runs once. Folding it in here closes the gap
+# (PDCA Act 2026-05-24 / Mistake-2 carry-over fix).
+description = "Bootstrap a fresh checkout: sync deps, seat editable install, install pre-commit hooks."
+run = "uv sync && uv pip install -e . && uv run pre-commit install"
 
 [tasks."pre-commit:default"]
 description = "Run the default pre-commit stage (lint / format / pyright / gitleaks / forbid-hardcoded-model-ids)."
