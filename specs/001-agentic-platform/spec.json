@@ -1,0 +1,35 @@
+{
+  "feature": "001-agentic-platform",
+  "version": "0.1.0",
+  "status": "active",
+  "phase": "tasks-generated",
+  "language": "ja",
+  "created": "2026-05-24T07:05:48Z",
+  "updated": "2026-05-24T18:30:00Z",
+  "description": "Pydantic AI V2 (Beta) × FastAPI × マルチプロバイダ Agentic AI 基盤。本番想定では安定版を採用しつつ、Pydantic AI V2 のローカル検証構築を前提とする。ruff/pyright によるリント・フォーマット・型チェック、pytest による品質確保、pre-commit による自動実行、定期セキュリティスキャンを含む。詳細設計は specs/inputs/idea0.md を参照。",
+  "tags": ["pydantic-ai", "fastapi", "multi-provider", "agentic-ai", "llm", "v2-beta"],
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "plan": {
+      "generated": true,
+      "approved": true,
+      "validated": true,
+      "validated_at": "2026-05-24T17:50:00Z",
+      "validation_notes": "3 件の整合ギャップ (Req 4.5 fail-fast / Req 6.2 integration CI / Req 7.7 coverage policy) を plan.md / research.md に反映済み"
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true,
+      "generated_at": "2026-05-24T18:05:00Z",
+      "analyzed_at": "2026-05-24T18:30:00Z",
+      "analysis_notes": "/sdd-analyze で検出した HIGH 3 / MEDIUM 3 / LOW 3 を全件反映済み。spec.md タイトル正規化、plan.md §4.2 / §4.3 / §6 にトレーサビリティ補完、tasks.md に T7.4 (Req 5.3 model ID span 検証) と T12.5 (Dependabot 9.5) を新設、T7.2 / T8.2 の boundary・依存関係を整合、T2.1 に .gitignore 検査 (Req 9.6) を追加、T5.4 の factory.py 二重編集制約を明文化。M1 (Req 6.2 PR-time 検証) は plan.md R-7 を「継続受容」から「採用方針」に格上げ: pull_request paths-filter (llm/agents/schemas/integration tests/pyproject.toml) + workflow_dispatch + actions/cache + concurrency.cancel-in-progress を T12.3 に明記し、provider/agent 改修 PR では Req 6.2 が PR 段階で発火する構成に変更。"
+    }
+  }
+}
