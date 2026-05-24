@@ -1,3 +1,43 @@
 [tools]
 python = "3.14"
 uv = "latest"
+
+# Tooling priority is `mise run <task>` first, `uv run <cmd>` second
+# (Constitution V / global guidelines). Bare invocations of ruff / pyright /
+# pytest are prohibited; every quality gate flows through this file.
+
+[tasks.lint]
+description = "Ruff lint check (security S / complexity C90 / docstrings D / naming N)."
+run = "uv run ruff check ."
+
+[tasks.format]
+description = "Ruff format verification — no in-place rewrites."
+run = "uv run ruff format --check ."
+
+[tasks.typecheck]
+description = "Pyright strict type-check against Python 3.14."
+run = "uv run pyright"
+
+[tasks.test]
+description = "Run unit + integration suites under pytest-asyncio auto mode."
+run = "uv run pytest"
+
+[tasks.check]
+description = "Aggregate quality gate (Constitution V, Req 7.5)."
+depends = ["lint", "format", "typecheck", "test"]
+
+[tasks.setup]
+description = "Bootstrap a fresh checkout: sync dependencies and install pre-commit hooks."
+run = "uv sync && uv run pre-commit install"
+
+[tasks."pre-commit:default"]
+description = "Run the default pre-commit stage (lint / format / pyright / gitleaks / forbid-hardcoded-model-ids)."
+run = "uv run pre-commit run --all-files"
+
+[tasks."pre-commit:manual"]
+description = "Run the manual pre-commit stage (pytest / pip-audit) — invoked in CI and on demand."
+run = "uv run pre-commit run --all-files --hook-stage manual"
+
+[tasks."test:integration"]
+description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
+run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"

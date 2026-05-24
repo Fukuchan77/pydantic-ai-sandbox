@@ -5,7 +5,21 @@
   "phase": "tasks-generated",
   "language": "ja",
   "created": "2026-05-24T07:05:48Z",
-  "updated": "2026-05-24T18:30:00Z",
+  "updated": "2026-05-24T19:30:00Z",
+  "amendments": [
+    {
+      "date": "2026-05-24T19:10:00Z",
+      "scope": "Q3 / Req 8.3 / Req 9.2 — bandit 非導入への一本化",
+      "summary": "ruff の `S` ルール群 (flake8-bandit 移植) が pyproject.toml で既に有効化されており、bandit を別途インストールしても Py3.14 strict プロジェクトでは追加検出価値が無いと実装段で判明。spec.md Q3 / 8.3 / 9.2、plan.md File Structure Plan、research.md security.yml、tasks.md T1.1 / T2.2 / T12.2 を整合更新。pyproject.toml dev から `bandit` を削除。詳細は specs/001-agentic-platform/pdca/do.md。",
+      "affected_artifacts": ["spec.md", "plan.md", "research.md", "tasks.md", "pyproject.toml"]
+    },
+    {
+      "date": "2026-05-24T19:30:00Z",
+      "scope": "Amendment trailing-edge cleanup — mise.toml / README.md の bandit 表記整合",
+      "summary": "/sdd-validate-impl Task 1 で検出された MEDIUM 2 件を解消。前段 amendment (19:10:00Z) の affected_artifacts に mise.toml と README.md が含まれておらず、`pre-commit:manual` の description / Day-to-day commands 表に bandit 表記が残存していた。両者を `pytest / pip-audit; bandit ≡ ruff S` 表記に書き換え、運用ドキュメントとランタイム依存 (bandit 非インストール) の整合を回復。",
+      "affected_artifacts": ["mise.toml", "README.md"]
+    }
+  ],
   "description": "Pydantic AI V2 (Beta) × FastAPI × マルチプロバイダ Agentic AI 基盤。本番想定では安定版を採用しつつ、Pydantic AI V2 のローカル検証構築を前提とする。ruff/pyright によるリント・フォーマット・型チェック、pytest による品質確保、pre-commit による自動実行、定期セキュリティスキャンを含む。詳細設計は specs/inputs/idea0.md を参照。",
   "tags": ["pydantic-ai", "fastapi", "multi-provider", "agentic-ai", "llm", "v2-beta"],
   "approvals": {
