@@ -1,0 +1,85 @@
+[project]
+name = "pydantic-ai-sandbox"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "ibm-watsonx-ai",
+    "logfire[fastapi,httpx]",
+    "pydantic-ai>=2.0.0b3",
+    "pydantic-settings",
+    "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "RUF", # ruff-specific
+    "S",   # flake8-bandit (security: eval/exec, SQL injection, hardcoded secrets, pickle, subprocess)
+    "A",   # flake8-builtins (prevent shadowing builtins)
+    "SIM", # flake8-simplify
+    "T20", # flake8-print (detect stray print statements)
+    "D",   # pydocstyle (Google docstring format)
+    "N",   # pep8-naming (CapWords classes, snake_case functions/variables)
+    "C4",  # flake8-comprehensions (prefer list/dict/set comprehensions)
+    "C90", # mccabe complexity
+    "TCH", # flake8-type-checking (move type-only imports into TYPE_CHECKING blocks)
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "S101",   # use of assert (acceptable in tests)
+    "D105",   # missing docstring in magic method
+    "D107",   # missing docstring in __init__ (document in class docstring per Google style)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",  # assert is expected in tests
+    "S105",  # hardcoded passwords acceptable in test fixtures
+    "S106",
+    "D",     # docstrings not required in tests
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["pydantic_ai_sandbox"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = ".venv"
+venv = "."
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
