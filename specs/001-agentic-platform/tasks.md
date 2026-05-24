@@ -389,7 +389,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `create_app()` を Plan §2.9 で実装する。lifespan で `configure_observability` と (条件付き) `_build_fallback()` の eager dry-run を呼び出し、Req 4.5 構成段の fail-fast を成立させる。
 
-- [ ] **10.1** `tests/unit/test_app_lifespan_fallback_dryrun.py` を作成する
+- [x] **10.1** `tests/unit/test_app_lifespan_fallback_dryrun.py` を作成する
   - `LLM_PROVIDER=fallback` + `FALLBACK_ORDER=watsonx,anthropic` (全 stub) で `create_app()` の lifespan startup が `RuntimeError` を raise し、TestClient 構築自体が失敗すること
   - `LLM_PROVIDER=fallback` + `FALLBACK_ORDER=ollama` で startup が成功すること
   - `LLM_PROVIDER=ollama` のときは `_build_fallback` が呼ばれないこと (mock で call 回数 0 を assert)
@@ -397,15 +397,22 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 5.4, 7.3, 8.2
   - _Requirements:_ 4.5
 
-- [ ] **10.2** `src/pydantic_ai_sandbox/main.py` を実装する
+- [x] **10.2** `src/pydantic_ai_sandbox/main.py` を実装する
   - `create_app() -> FastAPI`: lifespan で `get_settings()` → `configure_observability(app, settings)` → `if settings.llm_provider == "fallback": _build_fallback(settings)` (戻り値は破棄、構築可否のみ検証) → ルータ登録
   - `app = create_app()` をモジュールレベルで公開し、`fastapi dev app/main.py` 互換にする
   - 10.1 を green にする
-  - _Boundary:_ src/pydantic_ai_sandbox/main.py
+  - T9.3 で暫定追加された `tests/conftest.py::app_with_overrides` の `app.include_router(chat_router)` を撤去する (T9.3 Implementation Notes で前方宣言済みの carry-over: `create_app()` 側登録に折り畳まれるため二重 include となる)
+  - _Boundary:_ src/pydantic_ai_sandbox/main.py, tests/conftest.py
   - _Depends:_ 10.1, 9.3, 5.4, 7.3, 8.2
   - _Requirements:_ 1.3, 3.1, 4.5, 5.1
 
 ### Implementation Notes
+
+- T10.1 의 全 3 ケース (all-stub fail-fast / fallback+ollama success / ollama no-call spy) が `with TestClient(app)` の lifespan 起動で意図通り発火することを確認した。Starlette は `lifespan` の startup phase で送出された `RuntimeError` を `__enter__` から原型のまま再送するため、`pytest.raises(RuntimeError)` で素直に捕捉できる。`TestClient(app)` を `with` 句なしで構築する既存テスト群 (健康チェック/チャット系) は lifespan を一切走らせないので、本タスクの dry-run が他テストの挙動に副作用を与えないことが構造的に保証されている — これが T10.1 のテスト分離戦略の核心。
+- `_lifespan` の戻り型は当初 `AsyncIterator[None]` で書いたが、Pyright が `reportDeprecated` を出した (`@asynccontextmanager` は `AsyncGenerator` を期待)。Python 3.14 + 現行 typing_extensions では `AsyncGenerator` のシングル型引数構文 (`AsyncGenerator[None]`) が正となり、`Iterator` 系は型システム的に「終了通知 (`None`/`StopIteration`) を曖昧にする」非推奨パスとして扱われる。修正後 0 errors。
+- `tests/conftest.py::app_with_overrides` から `app.include_router(chat_router)` を撤去した。T8.2 当時の暫定 wiring であり、T10.2 が `create_app()` 側で chat ルータを登録するため二重 include になる。同時に conftest 冒頭の docstring も「fixture が唯一の chat-route wiring path」記述を「create_app() に折り畳まれた」記述に書き換えてあり、未来の読者が古い設計説明を読むことを防いだ。
+- `_build_fallback` の戻り値は意図的に破棄している。dry-run の責務は構築可否の検証だけで、実際のリクエスト時の model resolution は `Depends(get_chat_agent) → build_chat_agent → get_model("fallback") → _build_fallback` の経路を独立に再走するため。lifespan 内で結果を保持して agent factory に注入する設計も検討したが、(a) 現行 `get_chat_agent` の `lru_cache` 契約と二重管理になる、(b) plan.md §2.9 の "lifespan は組み立てのみ・ロジックなし" 規約に反する、の 2 点で不採用とした。
+- T10.2 完了で MVP の全コンポーネント wiring が揃い、`fastapi dev app/main.py` での起動経路が公式に成立した。残るタスクは T11 (実 Ollama E2E) と T12 (CI/security ライン)。
 
 ---
 

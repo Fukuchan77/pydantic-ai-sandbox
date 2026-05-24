@@ -5,7 +5,7 @@
   "phase": "tasks-generated",
   "language": "ja",
   "created": "2026-05-24T07:05:48Z",
-  "updated": "2026-05-24T19:30:00Z",
+  "updated": "2026-05-24T20:15:00Z",
   "amendments": [
     {
       "date": "2026-05-24T19:10:00Z",
@@ -18,6 +18,12 @@
       "scope": "Amendment trailing-edge cleanup — mise.toml / README.md の bandit 表記整合",
       "summary": "/sdd-validate-impl Task 1 で検出された MEDIUM 2 件を解消。前段 amendment (19:10:00Z) の affected_artifacts に mise.toml と README.md が含まれておらず、`pre-commit:manual` の description / Day-to-day commands 表に bandit 表記が残存していた。両者を `pytest / pip-audit; bandit ≡ ruff S` 表記に書き換え、運用ドキュメントとランタイム依存 (bandit 非インストール) の整合を回復。",
       "affected_artifacts": ["mise.toml", "README.md"]
+    },
+    {
+      "date": "2026-05-24T20:15:00Z",
+      "scope": "T10.2 boundary 整合 — tests/conftest.py 追記",
+      "summary": "/sdd-validate-impl Task 10 で検出された WARNING (boundary out-of-bounds) を解消。T10.2 実装で T9.3 Implementation Notes が前方宣言した `tests/conftest.py::app_with_overrides` からの `app.include_router(chat_router)` 撤去を実施したが、T10.2 の `_Boundary:_` 宣言が `src/pydantic_ai_sandbox/main.py` のみで、conftest 編集が未列挙だった。tasks.md の T10.2 `_Boundary:_` に `tests/conftest.py` を追加し、carry-over 操作を 1 行の説明文として明文化。設計契約と実態の literal 整合を回復。",
+      "affected_artifacts": ["tasks.md"]
     }
   ],
   "description": "Pydantic AI V2 (Beta) × FastAPI × マルチプロバイダ Agentic AI 基盤。本番想定では安定版を採用しつつ、Pydantic AI V2 のローカル検証構築を前提とする。ruff/pyright によるリント・フォーマット・型チェック、pytest による品質確保、pre-commit による自動実行、定期セキュリティスキャンを含む。詳細設計は specs/inputs/idea0.md を参照。",

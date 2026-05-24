@@ -35,13 +35,14 @@ exception. This matches the spec text in T9.2 ("``POST /chat`` が 5xx を
 返し partial データが client に届かないこと") which fundamentally requires
 the response object to exist for assertion.
 
-The chat router is included on the app explicitly here. T8.2's
-``create_app`` skeleton registers only the health router by design; T10.2
-will move the chat-router registration into ``create_app`` itself, at
-which point the explicit ``app.include_router(chat_router)`` line in this
-fixture becomes redundant and SHOULD be removed in the same change set.
-Until T10.2 lands, this fixture is the only path that wires the chat
-route into a FastAPI app.
+Chat-router registration was previously duplicated here while T8.2's
+skeleton ``create_app`` only included the health router. T10.2 folded
+``app.include_router(chat_router)`` into ``create_app`` proper, so this
+fixture relies on ``create_app()`` to wire the chat route — the explicit
+include here was removed in the same change set per the T10.2 task
+notes. The fixture deliberately uses ``TestClient`` *without* ``with`` so
+the new lifespan (eager fallback dry-run) is bypassed; chat tests stay
+focused on the request layer rather than re-testing T10.1's contract.
 """
 
 from __future__ import annotations
@@ -53,7 +54,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pydantic_ai_sandbox.api.deps import get_chat_agent
-from pydantic_ai_sandbox.api.routes.chat import router as chat_router
 from pydantic_ai_sandbox.config import Settings, get_settings
 from pydantic_ai_sandbox.main import create_app
 
@@ -179,12 +179,10 @@ def app_with_overrides(
         agent = get_chat_agent()
         stack.enter_context(agent.override(model=model))
 
+        # T10.2 folded ``include_router(chat_router)`` into create_app().
+        # The chat route is wired automatically; the fixture stays focused
+        # on env seating, cache clearing, and agent override.
         app = create_app()
-        # T10.2 will fold this registration into create_app() proper.
-        # Until then, the fixture is the only place that wires the chat
-        # route into an app for testing — keeping it local here means
-        # T9.3's boundary (deps.py + chat.py only) stays clean.
-        app.include_router(chat_router)
         # raise_server_exceptions=False keeps the 5xx path (Req 3.4)
         # observable as a response status code rather than a re-raised
         # UnexpectedModelBehavior. The 422 path is unaffected — those

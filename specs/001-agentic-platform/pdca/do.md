@@ -899,3 +899,46 @@ mise run check     → Finished in 2.57s (lint + format + typecheck + 47 tests p
 T9.1 → 3.1, 3.2, 3.5 ·
 T9.2 → 3.4, 3.6 ·
 T9.3 → 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
+
+---
+
+## 2026-05-24 — Task 10: App factory + Fallback dry-run
+
+**Scope**: `create_app()` を skeleton (T8.2) から本番形へ昇格させる。lifespan で `get_settings()` → `configure_observability()` → (条件付き) `_build_fallback()` の eager dry-run → routes 登録の 4 段構成を成立させ、Req 4.5 構成段の fail-fast を MVP の起動経路上で実現する。
+
+### What was done
+
+| Sub-task | Files | Outcome |
+| -------- | ----- | ------- |
+| 10.1 | `tests/unit/test_app_lifespan_fallback_dryrun.py` | 3 テスト (all-stub fail-fast / fallback+ollama success / ollama no-call spy) を `with TestClient(app)` パターンで作成。RED 確認済み (DID NOT RAISE) → GREEN。 |
+| 10.2 | `src/pydantic_ai_sandbox/main.py` | `@asynccontextmanager` の `_lifespan` 導入、`configure_observability` + `_build_fallback` を組み込み、`include_router(chat_router)` を `create_app()` に折り畳み。`AsyncGenerator[None]` 戻り型へ修正。 |
+| 10.2 (副作用) | `tests/conftest.py` | T8.2 の暫定 glue (`app.include_router(chat_router)` と `chat_router` import) を撤去し、docstring を新設計に追従。 |
+
+### Errors and root causes
+
+1. **Pyright `reportDeprecated`: `@asynccontextmanager` + `AsyncIterator[None]`**.
+   Root cause: Python 3.14 + 現行 typing_extensions では `@asynccontextmanager` が `AsyncGenerator` を期待するように契約が更新されており、`AsyncIterator` は終了通知の型が曖昧 (`StopIteration` vs `StopAsyncIteration` vs `None` の意味付けが揺れる) ため非推奨化された。Fix: 戻り型を `AsyncGenerator[None]` に書き換え (`from collections.abc import AsyncGenerator` を `TYPE_CHECKING` ブロックに追加)。Lesson: Python 3.14 strict mode では「@asynccontextmanager は AsyncGenerator を返す」と覚える。`AsyncIterator` は手書き `__aiter__/__anext__` 実装を持つクラスのアノテーション専用に思考を切り替える。
+
+### Verification
+
+```text
+mise run lint       → All checks passed!
+mise run format     → 39 files already formatted
+mise run typecheck  → 0 errors, 0 warnings, 0 informations
+mise run test       → 50 passed in 0.57s (新規 3 件含む)
+```
+
+### Design decisions
+
+- **`_build_fallback` の戻り値は破棄**。dry-run の責務は「構築可否の検証」のみ。実リクエスト時の model resolution は `Depends(get_chat_agent) → build_chat_agent → get_model("fallback") → _build_fallback` を独立に再走する設計のため、lifespan 側で結果を保持して agent factory に注入する案は (a) `get_chat_agent` の `lru_cache` 契約と二重管理になる、(b) plan.md §2.9 の "lifespan は組み立てのみ・ロジックなし" 規約に反する、の 2 点で不採用。
+
+- **lifespan を起動するテストは `with TestClient(app)` のみ**。`TestClient(app)` を `with` 句なしで構築する既存テスト群 (健康チェック / チャット系 / logging 系) は lifespan を一切走らせないので、本タスクの dry-run が他テストの挙動に副作用を与えないことが構造的に保証される。これは T10.1 のテスト分離戦略の核心であり、conftest fixture が `with` を使わない設計と整合している。
+
+- **`pyright: ignore[reportPrivateUsage]` の使用**。`_build_fallback` は plan.md §2.4 が underscore-prefix を仕様として明記しているため、`llm/fallback.py::__all__` に登録された公開 API である一方で命名規約上 Pyright は private 使用を警告する。`llm/factory.py` が `_MVP_STUB_PROVIDERS` を取り込む際に確立された既存パターン (`# pyright: ignore[reportPrivateUsage]`) をそのまま踏襲した。
+
+- **conftest 二重 include の解消**。T8.2 当時の暫定 wiring (`app.include_router(chat_router)`) を T10.2 の同一変更セットで撤去。tasks.md T10.2 のノートが明示的に「同 change set で削除すべし」と指示しており、これに従わないと FastAPI ルータが二重登録され `/chat` ハンドラが 2 回呼ばれる潜在バグになる。conftest 冒頭の docstring も「fixture が唯一の chat-route wiring path」記述から「create_app() に折り畳まれた」記述へ書き換え、未来の読者が古い設計説明を読むことを防いだ。
+
+#### Requirements covered
+
+T10.1 → 4.5 ·
+T10.2 → 1.3, 3.1, 4.5, 5.1
