@@ -350,21 +350,21 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `POST /chat` を Plan §2.7 + §3.1/§3.2 のフローで実装する。`agent.override(model=TestModel())` で provider 不要のテストパスを確立し、Req 3.2/3.4/3.6 を満たす。
 
-- [ ] (P) **9.1** `tests/unit/test_chat_endpoint_with_testmodel.py` を作成する
+- [x] (P) **9.1** `tests/unit/test_chat_endpoint_with_testmodel.py` を作成する
   - `agent.override(model=TestModel())` を `app_with_overrides` fixture で適用し、`POST /chat {"message": "..."}` が 200 を返し ChatResponse 構造 (`answer` + `sources`) を満たすこと
   - response が `ChatResponse` validator を通過すること
   - _Boundary:_ tests/unit/test_chat_endpoint_with_testmodel.py
   - _Depends:_ 6.4
   - _Requirements:_ 3.1, 3.2, 3.5
 
-- [ ] (P) **9.2** `tests/unit/test_chat_endpoint_validation_errors.py` を作成する
+- [x] (P) **9.2** `tests/unit/test_chat_endpoint_validation_errors.py` を作成する
   - 不正 body (`{}` や `{"message": 123}`) で `POST /chat` が 422 を返すこと (Req 3.6)
   - `function_model_returning_json({"unexpected": "shape"})` を override で適用したとき `POST /chat` が 5xx を返し partial データが client に届かないこと (Req 3.4)
   - _Boundary:_ tests/unit/test_chat_endpoint_validation_errors.py
   - _Depends:_ 6.4, 5.1
   - _Requirements:_ 3.4, 3.6
 
-- [ ] **9.3** `api/routes/chat.py` と `api/deps.py` を実装する
+- [x] **9.3** `api/routes/chat.py` と `api/deps.py` を実装する
   - `api/deps.py` に `get_chat_agent() -> Agent[None, ChatResponse]` ファクトリを追加 (`build_chat_agent()` を返す)
   - `api/routes/chat.py`: `POST /chat`、`ChatRequest` を受け、`agent.run(req.message)` を呼び `result.output` を `ChatResponse` として返す
   - 例外ハンドリングは FastAPI default に委譲 (Pydantic AI が `output_type` 検証で失敗 → 500 へ伝搬)
@@ -374,6 +374,14 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
 
 ### Implementation Notes
+
+- The `app_with_overrides` fixture body (`tests/conftest.py`) lands here under the explicit T3.1 license ("中身は task 8/9 で拡張するため最小実装に留める"). The fixture composes three primitives: `settings_factory(LLM_PROVIDER=ollama, OLLAMA_MODEL_NAME=dummy-...)` to make Settings validation pass without touching real Ollama, `get_settings.cache_clear()` + `get_chat_agent.cache_clear()` to make the per-test env reach the route, and `ExitStack.enter_context(agent.override(model=...))` so the override is automatically released on fixture teardown. The TestClient is built with `raise_server_exceptions=False` so the 5xx path (Req 3.4) is observable as a status code rather than a re-raised `UnexpectedModelBehavior`; 422 client errors are unaffected by that flag.
+- `get_chat_agent` is `lru_cache(maxsize=1)`-decorated, NOT a per-request factory. This is load-bearing for `agent.override` to flow through the FastAPI `Depends` chain: `agent.override` mutates contextvars on the agent **instance**, and a per-request factory would hand the route handler a fresh, never-overridden agent. Tests reset the cache via `get_chat_agent.cache_clear()` between scenarios so per-test Settings overrides are picked up before the override is entered.
+- The chat router is registered in `tests/conftest.py::app_with_overrides` (`app.include_router(chat_router)` after `create_app()`), not in `main.py::create_app`. T8.2's skeleton was scoped to "health ルータのみ登録" by design and T10.2 owns chat-router registration in `create_app()` proper. The fixture-side registration is the smallest cross-task glue that keeps T9.3's boundary (`api/routes/chat.py + api/deps.py` only) literal — when T10.2 lands, the explicit `app.include_router(chat_router)` in the fixture becomes redundant and SHOULD be removed in the same change set.
+- Async vs sync handler choice: `post_chat` is `async def` + `await agent.run(...)`. The `agent.override` ContextVar propagates through anyio's TestClient bridge into the async handler context but does NOT propagate to threadpool workers; a sync handler with `agent.run_sync` would have worked in practice (TestClient's anyio bridge does copy the calling context) but the async path matches Pydantic AI's idiomatic async-first surface and survives a future TestClient internal change.
+- `function_model_returning_json({"unexpected": "shape"})` returns `UnexpectedModelBehavior("Exceeded maximum output retries (1)")` from `agent.run`. The error message is implementation-specific; the test asserts on the **status range** (5xx) and the **absence of the offending key** (`"unexpected"` not in body), which is the contract the spec text pins (Req 3.4 "partial データが client に届かない"). Asserting on the exact pydantic-ai exception message would couple the test to upstream phrasing.
+- The third 422 case (`{"message": ""}`) is not in the spec text but covers the `min_length=1` constraint declared on `ChatRequest.message`. Without it, a regression that drops the constraint would silently let empty-string messages reach the agent — pydantic-ai would then either return an empty answer or fail at the model level, neither of which is the validator-stage rejection the schema commits to.
+- 詳細は `pdca/do.md` (2026-05-24 Task 9) を参照。
 
 ---
 
