@@ -853,3 +853,49 @@ T7.3 → 5.1, 5.2, 5.4, 5.5 ·
 T7.4 → 5.3 ·
 T8.1 → 1.3 ·
 T8.2 → 1.3
+
+---
+
+## 2026-05-24 — Task 9: Chat エンドポイント
+
+**Scope**: `POST /chat` を Plan §2.7 + §3.1/§3.2 のフローで実装し、Req 3.1 / 3.2 / 3.4 / 3.5 / 3.6 を完全カバー。`agent.override(model=TestModel())` を `app_with_overrides` フィクスチャ経由で適用し、provider 不要のテストパス (Req 10.2) を確立。`function_model_returning_json` 経由で出力 schema 違反 → 5xx 経路 (Req 3.4) も同時に立証。
+
+### What was done
+
+| Sub-task | File(s) | Outcome |
+| -------- | ------- | ------- |
+| 9.1 | `tests/unit/test_chat_endpoint_with_testmodel.py` | RED 確認 (`ImportError: cannot import name 'get_chat_agent' from 'pydantic_ai_sandbox.api.deps'`)。2 テスト: 200 返却 + ChatResponse 構造 / 余分キーが付かないこと (`response_model=ChatResponse` 防御の lock)。 |
+| 9.2 | `tests/unit/test_chat_endpoint_validation_errors.py` | RED 確認 (同上 ImportError による全テスト collection 失敗)。4 テスト: パラメトリ 422 (3 ケース: 空 body / 型違い / `min_length=1` 違反) + 出力 schema 違反 5xx + `"unexpected"` キーが body に漏れないこと (Req 3.4 partial-data 防御)。 |
+| conftest 拡張 | `tests/conftest.py` | T3.1 が明示的に "中身は task 8/9 で拡張するため最小実装に留める" と委譲した `app_with_overrides` フィクスチャの本体を実装。`(model: Model) -> TestClient` を yield する builder 形式 + `contextlib.ExitStack` で `agent.override` の lifecycle 管理。`raise_server_exceptions=False` で 5xx を status code として観測可能に。 |
+| 9.3 | `src/pydantic_ai_sandbox/api/deps.py` | GREEN: `get_chat_agent() -> Agent[None, ChatResponse]` を `lru_cache(maxsize=1)` で公開。caching の必然性: `agent.override` は agent インスタンスの ContextVar を変更するため、per-request factory だと override が見えない singleton を返してしまう。 |
+| 9.3 | `src/pydantic_ai_sandbox/api/routes/chat.py` | GREEN: `@router.post("/chat", response_model=ChatResponse)` で `async def post_chat(req, agent=Depends(get_chat_agent))`。`await agent.run(req.message)` → `result.output` を返却。例外は FastAPI default に委譲 (Req 3.4)。 |
+
+### Errors and root causes
+
+1. **RUF002 — 全角ダッシュ (EN DASH `–`) docstring 検出**。`Req 3.1–3.6` を docstring に書いたところ ruff の `RUF002` (ambiguous unicode in docstring) が発火。**Root cause**: 日本語まじりの spec を写すときに半角ハイフンと全角ダッシュを混同しやすい。**Fix**: `Req 3.1-3.6` (ASCII hyphen) に置換。**Lesson**: docstring 内で範囲表現を書くときは ASCII `-` を使う。`日本語` 本文中の `—` は `RUF003` 側で扱われ docstring 外なので問題ない。
+2. **`ruff format --check` が 2 ファイルで失敗**。`assert response.status_code == 200, (\n    f"... {response.status_code}: {response.text}"\n)` の f-string が 1 行に収まる長さだったため format が括弧を畳み直した。**Fix**: `uv run ruff format tests/unit/test_chat_endpoint_*.py` を 1 度走らせて反映。**Lesson**: T7 で同じパターンに既に当たっており、f-string assertion message は最初から 1 行で書く方が `format` 1 回のラウンドトリップを節約できる。
+
+### Verification
+
+```text
+mise run check     → Finished in 2.57s (lint + format + typecheck + 47 tests passed)
+  - lint:      All checks passed!
+  - format:    (clean — 38 files already formatted)
+  - typecheck: 0 errors, 0 warnings, 0 informations
+  - test:      47 passed in 0.37s (T9 で +6 テスト: T9.1 ×2, T9.2 ×4)
+```
+
+### Learnings carried forward
+
+- **`get_chat_agent` の lru_cache は契約に組み込まれている**。プロダクションでは「build once, override many」の効率上の最適化に見えるが、テストでは agent.override が ContextVar 経由で agent インスタンスの内部状態を変更する関係上、`Depends(get_chat_agent)` が同じインスタンスを返すことが override 見え方の必要条件である。`@lru_cache` を外すと test fixture が override したインスタンスと、route handler が `Depends` 経由で得るインスタンスが別物になり、テストは silent pass する 5xx 経路だけ正しく動き 200 経路が壊れる、という静かな汚染を起こす。コメントで明示しておくこと。
+- **`raise_server_exceptions=False` フラグの選択基準**。TestClient のデフォルトは server (5xx) 例外を test process に re-raise し、client (4xx) 例外は HTTP response として返す。Req 3.4 のように 5xx を「status code として」観測したい場合は False を選ぶ。422 系のテストには影響しないので、共有 fixture では False で固定して問題なし。
+- **`app_with_overrides` の builder 形式**。fixture が直接 TestClient を yield するのではなく `(model) -> TestClient` を yield する関数形式にしたのは、T9.2 が複数の異なる model (TestModel と FunctionModel) で同一テストフローを走らせるため。一テストで複数 model を切り替える必要があるケースは T11 の integration テストでも再利用しうる (e.g. 一連の retry 検証)。`ExitStack` で override を tracked に積むことで、二度目の builder 呼び出しは前の override の上に新しい override を重ねる semantics になる (LIFO で teardown)。
+- **`function_model_returning_json` の output validation 経路は `UnexpectedModelBehavior("Exceeded maximum output retries (1)")` を投げる**。pydantic-ai V2 の output coercion は失敗時にリトライを使い果たしてからこの例外を出す。テストは exception class や message ではなく status code 範囲 (`500 <= code < 600`) と body 中の禁則文字列 (`"unexpected" not in response.text`) で contract を pin することで、upstream phrasing 変更に脆弱でない net を張った。
+- **conftest 拡張の cross-task glue**。T3.1 の "task 8/9 で拡張するため最小実装に留める" コメントが今回 conftest 編集の license として機能した。同種の「将来の task で body を埋める」フィクスチャ skeleton は今後も `app_with_overrides` パターンに従って書き、license コメントを skeleton 側にも明示する規約を確立すると、boundary 違反かどうかが review 時に争点にならない。
+- **chat router 登録の置き場**。T9.3 boundary は `api/routes/chat.py + api/deps.py` のみで `main.py` を含まない。T10.2 が `create_app()` でルータ登録を担う設計のため、T9 では fixture 側で `app.include_router(chat_router)` を実行した。T10.2 完了時に fixture から除去すべき glue が 1 行残ることを fixture docstring と本ログで明文化。
+
+#### Requirements covered
+
+T9.1 → 3.1, 3.2, 3.5 ·
+T9.2 → 3.4, 3.6 ·
+T9.3 → 3.1, 3.2, 3.3, 3.4, 3.5, 3.6
