@@ -61,7 +61,7 @@
 
 Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿って実装する。pre-commit の禁則文字列フックと、フックの存在に依存しない単体テスト (リポジトリスナップショット検査) の二段構えで防御する。Test-First 原則に従い、まず src/ を探索する単体テストを失敗状態で確認 (`granite4.1:8b` の臨時ダミー文字列を `tests/unit/_fixtures_temp.py` 等に一度入れて red を観測 → 削除して green) する。
 
-- [ ] **2.1** `tests/unit/test_no_hardcoded_model_ids.py` を作成する
+- [x] **2.1** `tests/unit/test_no_hardcoded_model_ids.py` を作成する
   - `src/` 配下を再帰探索し、`granite4.1:8b`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001-v1:0`, `llama3.2-vision:11b`, `granite-4-h-small` 等の禁則リテラル列の出現を正規表現で検査して assert する
   - 例外: `__init__.py` のバージョン文字列等は対象外。検査対象は `*.py` のみ
   - 追加 assert (Req 9.6 補強): リポジトリ直下の `.gitignore` に `.env` 行が含まれることを文字列検索で確認する。失敗時は本テストが赤化し、誤って `.env` を tracked にする変更を block する
@@ -70,7 +70,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 1.1
   - _Requirements:_ 1.5, 9.6
 
-- [ ] **2.2** `.pre-commit-config.yaml` を作成し、default / manual ステージを構成する
+- [x] **2.2** `.pre-commit-config.yaml` を作成し、default / manual ステージを構成する
   - default stage: `ruff check`, `ruff format --check`, `pyright`, `gitleaks`, ローカル `forbid-hardcoded-model-ids` (`pygrep-hooks` ベースの local hook)
   - manual stage: `pytest`, `pip-audit` (bandit は ruff `S` 経由で default stage に内包済み — Spec 8.3 の意図は preserve)
   - `forbid-hardcoded-model-ids` の正規表現は task 2.1 と同じ禁則集合を使用 (重複定義を避けるためテストと同じ語彙を採用する旨をコメントに明記)
@@ -80,6 +80,11 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 1.5, 7.6, 8.1, 8.2, 8.3
 
 ### Implementation Notes
+
+- T2.1 の RED 状態は `src/pydantic_ai_sandbox/_red_demo.py` に `granite4.1:8b` 文字列を一時投入して観測した (PDCA `do.md` 2026-05-24 Task 2 を参照)。`src/` 全体が削除された GREEN 状態でも `_iter_scanned_py_files()` が空を返して assert は成立するため、後続 T3.3 で `src/` が再度生成された瞬間から本テストが意味を持って効き始める。
+- `forbid-hardcoded-model-ids` の正規表現は `tests/unit/test_no_hardcoded_model_ids.py::FORBIDDEN_MODEL_ID_LITERALS` を一行コメントで参照しており、語彙更新は両ファイルに lockstep で行うこと (片側更新は語彙ドリフトの温床になる)。Plan AD-4 の "ruff にカスタム rule 機構が無い" 制約を満たす二段防御の構図そのもの。
+- `language: system` を採用したことで `mise run check` と `pre-commit run` の挙動が byte-identical になり、Constitution V (single entry point) を満たす。`uv run ruff` / `uv run pyright` / `uv run pytest` の version は `pyproject.toml` の dev deps に唯一記録されるため、pre-commit 側に重複 pin が発生しない。
+- `pre-commit run --all-files` は git-tracked file のみを対象にするため、新規ファイルは `git add -N` で intent-to-add とした後でないとフックが空回りする。CI (T12.1) では `actions/checkout@v4` 後に `git add -N` 相当を踏む必要は無いが、ローカルの最初の commit 直前は注意。
 
 ---
 

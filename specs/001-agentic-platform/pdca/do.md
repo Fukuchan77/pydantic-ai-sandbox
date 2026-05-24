@@ -117,3 +117,82 @@ mise run test                           # exit 5 (no tests yet) — T2.1 待ち
 
 - Spec 策定時にツール重複の独立検証ステップ (既存 `pyproject.toml` / `mise.toml` の static analysis 設定との逆引き照合) が抜けていた。次の `/sdd-spec` 実行時に "ツールスタック重複監査" を Plan 段の自己点検項目に追加する候補。
 - `S` ルールが flake8-bandit の上位互換であるという事実は ruff doc にしか書かれておらず、constitution.md の "flake8-bandit rules (`S`) are enforced" だけでは "bandit 単体不要" の含意までは読み取れなかった。constitution の Quality & Tooling Standards 節に "ruff `S` で bandit を兼ねる" を明記すべきか、`/sdd-reflect` 段で検討する。
+
+---
+
+## 2026-05-24 — Task 2: ハードコード model ID 防御 (lint stage)
+
+**Scope**: Plan AD-4 の二段防御を成立させる。`tests/unit/test_no_hardcoded_model_ids.py`
+を runtime 側のスナップショット検査として、`.pre-commit-config.yaml` の
+`forbid-hardcoded-model-ids` (pygrep) を commit 段の即時遮断として配置し、
+両者が同一の禁則語彙を共有する構成にした。Test-First (Constitution I) 適用。
+
+### What was done
+
+| Sub-task | Files                                       | Outcome                                                                                                                                                                                                                              |
+| -------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 2.1      | `tests/unit/test_no_hardcoded_model_ids.py` | `FORBIDDEN_MODEL_ID_LITERALS` を 5 件で確定 (granite4.1:8b / claude-sonnet-4-6 / claude-haiku-4-5-20251001-v1:0 / llama3.2-vision:11b / granite-4-h-small)。`src/**/*.py` から `__init__.py` を除外して走査。`.gitignore` の `.env` 検査も同テスト内で兼用 (Req 9.6)。 |
+| 2.2      | `.pre-commit-config.yaml`                   | default stage に ruff-check / ruff-format-check / pyright / pygrep `forbid-hardcoded-model-ids` / gitleaks v8.21.2 を、manual stage に pytest / pip-audit を配置。`language: system` で `mise run` と version-identical。`exclude` で `tests/**` と将来の `src/**/config.py` を除外。 |
+
+### RED→GREEN trace (Constitution I)
+
+1. `tests/unit/test_no_hardcoded_model_ids.py` 着地直後に `src/pydantic_ai_sandbox/_red_demo.py` を作成し
+   `DEMO_MODEL_ID = "granite4.1:8b"` を埋め込んだ状態で `uv run pytest tests/unit/test_no_hardcoded_model_ids.py -v`
+   を実行 → `test_no_hardcoded_model_ids_in_src` が `AssertionError: ... src/pydantic_ai_sandbox/_red_demo.py:4 contains 'granite4.1:8b'` で
+   FAILED を返した (RED 観測完了)。
+2. `_red_demo.py` を削除し空の `src/` を rmdir した上で再走 → 2 件全 PASSED (GREEN)。
+3. `_red_demo.py` も含めて全ての `src/` 配下を削除しているため、commit 履歴には RED ファイル本体は残らず本ログのみが
+   PDCA 記録となる。`tests/` ボーダーを破らない (T2.1 の `_Boundary:_` 遵守)。
+
+### Verification
+
+```text
+uv run ruff check .                            → All checks passed!
+uv run ruff format --check .                   → 1 file already formatted (after one auto-format pass on the test)
+uv run pyright                                  → 0 errors, 0 warnings, 0 informations
+uv run pytest                                   → 2 passed in 0.01s (test_no_hardcoded_model_ids_in_src + test_gitignore_excludes_dotenv)
+mise run check                                  → all four gates green (aggregated)
+uv run pre-commit run --all-files               → ruff-check / ruff-format-check / pyright / gitleaks all Passed; pygrep skipped (no candidate files yet — expected, src/ empty)
+uv run pre-commit run --all-files --hook-stage manual → pytest / pip-audit Passed
+```
+
+追加サニティチェック: `src/pydantic_ai_sandbox/_pygrep_check.py` に `claude-sonnet-4-6` を一時注入して
+`uv run pre-commit run forbid-hardcoded-model-ids --all-files` を走らせ、`Failed` で正しく検出されることを
+確認 (regex / exclude pattern の双方が機能している証拠)。検査後に同ファイルと `src/` ツリー全体を削除済み。
+
+### Errors and root causes
+
+1. **`uv run ruff format --check` が初回失敗** — テスト本文の改行スタイルが ruff format 既定と相違。
+   Root cause: 手書きの multiline f-string 連結スタイルが ruff の preferred line wrapping に合わなかった。
+   Fix: `uv run ruff format tests/unit/test_no_hardcoded_model_ids.py` を 1 回実行して受け入れ。symptom (フォーマットエラー)
+   ではなく cause (ruff の一意フォーマット) に従う方針を維持 (Constitution V "fix the cause, not the symptom")。
+2. **`pre-commit run --all-files` が新規ファイルに対して "no files to check" Skipped** — git-tracked でないため。
+   Root cause: pre-commit は `git ls-files` ベースで対象を決める。Fix: `git add -N` で intent-to-add 状態にした後で
+   再走したところ全フックが期待通り fire。本件は CLAUDE.md の振る舞いではなく pre-commit の正規仕様。
+   学びとして tasks.md Implementation Notes に明記し、初回コミット workflow の罠として後続タスクにも継承可能にした。
+
+### Design notes (将来の語彙更新ポリシー)
+
+`FORBIDDEN_MODEL_ID_LITERALS` は **新たな model ID literal が env 経由で codebase に入った瞬間に追記** するルールで運用する。
+追記時は (a) `tests/unit/test_no_hardcoded_model_ids.py` の tuple、(b) `.pre-commit-config.yaml` の pygrep `entry`,
+(c) (該当があれば) `.env.example` のコメントの三箇所を lockstep 更新。三箇所のうち一箇所でも忘れると
+語彙ドリフトを起こすため、`/sdd-reflect` 段で「禁則語彙更新チェックリスト」をパターン化する候補。
+
+`src/**/config.py` を `exclude` に組み込んだのは Plan §8 R-5 (default 値の偽陽性回避) への先回り対応。
+T3.3 で `src/pydantic_ai_sandbox/config.py` が誕生する時点で、env-default の文字列 (今のところ皆無) は
+このフックの対象から外れる。同時に T2.1 の runtime テストは `__init__.py` を除外するだけなので config.py を
+通常通り検査する → "コミット段では緩く / runtime テストでは厳格に" の二層体制になる。
+
+### Learnings carried forward
+
+- Pre-commit `language: system` パターンは `mise run check` と完全に重複するため、コマンド統治の観点で扱いやすい。
+  ただし developer machine に `uv` が前提となるので README.md (T1.4 完了済み) の "uv install" を欠かさないこと。
+- pygrep hook は単一行リテラル限定。改行を跨ぐ難読化文字列 (例えば `"granite4.1:" + "8b"`) は検出できない。
+  これは設計上の妥協点で、runtime テスト側も同様。難読化の悪意はそもそも `S` ルールや code review の領分で、
+  本フックは "うっかり忘れ" の防止が目的。
+- gitleaks `v8.21.2` を rev pin にした。9.x 系の改変があれば pre-commit の autoupdate で別途追従。
+
+### Requirements covered
+
+T2.1 → 1.5, 9.6 ·
+T2.2 → 1.5, 7.6, 8.1, 8.2, 8.3
