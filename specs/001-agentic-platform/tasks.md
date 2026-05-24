@@ -271,7 +271,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `configure_observability(app, settings)` を Plan §2.8 の通り `logfire.configure(send_to_logfire='if-token-present', ...)` → `instrument_pydantic_ai()` → `instrument_fastapi(app)` → `instrument_httpx()` の順で呼ぶ。`LOGFIRE_TOKEN` 未設定 / 例外でも起動継続を保証する。
 
-- [ ] (P) **7.1** `tests/unit/test_logging_setup.py` を作成する
+- [x] (P) **7.1** `tests/unit/test_logging_setup.py` を作成する
   - `LOGFIRE_TOKEN` 未設定で `configure_observability(app, settings)` が例外を上げず、警告ログが 1 行出ること (Req 5.2)
   - `instrument_pydantic_ai`, `instrument_fastapi`, `instrument_httpx` の 3 つが呼ばれること (mock で call 検証)
   - `ScrubbingOptions(extra_patterns=[...])` で `prompt`, `tool_input`, `tool_output` がスクラブ対象に含まれること (Req 5.4)
@@ -279,7 +279,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 3.3
   - _Requirements:_ 5.1, 5.2, 5.4
 
-- [ ] (P) **7.2** `tests/unit/test_logging_resilience.py` を作成する
+- [x] (P) **7.2** `tests/unit/test_logging_resilience.py` を作成する
   - `logfire.configure` が例外を raise する状況を `monkeypatch` で再現し、`/healthz` (TestClient 経由) が 200 を返すこと (Req 5.5)
   - 観測系の失敗が API レスポンスに伝搬しないこと
   - **依存**: TestClient 経由で `/healthz` を叩くため `create_app()` の skeleton (Task 8.2 範囲) を要求する
@@ -287,7 +287,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 3.3, 8.2
   - _Requirements:_ 5.5
 
-- [ ] **7.3** `src/pydantic_ai_sandbox/logging_setup.py` を実装する
+- [x] **7.3** `src/pydantic_ai_sandbox/logging_setup.py` を実装する
   - `configure_observability(app: FastAPI, settings: Settings) -> None`
   - `logfire.configure(send_to_logfire='if-token-present', token=settings.logfire_token, scrubbing=ScrubbingOptions(extra_patterns=['prompt','tool_input','tool_output']))`
   - 失敗時は `logging.getLogger(__name__).warning(...)` で 1 行出力し、関数は正常終了 (Req 5.2/5.5)
@@ -297,7 +297,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 7.1, 7.2
   - _Requirements:_ 5.1, 5.2, 5.4, 5.5
 
-- [ ] **7.4** `tests/unit/test_logging_span_attributes.py` を作成する (Req 5.3 専用テスト)
+- [x] **7.4** `tests/unit/test_logging_span_attributes.py` を作成する (Req 5.3 専用テスト)
   - `agent.override(model=TestModel())` 配下で `agent.run(...)` を 1 回実行し、`logfire.testing.CaptureLogfire` (または span exporter モック) が捕捉した span 属性に `provider` 名と `model_id` (Pydantic AI 既定の span 属性キー、例: `model_name` / `gen_ai.request.model`) の双方が含まれることを assert する (Req 5.3)
   - 失敗系 (フォールバック) は T5.3 がカバーするため本テストは正常系 1 件のみで十分
   - 検出したキー名は実装で `instrument_pydantic_ai()` が emit する標準属性に合わせ、リネーム/削除があれば本テストが赤化することを設計目的に明記する
@@ -307,20 +307,27 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 ### Implementation Notes
 
+- T7.2 carries an explicit cross-task dependency on T8.2 (`create_app()` + `/healthz` skeleton). To honour the dependency graph from `tasks.md`, Task 8.1 / 8.2 were executed inline as a prerequisite to Task 7 — the tasks.md checkbox state reflects that both Task 7 and Task 8 subtasks completed in the same `/sdd-impl` invocation. This is the documented branch the `_Depends:_` annotation expected; no boundary was widened.
+- The fail-soft contract uses a bare `except Exception:` rather than `noqa: BLE001`. ruff's `BLE` ruleset is **not** enabled in `pyproject.toml`, so a `noqa: BLE001` directive raises `RUF100` (unused noqa). The rationale lives in a multi-line comment above the catch instead, which keeps the strict-mode lint config untouched and satisfies Constitution V (no local weakening).
+- T7.2 patches `pydantic_ai_sandbox.logging_setup.logfire.configure` rather than the global `logfire.configure`. With `import logfire` at module top, the wrapper's binding **is** the global module object, so attribute-level `setattr` reaches the call site; `monkeypatch` restores after teardown so cross-test pollution is impossible. Patching the global package attribute directly would also work but would conflict with `caplog` ordering across tests.
+- T7.4 went green on first run because Req 5.3 is an upstream-instrumentation contract, not a new src-side feature: pydantic-ai V2's `instrument_pydantic_ai()` already emits `gen_ai.provider.name` + `gen_ai.request.model` on the chat span. The RED state for this test is the **absence** of the file — without it, future drift (key rename, attribute drop) would silently bypass observability checks. The test now serves as a contract probe; rewording the assertion against `model_name` only would have weakened that net.
+- TestModel reports both `system="test"` and `model_name="test"`, so `chat` span attrs `gen_ai.provider.name` / `gen_ai.system` / `gen_ai.request.model` / `gen_ai.response.model` are all `"test"` for this run. The test asserts on `gen_ai.provider.name OR gen_ai.system` to remain tolerant of the OTel GenAI semantic-convention key migration (`system` is the legacy alias of `provider.name`).
+- 詳細は `pdca/do.md` (2026-05-24 Task 7 + Task 8) を参照。
+
 ---
 
 ## Task 8. Health エンドポイント
 
 `GET /healthz` を Plan §2.7 の通り実装する。最小依存で動かせるエンドポイントなので、本タスクは Chat エンドポイントの前に独立して green にする。
 
-- [ ] **8.1** `tests/unit/test_health.py` を作成する
+- [x] **8.1** `tests/unit/test_health.py` を作成する
   - TestClient 経由で `GET /healthz` が 200 を返し、JSON が `{"status": "ok", "provider": <settings.llm_provider>}` を満たすこと
   - `LLM_PROVIDER` を変えると `provider` フィールドが追従すること
   - _Boundary:_ tests/unit/test_health.py
   - _Depends:_ 3.3
   - _Requirements:_ 1.3
 
-- [ ] **8.2** `api/__init__.py`, `api/deps.py`, `api/routes/__init__.py`, `api/routes/health.py`, および `main.py` の skeleton を実装する
+- [x] **8.2** `api/__init__.py`, `api/deps.py`, `api/routes/__init__.py`, `api/routes/health.py`, および `main.py` の skeleton を実装する
   - `api/deps.py`: `get_settings_dep()` などの `Depends` ファクトリの skeleton (chat 側で拡張)
   - `api/routes/health.py`: `GET /healthz` ルータ。`Depends(get_settings_dep)` で `Settings` を受け取り `{"status": "ok", "provider": settings.llm_provider}` を返す
   - `main.py` skeleton: `create_app() -> FastAPI` の最小実装 (lifespan は no-op で良い、health ルータのみ登録)。フル実装 (lifespan で `configure_observability` + fallback dry-run 配線) は task 10.2 で行う
@@ -330,6 +337,12 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 1.3
 
 ### Implementation Notes
+
+- T8.2 was executed inline as the prerequisite for T7.2 (the `_Depends:_` annotation on T7.2 explicitly listed 8.2). The skeleton honours plan.md §2.9: lifespan stays no-op here; T10.2 will wire `configure_observability` + fallback dry-run on top.
+- `api/deps.get_settings_dep` is a thin wrapper around `get_settings()` rather than a direct re-export. The wrapper exists purely so FastAPI's `app.dependency_overrides` keying works against a function whose identity is owned by this package — overriding `get_settings` itself would reach into `config.py`, violating the boundary contract for downstream test tasks (T9.1 / T9.2).
+- The `app: FastAPI = create_app()` module-level binding is built once at import time so `fastapi dev app/main.py` and `fastapi run app/main.py` work without code changes once T10.2 lands. Tests that need a per-scenario app call `create_app()` directly (after `get_settings.cache_clear()`); the singleton stays untouched.
+- T8.1's `_build_client` helper bundles env mutation + cache clear + app construction so future route tests (T9.1 / T9.2 / T10.1) can copy the pattern with one line. The helper was tempted to live in `conftest.py` but was kept local to T8.1 — promoting it would widen the shared fixture surface for a single caller, which the project consistently avoids (see `tests/unit/test_fallback_failover.py::_success_function_model` for the same calculus).
+- 詳細は `pdca/do.md` (2026-05-24 Task 7 + Task 8) を参照。
 
 ---
 

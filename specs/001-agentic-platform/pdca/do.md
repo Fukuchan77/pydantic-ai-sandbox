@@ -751,3 +751,105 @@ T6.1 → 3.3, 6.3 ·
 T6.2 → 6.4 ·
 T6.3 → 3.1, 3.2 ·
 T6.4 → 3.3, 6.3, 6.4
+
+---
+
+## 2026-05-24 — Task 7 + Task 8 (combined): 可観測性 fail-soft 計装と Health エンドポイント
+
+**Scope**: Logfire `configure_observability` (Req 5.1, 5.2, 5.3, 5.4, 5.5) と
+`GET /healthz` + `create_app()` skeleton (Req 1.3) を一体で実装。tasks.md の
+依存グラフ (T7.2 が T8.2 を `_Depends:_` で要求) を尊重し、両 Task を
+同一 `/sdd-impl` 実行で完了させた。Task 7 単独着手では T7.2 がブロック
+され、TDD の RED-GREEN-REFACTOR が成立しないため。
+
+### What was done
+
+| Sub-task | File(s) | Outcome |
+| -------- | ------- | ------- |
+| 8.1 | `tests/unit/test_health.py` | RED 確認 (`ModuleNotFoundError: pydantic_ai_sandbox.main`)。3 テスト: 既定 Ollama パス / `LLM_PROVIDER` パラメトリ (ollama, fallback)。`_build_client` ヘルパで env override + `get_settings.cache_clear()` + `create_app()` を 1 関数化。 |
+| 8.2 | `src/.../api/__init__.py`, `api/deps.py`, `api/routes/__init__.py`, `api/routes/health.py`, `main.py` | GREEN: `get_settings_dep` を `Depends` ファクトリとして公開。`router.get("/healthz")` で `{"status": "ok", "provider": settings.llm_provider}` を返却。lifespan は no-op (T10.2 が `configure_observability` + fallback dry-run を上乗せ)。`app: FastAPI = create_app()` をモジュールレベルで公開し `fastapi dev` 互換。 |
+| 7.1 | `tests/unit/test_logging_setup.py` | RED 確認 (`logging_setup` 不在)。3 テスト: token 未設定時の 1 行 WARNING (Req 5.2) / `instrument_pydantic_ai`+`instrument_fastapi(app)`+`instrument_httpx` の 3 呼び出し (Req 5.1) / `ScrubbingOptions.extra_patterns ⊇ {prompt, tool_input, tool_output}` (Req 5.4)。 |
+| 7.2 | `tests/unit/test_logging_resilience.py` | RED 確認。`monkeypatch.setattr("pydantic_ai_sandbox.logging_setup.logfire.configure", _raise_runtime_error)` で transport 障害を再現。`create_app()` + `configure_observability(app, settings)` 直後に `TestClient.get('/healthz')` が 200 を返すことで Req 5.5 を立証。 |
+| 7.3 | `src/pydantic_ai_sandbox/logging_setup.py` | GREEN: `configure_observability(app, settings)` を実装。token 未設定時に `logger.warning("LOGFIRE_TOKEN is unset; …")` を 1 行発火 → `logfire.configure(send_to_logfire='if-token-present', token=…, scrubbing=ScrubbingOptions(extra_patterns=['prompt','tool_input','tool_output']))` → `instrument_pydantic_ai/fastapi/httpx`。全体を `try/except Exception` で包み、失敗時は `logger.warning(..., exc_info=True)` で 1 行通知のみ (Req 5.5)。 |
+| 7.4 | `tests/unit/test_logging_span_attributes.py` | 設計上 first-run GREEN: pydantic-ai V2 の `instrument_pydantic_ai()` が `gen_ai.provider.name` / `gen_ai.system` / `gen_ai.request.model` を chat span 属性として既に発火している。本テストは contract probe — 上記キーが将来 rename / drop された瞬間に赤化することが設計目的 (Req 5.3 / Req 6.4 の前段)。 |
+
+### Errors and root causes
+
+1. **依存グラフ衝突 (T7.2 `_Depends:_ 3.3, 8.2`)**。Task 7 単独では T7.2 が
+   `create_app() + /healthz` を `TestClient` 経由で要求し RED-GREEN-REFACTOR が
+   成立しない。**Root cause**: tasks.md でこの cross-task 依存は
+   `_Depends:_` に明示されていたが、`/sdd-impl Task 7` の素朴解釈では
+   見落とし得る。**Fix**: AskUserQuestion で 3 択 (8.1/8.2 を先に取り込む /
+   T7.2/7.4 を defer / blocker 扱い) を提示し、ユーザ選択 (推奨案) で
+   8.1 → 8.2 → 7.1 → 7.2 → 7.3 → 7.4 の順を採用。**Lesson**: `_sdd-impl Task N`
+   呼び出し時は他 Task からの依存を最初の context load 段で確認し、
+   違反時は AskUserQuestion で明示的に分岐する。
+2. **`ruff format --check` 1 件失敗** (`tests/unit/test_logging_setup.py`)。
+   f-string 連結が 1 行にまとまる長さだったため。**Fix**: `uv run ruff format`
+   を 1 度走らせて反映。**Lesson**: f-string assertion メッセージは
+   ruff の line-length 判断に乗るので、複数行に手動 break する前に
+   format を回した方が安い。
+3. **`RUF100 Unused noqa: BLE001`**。`pyproject.toml` の `select` に
+   `BLE` (flake8-blind-except) は含まれていないため、`# noqa: BLE001`
+   は未使用ディレクティブとして検出される。**Fix**: `noqa` を削除し、
+   `except Exception:` 直下の複数行コメントで fail-soft 契約 (Req 5.5) と
+   `BaseException` を意図的に外している点を明文化。**Lesson**: ruff の
+   `select` セットを更新する前に `noqa` を書くと逆に lint が壊れる。
+   この場合は inline コメントで意図を残す方が select-set との結合度が低い。
+4. **`TC002 Move third-party import 'pytest' into a type-checking block`**
+   (`tests/unit/test_logging_resilience.py`)。pytest の利用が `monkeypatch:
+   pytest.MonkeyPatch` 注釈のみで、`from __future__ import annotations` 配下
+   では文字列評価扱いとなり実行時 import 不要。**Fix**: `import pytest` を
+   `if TYPE_CHECKING:` ブロックに移動。**Lesson**: 注釈以外で `pytest.fixture`
+   デコレータや `pytest.raises` を使う場合は実行時 import が必要なので、
+   テストファイルごとに pytest の利用形態を確認する。
+
+### Verification
+
+```text
+mise run lint       → All checks passed!
+mise run format     → (clean)
+mise run typecheck  → 0 errors, 0 warnings, 0 informations
+mise run test       → 41 passed in 1.17s (T7/T8 合算で +8 テスト)
+```
+
+### Learnings carried forward
+
+- **依存横断 `/sdd-impl` パターン**: Task N の `_Depends:_` が他 Task の
+  サブタスクを指す場合、まず両 Task を同一実行で完了させる選択肢を
+  AskUserQuestion で提示する。ユーザ判断を得てから着手する方が、
+  後で BLOCKED マーク + 巻き戻しより安い。
+- **fail-soft の bare-except は `noqa` でなく inline コメント**。
+  プロジェクトの `select` セットにそのルールが入っていない時に `noqa`
+  を書くと `RUF100` で逆に壊れる。意図の文書化は コメントで行い、
+  `select` 拡張時に `noqa` を足すかは将来判断。
+- **`monkeypatch.setattr("pkg.module.logfire.configure", fn)` パターン**は
+  `import logfire` で global module を bind しているコードに対して
+  cross-test pollution なく介入できる。`monkeypatch` の teardown が
+  module attribute を正しく復元するため、別テストでの logfire 利用に
+  影響しない。
+- **TestModel の OTel GenAI 属性表面**: `gen_ai.provider.name` (新キー) と
+  `gen_ai.system` (legacy alias) が両方 emit される。テストは
+  `provider.name OR system` で or-tolerant に書き、`request.model` は
+  単独で必須化することで、上流の semantic-convention 移行に追従しつつ
+  「provider 名 + model ID」両方の存在を Req 5.3 で必須化する。
+- **`app_with_overrides` skeleton はまだ pytest.skip() のまま**。T9.1 / T9.2
+  が body を埋める段で `app.dependency_overrides` + `agent.override` の
+  合成パターンを確定する。T8.1 の `_build_client` ヘルパは
+  `app_with_overrides` 完成後にローカル化されるか共有化されるかを
+  そこで再評価する。
+- **T7.4 = contract probe**: 既存実装が要件を満たしている場合、
+  RED 状態は「テストの不在」自体である。今回の T7.4 は upstream
+  pydantic-ai V2 の instrument_pydantic_ai 動作に対する regression net
+  として機能する。同種パターン (V2 表面の上流契約に依存) は今後も
+  出現するので、PDCA で「first-run GREEN は実装ギャップではなく
+  契約 lock」と区別して記録する規約を確立。
+
+#### Requirements covered
+
+T7.1 → 5.1, 5.2, 5.4 ·
+T7.2 → 5.5 ·
+T7.3 → 5.1, 5.2, 5.4, 5.5 ·
+T7.4 → 5.3 ·
+T8.1 → 1.3 ·
+T8.2 → 1.3
