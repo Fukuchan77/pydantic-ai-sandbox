@@ -1,0 +1,194 @@
+# Spec Req 3.5, 6.2, 10.3 / Plan §4.3 R-7 / tasks.md T12.3.
+#
+# This is the ONLY lane that exercises tests/integration/test_ollama_chat_e2e.py
+# against a real `granite4.1:8b` daemon. Everything else (T11.1's gate, the
+# unit suite's `agent.override(TestModel())`) stops at the contract boundary.
+#
+# Trigger surface (Plan R-7 採用方針):
+#   1. push: main           — post-merge regression net.
+#   2. schedule: weekly cron — catches drift in upstream Ollama/granite tags.
+#   3. pull_request paths   — fires only when LLM router / agents / schemas /
+#                              integration tests / pyproject.toml change. PRs
+#                              that don't touch the provider surface get the
+#                              cheap unit-only `ci.yml` lane.
+#   4. workflow_dispatch    — manual override for reviewers.
+#
+# `concurrency.cancel-in-progress: true` collapses PR-push storms to one
+# active job per ref. The cron and main-push lanes use distinct ref groups
+# (refs/heads/main vs the schedule's synthetic ref) so they never cancel
+# each other.
+#
+# Model caching: `granite4.1:8b` is ~5GB; pulling it on every run blows the
+# job budget. `actions/cache` keys on the workflow file's hash so a model
+# bump (changing OLLAMA_MODEL_NAME below) invalidates the cache automatically.
+# The cache stores `~/.ollama` from the host, mounted into the daemon
+# container as `/root/.ollama` so a cache miss falls back to `ollama pull`.
+
+name: integration-ollama
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '37 3 * * 1'  # off-zero minute to dodge the :00 stampede
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/pydantic_ai_sandbox/llm/**'
+      - 'src/pydantic_ai_sandbox/agents/**'
+      - 'src/pydantic_ai_sandbox/schemas/**'
+      - 'tests/integration/**'
+      - 'pyproject.toml'
+      - '.github/workflows/integration-ollama.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: integration-ollama-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write  # paths-filter explainer comment on PRs
+
+# Single source of truth for the model + base URL so the cache key, the
+# `ollama pull` step, and the test env all read the same values. Changing
+# the model here is a one-line operator action that automatically rotates
+# the cache key (via hashFiles on this workflow file).
+env:
+  OLLAMA_MODEL_NAME: granite4.1:8b
+  OLLAMA_BASE_URL: http://localhost:11434/v1
+  LLM_PROVIDER: ollama
+
+jobs:
+  e2e:
+    name: integration-ollama (granite4.1:8b)
+    runs-on: ubuntu-latest
+    # Generous budget: pull + warm-up + first-token latency on a cold cache
+    # hit can run 8-12 minutes. With cache hit, < 5 minutes typical.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mise + tooling
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          install: true
+          cache: true
+
+      - name: Sync project dependencies
+        run: uv sync --all-groups
+
+      # ----------------------------------------------------------------------
+      # Restore Ollama model blob cache. Path is the host's ~/.ollama which
+      # we mount into the daemon container in the next step. Cache key
+      # invalidates whenever this workflow file changes (model rotation,
+      # daemon flag change, etc.). The literal `granite4.1-8b` suffix in the
+      # key is workflow-only metadata; pre-commit's forbid-hardcoded-model-ids
+      # hook scopes to `types: [python]` so YAML is exempt.
+      # ----------------------------------------------------------------------
+      - name: Restore Ollama model cache
+        id: ollama-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ollama-model-${{ hashFiles('.github/workflows/integration-ollama.yml') }}-granite4.1-8b
+          restore-keys: |
+            ollama-model-
+
+      # ----------------------------------------------------------------------
+      # Start the Ollama daemon as a detached docker container with the host
+      # cache mounted. We DON'T use `services:` because services don't easily
+      # accept host volume mounts — the cache strategy above requires the
+      # ~/.ollama path to be writable from both runner and container.
+      # ----------------------------------------------------------------------
+      - name: Start Ollama daemon
+        run: |
+          mkdir -p "${HOME}/.ollama"
+          docker run -d \
+            --name ollama \
+            --restart unless-stopped \
+            -p 11434:11434 \
+            -v "${HOME}/.ollama:/root/.ollama" \
+            ollama/ollama:latest
+
+      - name: Wait for daemon readiness
+        run: |
+          # 60s budget: cold-start of the daemon is typically < 5s; cache
+          # cold-fill is the slow step (next stage), not boot.
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:11434/api/tags > /dev/null; then
+              echo "daemon ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Ollama daemon failed to become ready within 60s"
+          docker logs ollama || true
+          exit 1
+
+      - name: Pull model (skip if cached)
+        run: |
+          if docker exec ollama ollama list 2>/dev/null \
+              | awk 'NR>1 {print $1}' \
+              | grep -Fxq "${OLLAMA_MODEL_NAME}"; then
+            echo "model already cached: ${OLLAMA_MODEL_NAME}"
+          else
+            echo "pulling ${OLLAMA_MODEL_NAME}..."
+            docker exec ollama ollama pull "${OLLAMA_MODEL_NAME}"
+          fi
+
+      # ----------------------------------------------------------------------
+      # The actual contract under test: tests/integration/test_ollama_chat_e2e.py
+      # is gated by RUN_INTEGRATION_OLLAMA=1 (Spec Req 10.3 / T11.1). The mise
+      # task `test:integration` already sets that env var; we set the
+      # provider-side env vars at workflow level (see top of file).
+      # ----------------------------------------------------------------------
+      - name: Run integration tests
+        run: mise run "test:integration"
+
+      # Even on green, capture daemon logs as a build artifact so flaky
+      # failures (model warm-up, intermittent tool-call decisions on a
+      # mid-size model) leave a forensic trail.
+      - name: Capture Ollama daemon logs
+        if: always()
+        run: docker logs ollama > ollama-daemon.log 2>&1 || true
+
+      - name: Upload daemon logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-daemon-${{ github.run_id }}
+          path: ollama-daemon.log
+          retention-days: 14
+
+      # ----------------------------------------------------------------------
+      # Spec Req 6.2 reviewability: when the lane was triggered by a PR's
+      # paths filter, summarise WHICH paths matched. The summary is plain
+      # markdown so it surfaces in the PR's checks tab without an extra API
+      # round-trip. We don't actually post a PR comment (would compete with
+      # ci.yml's coverage comment); the build summary is sufficient signal.
+      # ----------------------------------------------------------------------
+      - name: Summarise trigger context
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo '## integration-ollama trigger explanation'
+            echo ''
+            echo 'This PR touches one of the provider/agent surfaces tracked'
+            echo 'by `paths:` in `.github/workflows/integration-ollama.yml`:'
+            echo ''
+            echo '- `src/pydantic_ai_sandbox/llm/**`'
+            echo '- `src/pydantic_ai_sandbox/agents/**`'
+            echo '- `src/pydantic_ai_sandbox/schemas/**`'
+            echo '- `tests/integration/**`'
+            echo '- `pyproject.toml`'
+            echo ''
+            echo 'Spec Req 6.2 requires the V2 Beta agent + structured output'
+            echo 'contract to be exercised against a real Ollama backend on'
+            echo 'every PR that could break it. If this lane fails, the'
+            echo 'failure is provider-side and MUST NOT be merged regardless'
+            echo 'of `ci.yml` status.'
+          } >> "$GITHUB_STEP_SUMMARY"

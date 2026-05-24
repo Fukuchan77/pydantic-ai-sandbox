@@ -1015,3 +1015,76 @@ mise run check      → Finished in 3.85s
 #### Requirements covered
 
 T11.1 → 3.5, 6.2, 10.3
+
+---
+
+## 2026-05-24 Task 12 — CI workflows + dependabot + gitleaks config
+
+### Subtasks
+
+- T12.1 `.github/workflows/ci.yml` — push/PR で `mise run check` + `mise run pre-commit:manual` + 別 step で `pytest --cov --cov-report=xml`、PR は `py-cov-action/python-coverage-comment-action@v3` で diff coverage コメント、main push は coverage XML を artifact 保存 (Req 7.7 / 10.4)
+- T12.2 `.github/workflows/security.yml` — pip-audit (PyPI Advisory DB) + gitleaks-action@v2 + supply-chain-summary job (Req 9.1 / 9.3 / 9.4 / 9.5)
+- T12.3 `.github/workflows/integration-ollama.yml` — push:main + 週次 cron + paths-filter PR + workflow_dispatch、`docker run -d` + host volume + `actions/cache@v4` で granite4.1:8b キャッシュ、`concurrency.cancel-in-progress: true` で PR 連投抑制 (Plan R-7 採用方針 / Req 6.2 / 3.5 / 10.3)
+- T12.4 `.gitleaks.toml` — `[extend] useDefault = true` + tests/** / .env.example / uv.lock / specs/**/*.md / .sdd/** の path allowlist (Req 9.3 / 9.6)
+- T12.5 `.github/dependabot.yml` — pip + github-actions の週次 cron、`groups.exclude-patterns: ["litellm","pydantic-ai*"]` で supply-chain-watch 対象を standalone PR 化 (Req 9.5)
+
+### Validation
+
+```bash
+# YAML/TOML syntax (PyYAML + tomllib parse)
+$ uv run python -c '... yaml.safe_load + tomllib.load over 5 files ...'
+  → OK YAML: ci.yml / security.yml / integration-ollama.yml / dependabot.yml
+  → OK TOML: .gitleaks.toml
+
+# 4-gate aggregate
+$ mise run check
+  → lint:      All checks passed!
+  → format:    41 files already formatted
+  → typecheck: 0 errors, 0 warnings, 0 informations
+  → test:      50 passed, 1 skipped in 0.50s
+  → Finished in 2.67s
+
+# pre-commit default stage
+$ uv run pre-commit run --all-files
+  → ruff check (lint; S/C90/D/N/T20)        Passed
+  → ruff format --check                     Passed
+  → pyright (strict, py3.14)                Passed
+  → forbid-hardcoded-model-ids (Req 1.5)    Passed
+  → Detect hardcoded secrets                Passed
+```
+
+### Design decisions
+
+- **TDD exemption**: Task 1 と同じ理由で Test-First の対象外 (CLAUDE.md / spec の Task 1 prefix が "src/ 配下を一切触らないので Test-First 原則の対象外" と明示)。代替の GREEN 観測条件を 4 ゲート集約 + pre-commit + YAML/TOML parse の三段で構成し、`src/` を触る Task 2-11 が確立した契約を本タスクが赤化させないことを literal に確認した。
+
+- **Single-source-of-truth tool versions**: ワークフローは Python/uv/ruff/pyright/pytest のいずれも pin せず、`jdx/mise-action@v2` で `mise.toml` を読むだけ。tool 版は `pyproject.toml` の dev-deps が唯一管理し、ワークフローは entry-point name (`mise run check` / `mise run "pre-commit:manual"` / `mise run "test:integration"`) のみを呼ぶ。これは Constitution V "single entry point" を local と CI で literal 一致させる設計で、`.pre-commit-config.yaml` の `language: system` 採用 (T2.2) と同じ計算 — pin が増えるたび drift する可能性が線形に増えるため、pin を 1 ヶ所 (pyproject.toml) に集約する。
+
+- **integration-ollama の host-mount + actions/cache 戦略**: GitHub Actions の `services:` ブロックはコンテナを auto-start するが、host workspace の volume mount は標準では宣言できない (`options:` で `--mount` を渡せるが文字列パース脆弱)。一方 `actions/cache@v4` は host workspace 上の path しか復元できない。両者を合わせるには **`docker run -d` で手動起動 + host `${HOME}/.ollama` を `/root/.ollama` にマウント** が最短経路で、cache key を `hashFiles('.github/workflows/integration-ollama.yml')` に紐付けることで env 冒頭の `OLLAMA_MODEL_NAME` を回した瞬間に cache 自動 invalidate される (operator が cache 名を手動で直す必要なし)。`granite4.1:8b` ~5GB を毎 run pull すると job 当たり 8-12 min 余分にかかるため、cache hit 時で 0min は budget 上必須。
+
+- **paths-filter に `.github/workflows/integration-ollama.yml` 自身を含める**: Plan R-7 が列挙する `src/{llm,agents,schemas}/**` + `tests/integration/**` + `pyproject.toml` だけだと、ワークフロー自身を編集した PR では paths-filter が hit せず "ワークフロー変更を検証しないまま main に merge" の罠が生じる。ワークフロー自身を paths に追加することでこの罠を構造的に塞ぐ。これは Plan R-7 の literal 列挙の超範囲だが、R-7 の "Req 6.2 を PR 段階で確実に発火させる" 意図を完全に満たす最小拡張。tasks.md 本文の paths 列挙にも追記済み (T12.3 説明文)。
+
+- **gitleaks 二重配備の単一 config**: pre-commit (binary v8.21.2) と `security.yml` (gitleaks-action@v2 bundles binary) は両方 root の `.gitleaks.toml` を読むため、allowlist 規則は単一ファイルに集約され local/CI で divergeしない。`useDefault = true` で upstream 既定ルールを継承するため、新しい credential pattern (例: 将来の Anthropic API key prefix 変更) が gitleaks 側に追加されたら自動で防御強化される — 本リポジトリは false-positive allowlist のみを足し、検出は弱めない方針。
+
+- **supply-chain-watch ラベルは二段構え**: Dependabot v2 schema は per-package label の map を持たないため、(a) `dependabot.yml` の `groups.exclude-patterns: ["litellm","pydantic-ai*"]` で `litellm` の bump を絶対に minor/patch group へ畳まず常に standalone PR とする。(b) `security.yml` の `supply-chain-summary` job が毎 run watchlist を `$GITHUB_STEP_SUMMARY` に印字する (機械検出ではなく reviewer notification の責務)。(a)+(b) で literal "ラベル付与 + 自動マージ不可" 運用を表現した。`pydantic-ai*` を group から外したのは V2 Beta が API ロックされておらず minor bump でも breaking change を含む可能性があるため。
+
+- **coverage XML を `mise run test` に含めない判断**: `mise run test` は `uv run pytest` のシンプルな entry で、`--cov` フラグを付けると Constitution V "single entry point" の意味が CI と local で divergeするリスクがある (developer は `mise run test` を冪等に叩きたい)。CI 側で別 step として `uv run pytest --cov --cov-report=xml --cov-report=term` を 1 回追加する設計に倒した。`fail_under = 0` baseline は `pyproject.toml` で T1.1 が確立済みなので、本ワークフローは coverage 値の **観測** に責務を限定 (Req 7.7 の段階引き上げは future task)。
+
+- **`schedule:` cron の minute オフセット**: security.yml が `'17 2 * * 1'`、integration-ollama.yml が `'37 3 * * 1'`。GitHub Actions の scheduler は :00 / :30 で発火する job が世界中から集中するため、:17 / :37 のような off-zero 分を選ぶことでスケジューラ stampede を回避し job の発火遅延を最小化する。
+
+### Learnings carried forward
+
+- **CI/CD config に対する TDD の代替契約**: `src/` を触らない infrastructure config (mise.toml, pyproject.toml, .github/workflows/, .gitleaks.toml, dependabot.yml, .pre-commit-config.yaml) は Constitution I の Test-First 対象外だが、**4 ゲート集約 (`mise run check`) が green を保つ** + **pre-commit default stage が pass する** + **YAML/TOML parse が成立する** の 3 つを GREEN 観測条件として採用することで、契約面の RED-GREEN-REFACTOR を維持できる。Task 1 (依存ブートストラップ) と Task 12 (CI ワークフロー) で同じ exemption を使ったが、後続 Task で同種の infra タスクが出てきた場合も同じ三段検証を適用すれば良い。
+
+- **GitHub Actions cache key 設計の rule of thumb**: cache key には (a) 内容ハッシュ (`hashFiles('...')`) と (b) 識別子 suffix (今回は `granite4.1-8b`) を combine するのが定石。(a) のみだと "model 名は同じだが他の workflow パラメータが変わった" 時に cache が古いままになる罠があり、(b) のみだと "model は変わらないが daemon flag が変わった" 時に invalidate されない。両者を `-` で結合することで両方向の drift に対応できる。
+
+- **Spec Q3 amendment の波及確認**: Task 12 の security.yml は Req 9.2 (Python コード脆弱性スキャン) を bandit ではなく `mise run check` 経由の ruff `S` で充足する設計を採用した。これは Spec Q3 / Req 8.3 / Req 9.2 の amendment (2026-05-24 19:10:00Z) を CI 段階で literal 反映する作業で、もし将来 bandit を再導入する判断が出た場合、本ワークフローに `bandit` 専用 step を追加するのではなく、まず `pyproject.toml` dev-deps に bandit を戻し、`pre-commit:manual` 経由で実行する方針に倒すべき (single entry point 原則を維持)。
+
+- **Dependabot v2 の per-package config 限界**: v2 schema は package ごとに label を変える map をネイティブには持たない。`groups.exclude-patterns` で標準 group から除外して standalone PR 化することが事実上の "watchlist 表示" となる。将来 Renovate に移行する判断が出た場合、Renovate の `packageRules` で per-package label が直接書けるため、supply-chain-watch 運用がより直感的になる (今回は dependabot を採用、設定簡潔さ + GitHub-native)。
+
+#### Requirements covered
+
+T12.1 → 6.5, 7.1, 7.2, 7.3, 7.4, 7.7, 8.4, 10.4
+T12.2 → 9.1, 9.2, 9.3, 9.4, 9.5
+T12.3 → 3.5, 6.2, 10.3
+T12.4 → 9.3, 9.6
+T12.5 → 9.5
