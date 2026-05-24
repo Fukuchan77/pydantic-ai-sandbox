@@ -17,16 +17,16 @@
 
 開発を開始する前に、依存とタスクランナーと開発者オンボーディング契約を最低限揃える。これは Constitution V (Quality Gates) と spec Req 7.5/8.5/NFR-2 の前提を成立させるためのブートストラップである。本タスクは `src/` 配下を一切触らないので Test-First 原則の対象外。
 
-- [ ] (P) **1.1** `pyproject.toml` に MVP 依存と coverage 設定を追加する
+- [x] (P) **1.1** `pyproject.toml` に MVP 依存と coverage 設定を追加する
   - `pydantic-ai-slim[openai]` を runtime dep に追加 (Plan AD-6 / research.md R-1)。`pydantic-ai>=2.0.0b3,<3` は据え置き
-  - dev/test extras に `pip-audit`, `bandit`, `pytest-cov` を追加
+  - dev/test extras に `pip-audit`, `pytest-cov` を追加 (bandit は ruff `S` ルールで完全代替するため非導入。Spec Q3 / Req 8.3 / Req 9.2 の bandit 言及はこの代替で充足)
   - `[tool.coverage.report]` に `fail_under = 0` のベースラインを設定し、`[tool.coverage.run] source = ["src/pydantic_ai_sandbox"]` を明示する
   - `requires-python = ">=3.14"` が宣言されていることを確認する (既存ならノータッチ)
   - _Boundary:_ pyproject.toml
   - _Depends:_ none
   - _Requirements:_ 1.4, 6.1, 7.7, 9.1, 9.2, 10.1, 10.4
 
-- [ ] (P) **1.2** `mise.toml` に品質ゲートと統合タスクを登録する
+- [x] (P) **1.2** `mise.toml` に品質ゲートと統合タスクを登録する
   - `lint = "uv run ruff check ."`, `format = "uv run ruff format --check ."`, `typecheck = "uv run pyright"`, `test = "uv run pytest"` を最低限定義する
   - 集約タスク `check` を `depends = ["lint", "format", "typecheck", "test"]` で構成する (Req 7.5)
   - `setup` (例: `uv sync && pre-commit install`)、`pre-commit:default` (`uv run pre-commit run --all-files`)、`pre-commit:manual` (`uv run pre-commit run --all-files --hook-stage manual`)、`test:integration` (`RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration`) を追加する
@@ -34,14 +34,14 @@
   - _Depends:_ none
   - _Requirements:_ 7.1, 7.2, 7.3, 7.4, 7.5, 8.5
 
-- [ ] (P) **1.3** `.env.example` を作成し、必要な環境変数を網羅する
+- [x] (P) **1.3** `.env.example` を作成し、必要な環境変数を網羅する
   - 変数: `APP_ENV`, `LOG_LEVEL`, `LLM_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL_NAME`, `OLLAMA_API_KEY`, `WATSONX_*`, `ANTHROPIC_*`, `BEDROCK_*`, `FALLBACK_ORDER`, `LOGFIRE_TOKEN`, `LOG_SENSITIVE_PAYLOADS`, `RUN_INTEGRATION_OLLAMA`
   - 各変数の役割と既定値、必須/任意の別をコメントで明示する。秘匿値は空欄で記載しダミー値を入れない (Req 9.6)
   - _Boundary:_ .env.example
   - _Depends:_ none
   - _Requirements:_ 9.6
 
-- [ ] **1.4** `README.md` にオンボーディング手順を記載する
+- [x] **1.4** `README.md` にオンボーディング手順を記載する
   - 必須コマンド: `git clone` → `mise install` → `uv sync` → `pre-commit install` (または `mise run setup`) → `mise run check`
   - `LLM_PROVIDER` 切替、`fastapi dev app/main.py` 起動、`RUN_INTEGRATION_OLLAMA=1 mise run test:integration` 実行手順を別節で説明する
   - _Boundary:_ README.md
@@ -49,6 +49,11 @@
   - _Requirements:_ 8.5
 
 ### Implementation Notes
+
+- TOML key quoting is segment-scoped. `[tasks."pre-commit:default"]` works; `["tasks.pre-commit:default"]` flattens to a single literal key and mise warns. Apply the same pattern to any future `task:subtask` names.
+- `mise run test` exits 5 (no tests collected) until T2.1 lands the first test. This is intentional bootstrap state, not a gate-bypass — `lint`/`format`/`typecheck` are individually green; do not paper over the empty test suite.
+- bandit を dev 依存から外した。ruff の `S` ルール群が flake8-bandit の Py3 系チェックを網羅実装しているため、bandit 単体は重複コストのみとなる。Spec Q3 / Req 8.3 / Req 9.2 の bandit 言及は ruff S で充足する旨を spec.md / plan.md / research.md / spec.json に反映済み。
+- 詳細は `pdca/do.md` (2026-05-24 Task 1) を参照。
 
 ---
 
@@ -67,7 +72,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 - [ ] **2.2** `.pre-commit-config.yaml` を作成し、default / manual ステージを構成する
   - default stage: `ruff check`, `ruff format --check`, `pyright`, `gitleaks`, ローカル `forbid-hardcoded-model-ids` (`pygrep-hooks` ベースの local hook)
-  - manual stage: `pytest`, `pip-audit`, `bandit`
+  - manual stage: `pytest`, `pip-audit` (bandit は ruff `S` 経由で default stage に内包済み — Spec 8.3 の意図は preserve)
   - `forbid-hardcoded-model-ids` の正規表現は task 2.1 と同じ禁則集合を使用 (重複定義を避けるためテストと同じ語彙を採用する旨をコメントに明記)
   - `exclude` で `tests/**` と将来の `src/**/config.py` の default 値を任意で除外する設定を準備する
   - _Boundary:_ .pre-commit-config.yaml
@@ -381,7 +386,7 @@ CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 
   - _Requirements:_ 6.5, 7.1, 7.2, 7.3, 7.4, 7.7, 8.4, 10.4
 
 - [ ] (P) **12.2** `.github/workflows/security.yml` を作成する
-  - push / `schedule:` (週次 cron) で `pip-audit`, `bandit -r src/`, `gitleaks detect` を実行
+  - push / `schedule:` (週次 cron) で `pip-audit` と `gitleaks detect` を実行 (Python コード脆弱性スキャンは `mise run check` 内の `ruff check .` の `S` ルールで CI 時に毎回走るため、Req 9.2 はこの ruff S 経路で充足。bandit を別途呼ばない)
   - HIGH / CRITICAL 検出時に job を fail し、PR を auto-merge 不可にする (Req 9.4)
   - `litellm` 等のサプライチェーン警戒対象を Renovate/Dependabot のラベルで管理する旨を job comment / README で明示 (Req 9.5; ワークフロー内では検出のみ)
   - _Boundary:_ .github/workflows/security.yml

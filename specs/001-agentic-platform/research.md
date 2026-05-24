@@ -174,12 +174,21 @@ depends = ["pre-commit:install"]
 
 ### 想定 GitHub Actions ジョブ構成
 
-| Workflow       | トリガ                                                 | 内容                                                                          |
-| -------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `ci.yml`       | push, PR                                               | `mise run check` + `mise run pre-commit:manual` (pytest を含む全 hook を回す) |
-| `security.yml` | push, PR, weekly cron (`schedule: cron: '17 2 * * 1'`) | `uv run pip-audit`, `uv run bandit -r src`, `gitleaks detect --redact`        |
+| Workflow       | トリガ                                                 | 内容                                                                                                               |
+| -------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `ci.yml`       | push, PR                                               | `mise run check` + `mise run pre-commit:manual` (pytest を含む全 hook を回す)                                      |
+| `security.yml` | push, PR, weekly cron (`schedule: cron: '17 2 * * 1'`) | `uv run pip-audit`, `gitleaks detect --redact` (Python コード脆弱性は `ci.yml` 側で常時走る ruff `S` ルールで担保) |
 
-`pip-audit` / `bandit` / `gitleaks` は dev 依存に追加 (現状 `pyproject.toml` にはない)。`gitleaks` バイナリは GitHub Actions の公式 action `gitleaks/gitleaks-action@v2` を採用。
+`pip-audit` / `gitleaks` は dev 依存に追加 (現状 `pyproject.toml` にはない)。`gitleaks` バイナリは GitHub Actions の公式 action `gitleaks/gitleaks-action@v2` を採用。
+
+> **bandit 非導入の根拠**: ruff の `S` ルール群 (`flake8-bandit` 移植) が
+> assert / exec / 弱ハッシュ / SSL / subprocess / SQL injection / Jinja XSS
+> といった bandit の Python 3 系チェックを安定実装している。ruff 未実装の
+> S309 / S322 / S325 / S320 / S410 はいずれも Python 2 残骸または lxml で
+> Py3.14 strict プロジェクトには無関係。bandit を別途インストールしても検出
+> 上の追加価値は無く、依存と CI ステップの重複コストのみが残る。Spec Q3 /
+> Req 8.3 / Req 9.2 で要求された "Python コード脆弱性スキャン" は ruff `S`
+> が `mise run check` 経由で全レーン実行されることで充足する。
 
 ### CI 上の優先順位
 

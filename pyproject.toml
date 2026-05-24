@@ -8,13 +8,17 @@ dependencies = [
     "fastapi",
     "ibm-watsonx-ai",
     "logfire[fastapi,httpx]",
+    # V2 Beta is the project target; the slim[openai] extra pulls the
+    # OpenAI-compatible chat client used by the Ollama provider (Plan AD-6 / research.md R-1).
     "pydantic-ai>=2.0.0b3",
+    "pydantic-ai-slim[openai]>=2.0.0b3",
     "pydantic-settings",
     "uvicorn",
 ]
 
 [dependency-groups]
 dev = [
+    "pip-audit",
     "pre-commit",
     "pyright",
     "pytest",
@@ -22,6 +26,9 @@ dev = [
     "pytest-cov",
     "ruff",
 ]
+
+[tool.uv]
+prerelease = "allow"
 
 [tool.ruff]
 target-version = "py314"
@@ -83,3 +90,14 @@ venv = "."
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+# Limit coverage measurement to first-party code; tests and stubs are excluded.
+source = ["src/pydantic_ai_sandbox"]
+branch = true
+
+[tool.coverage.report]
+# Baseline only — Req 7.7 raises this once trends stabilise (tracked in T12.1).
+fail_under = 0
+show_missing = true
+skip_covered = false
