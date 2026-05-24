@@ -176,7 +176,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 `_build_fallback()` は `FALLBACK_ORDER` から member を解決し `FallbackModel(*members)` を返す (Plan §2.4)。MVP では実 provider が Ollama のみのため、`FunctionModel` で member の挙動を差し替えて failover の発火を検証する。
 
-- [ ] **5.1** `tests/support/__init__.py` と `tests/support/model_fakes.py` にフェイク provider 集合を作る
+- [x] **5.1** `tests/support/__init__.py` と `tests/support/model_fakes.py` にフェイク provider 集合を作る
   - `function_model_returning_json(payload: dict) -> FunctionModel`: 構造化 JSON を返すフェイク
   - `function_model_raising(exc: Exception) -> FunctionModel`: 呼び出し時に例外を raise するフェイク
   - production code から import されないこと (Plan §2.10)
@@ -184,7 +184,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 3.3
   - _Requirements:_ 4.4, 10.2
 
-- [ ] **5.2** `tests/unit/test_factory_fallback.py` を作成する
+- [x] **5.2** `tests/unit/test_factory_fallback.py` を作成する
   - `FALLBACK_ORDER="ollama"` で `_build_fallback()` が `FallbackModel` を返すこと
   - 全 member が `_MVP_STUB_PROVIDERS` の構成 (例: `FALLBACK_ORDER="watsonx,anthropic"`) で `_build_fallback()` 直接呼び出し時に `RuntimeError` (StartupError) を raise すること (Req 4.5 構成段)
   - `FALLBACK_ORDER=""` または未知 provider のみは `Settings` 段で先に弾かれるため、本テストは到達不能ケースを前提条件として記述する
@@ -192,14 +192,14 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Depends:_ 4.3, 5.1
   - _Requirements:_ 4.1, 4.2, 4.5
 
-- [ ] **5.3** `tests/unit/test_fallback_failover.py` を作成する
+- [x] **5.3** `tests/unit/test_fallback_failover.py` を作成する
   - `FallbackModel(failing_fn, success_fn)` を直接構築 (`get_model` 経由ではなく純粋なロジックテスト) し、`Agent(model=fallback).run(...)` が success_fn の出力を返すこと
   - logfire span 属性 (provider 名 / error class) が含まれることを `logfire.testing` または span exporter モックで assert する
   - _Boundary:_ tests/unit/test_fallback_failover.py
   - _Depends:_ 5.1
   - _Requirements:_ 4.3, 4.4
 
-- [ ] **5.4** `src/pydantic_ai_sandbox/llm/fallback.py` を実装する + `factory.py` に fallback dispatch を追記
+- [x] **5.4** `src/pydantic_ai_sandbox/llm/fallback.py` を実装する + `factory.py` に fallback dispatch を追記
   - `_build_fallback(settings)`: `settings.fallback_order` をカンマ区切りで分割し、各 member について `get_model(member)` を再帰呼び出し
   - 全 member が `_MVP_STUB_PROVIDERS` に含まれる場合は `RuntimeError("All members of FALLBACK_ORDER are unimplemented stubs in MVP; configure at least one real provider")` を raise
   - 構築結果を `FallbackModel(*members)` で返す
@@ -211,6 +211,12 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
   - _Requirements:_ 4.1, 4.2, 4.3, 4.5
 
 ### Implementation Notes
+
+- `_build_fallback` は `_MVP_STUB_PROVIDERS` への循環 import を避けるため、`factory.py::get_model` の `"fallback"` ブランチで **遅延 import** している。Module-top で `from llm.fallback import _build_fallback` すると `llm.fallback` が `from llm.factory import _MVP_STUB_PROVIDERS, get_model` を要求して双方向に解決不能になる。`if resolved == "fallback":` 内に import を閉じ込める方針で解決。
+- 全 member が stub の場合は `RuntimeError` (Req 4.5)、混在ケース (`ollama,watsonx` 等) では stub を **シルエント filter** して real provider のみで `FallbackModel` を構築する設計を採用。これは tasks.md の "全 member が stub → RuntimeError" のみ明示制約に対する最小逸脱解釈で、ユーザの `FALLBACK_ORDER` を尊重しつつ stub 由来の `NotImplementedError` を `/chat` まで遅延させない (Plan §2.4 "これにより NotImplementedError を /chat 呼び出し時まで遅延させない" の意図と整合)。
+- T5.3 の "logfire span 属性に provider 名 / error class が含まれる" は V2 Beta の実体に合わせて二部構成で表現した: (a) 成功時の `invoke_agent` span の `model_name` 属性が `"fallback:<a>,<b>"` 形式で全 chain を載せるため、失敗 member 名を含めて assert することで failover 経路が span に残ることを証明、(b) 全 member 失敗時は `FallbackExceptionGroup.exceptions` が原 `ModelAPIError` を identity で保持することを assert し、"error class" の正体性を担保。`instrument_pydantic_ai()` は失敗 attempt を span 属性に書かない仕様 (`models/fallback.py::request` の `_set_span_attributes` は成功時のみ呼ばれる) のため、ExceptionGroup が canonical な記録源となる。
+- `tests/unit/test_fallback_failover.py` の span filter は `gen_ai.operation.name == "invoke_agent"` 属性経由で行う。pydantic-ai V2 は span name に変数名を埋め込む (例: `"invoke_agent agent"`) ため、name による filter はローカル binding rename に脆弱。属性 filter は仕様で安定。
+- 詳細は `pdca/do.md` (2026-05-24 Task 5) を参照。
 
 ---
 

@@ -12,10 +12,11 @@ Boundary rules (plan.md §2.2 境界規則):
   delegates to :func:`_build_ollama`, which constructs the OpenAI
   client lazily; the first HTTP call is the eventual ``agent.run(...)``
   invocation. Locked by ``tests/unit/test_factory_ollama_no_io.py``.
-* The ``"fallback"`` branch is a deliberate ``NotImplementedError``
-  placeholder; T5.4 (``_build_fallback``) will replace it with the real
-  composition. The boundary contract in tasks.md T5.4 forbids touching
-  any other branch when that wiring lands.
+* The ``"fallback"`` branch delegates to
+  :func:`pydantic_ai_sandbox.llm.fallback._build_fallback` (T5.4). That
+  module imports ``_MVP_STUB_PROVIDERS`` and ``get_model`` from here,
+  so the dispatch import is performed lazily inside the branch to keep
+  the otherwise-circular module graph initialisable.
 """
 
 from __future__ import annotations
@@ -79,8 +80,11 @@ def get_model(provider: str | None = None) -> Model:
 
     Raises:
         NotImplementedError: When ``provider`` resolves to a name in
-            :data:`_MVP_STUB_PROVIDERS` (watsonx / anthropic / bedrock)
-            or to ``"fallback"`` before T5.4 lands.
+            :data:`_MVP_STUB_PROVIDERS` (watsonx / anthropic / bedrock).
+        RuntimeError: Surfaced from :func:`_build_fallback` when
+            ``provider == "fallback"`` and every member of
+            ``Settings.fallback_order`` is itself a stub provider
+            (Req 4.5 構成段).
         ValueError: When ``provider`` is not a member of the
             :data:`pydantic_ai_sandbox.config.LLMProvider` alphabet.
     """
@@ -96,16 +100,16 @@ def get_model(provider: str | None = None) -> Model:
     if resolved == "bedrock":
         _build_bedrock(settings)
     if resolved == "fallback":
-        # T5.4 replaces this branch with `_build_fallback(settings)`.
-        # Until then we surface a NotImplementedError so misconfigured
-        # deployments fail loudly rather than silently falling through
-        # to the unknown-provider ValueError (which would mislead the
-        # operator into thinking they typed the env var wrong).
-        msg = (
-            "LLM_PROVIDER='fallback' dispatch is wired in T5.4; "
-            "set LLM_PROVIDER to a concrete provider until that task lands."
+        # T5.4 wiring. Imported lazily to break the circular import:
+        # ``llm.fallback`` imports ``_MVP_STUB_PROVIDERS`` and
+        # ``get_model`` from this module, so the top-level ``import``
+        # would form a cycle. The lazy form keeps the cycle visible only
+        # at call time, when both modules are fully initialised.
+        from pydantic_ai_sandbox.llm.fallback import (
+            _build_fallback,  # pyright: ignore[reportPrivateUsage]
         )
-        raise NotImplementedError(msg)
+
+        return _build_fallback(settings)
 
     msg = f"Unknown LLM_PROVIDER: {resolved!r}"
     raise ValueError(msg)
