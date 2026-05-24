@@ -942,3 +942,76 @@ mise run test       → 50 passed in 0.57s (新規 3 件含む)
 
 T10.1 → 4.5 ·
 T10.2 → 1.3, 3.1, 4.5, 5.1
+
+---
+
+## 2026-05-24 — Task 11: Ollama 実 provider 統合テスト (E2E)
+
+**Scope**: MVP 唯一の E2E テストとして、real Ollama (`granite4.1:8b`) に対して `POST /chat` を end-to-end で叩く lane を確立する。`RUN_INTEGRATION_OLLAMA=1` ガードで default lane (Req 10.2 network-free) を保護しつつ、gate 有効時は daemon 不到達を **skip ではなく fail** で扱う契約を立証 (Req 3.5 / 6.2 / 10.3)。
+
+### What was done
+
+| Sub-task | Files | Outcome |
+| -------- | ----- | ------- |
+| 11.1 | `tests/integration/__init__.py`, `tests/integration/test_ollama_chat_e2e.py` | RED 確認 (`tests/integration/` 不在で `pytest --collect-only` が `file or directory not found` を返す)。GREEN: default lane skip × 1 / `RUN_INTEGRATION_OLLAMA=1` + 不到達 URL で `pytest.fail("Ollama unreachable...")` × 1 の 2 経路を実観測。 |
+
+### Errors and root causes
+
+1. **Reachability probe が `/api/version` を叩いて 404**。初版テストは `<base_url>/api/version` を probe URL に採用していた。**Root cause**: Ollama は **2 つの異なる API surface** を expose している — (a) **native API** (`/api/version` / `/api/generate` / `/api/tags` 等) は port 直下、(b) **OpenAI-compat API** (`/v1/chat/completions` / `/v1/models` 等) は `/v1` prefix 配下。`Settings.ollama_base_url` は `OllamaProvider` が直接 `AsyncOpenAI(base_url=...)` に渡す値で、operator は `.env.example` の指示通り **OpenAI-compat 側の base** (`http://localhost:11434/v1`) を設定する。この値に `/api/version` を後置すると `http://localhost:11434/v1/api/version` という存在しないパスを叩き 404 が返る。**Fix**: probe URL を `<base_url>/models` に変更。OpenAI 標準の list-models エンドポイントで、Ollama は `/v1/models` で実装している (実 daemon に対し 200 + 3 model entries を観測済み)。**Lesson**: external service の health probe を書くときは、その service の **どの API surface** に operator が向いているかを確認する。Ollama のように複数 surface を持つ daemon では、操作対象 API の health endpoint を probe しないと「アプリは生きているが test が見ている surface は死んでいる」状態を検出できない。
+2. **`ModelHTTPError: 404 page not found` for `POST localhost/chat/completions`**. 再実行時に `OLLAMA_BASE_URL=http://localhost:11434` (`/v1` 抜き) を誤って指定したため、`AsyncOpenAI` が `http://localhost:11434/chat/completions` を叩いて 404。**Root cause**: 上記と同根の OpenAI-compat surface の path 規約。**Fix**: `OLLAMA_BASE_URL=http://localhost:11434/v1` を使う (`.env.example` のデフォルトに整合)。**Lesson**: integration test invocation で env を override する場合は `.env.example` の canonical value を copy するのが最も安全。手で短縮版を書くと path suffix を落としやすい。
+
+### Verification
+
+```text
+# (a) Default lane: gate 未設定 → 全件 skip
+mise run test       → 50 passed, 1 skipped in 0.39s
+
+# (b) Gate 有効 + 不到達 URL → fail-fast 契約発火
+RUN_INTEGRATION_OLLAMA=1 OLLAMA_BASE_URL=http://127.0.0.1:1 \
+  OLLAMA_MODEL_NAME=granite4.1:8b uv run pytest tests/integration/ -v
+  → 1 failed: "Ollama unreachable at http://127.0.0.1:1/models:
+     ConnectError('[Errno 61] Connection refused')..."
+
+# (c) **TRUE GREEN**: real Ollama daemon + granite4.1:8b への round-trip
+RUN_INTEGRATION_OLLAMA=1 OLLAMA_BASE_URL=http://localhost:11434/v1 \
+  OLLAMA_MODEL_NAME=granite4.1:8b LLM_PROVIDER=ollama \
+  uv run pytest tests/integration/ -v
+  → 1 passed in 18.93s
+  → /chat 200 + ChatResponse 構造 round-trip + sources 非空 + 全 entry が str
+  → V2 Beta Agent.run の result.output 経路が real backend で動作することを実証
+
+# (d) 4 ゲート集約 (probe fix 後)
+mise run check      → Finished in 3.85s
+  - lint:      All checks passed!
+  - format:    41 files already formatted
+  - typecheck: 0 errors, 0 warnings, 0 informations
+  - test:      50 passed, 1 skipped in 0.68s
+```
+
+### Design decisions
+
+- **`pytest.skip` ではなく `pytest.fail` を採用**。`RUN_INTEGRATION_OLLAMA=1` という gate 自体が「operator が integration lane にコミットした」signal であるため、daemon 不在を skip 表示すると CI lane summary が誤って green に見える。tasks.md T11.1 の "skip ではなく fail; CI lane の前提" 指示の literal 実装。手動検証で `OLLAMA_BASE_URL=http://127.0.0.1:1` を強制して `ConnectError → pytest.fail` が実発火することを確認。
+
+- **二段 lru_cache クリア**。`pytest-asyncio` auto モードと同一プロセス上で unit test 群が先に走るため、`Settings` と `get_chat_agent` の lru_cache に前段テストの `settings_factory(LLM_PROVIDER='ollama', OLLAMA_MODEL_NAME='dummy-...')` 由来のダミー値が残留する。integration test 冒頭で `get_settings.cache_clear()` + `get_chat_agent.cache_clear()` の順で必ずクリアし、その後 `get_settings()` を再呼び出しすることで operator 提供の本物の `OLLAMA_*` 値が観測される。順序を逆にすると `get_chat_agent` がまだ古い settings ベースで構築された agent を保持してしまうため、settings → agent の順序が契約。
+
+- **`with TestClient(app):` で lifespan を明示起動**。T8/T9 系 unit test は lifespan を bypass する `TestClient(app)` (without `with`) を使うが、integration test は production 起動経路の literal シミュレーションを目的とするため lifespan の execution を契約に含める。これは `_build_fallback()` dry-run / observability bootstrap / env validation の三段が production と完全一致する shape で発火することを保証する。
+
+- **日本語プロンプトでツール起動意図を強く誘導**。`granite4.1:8b` は中サイズモデルで tool-call decision にバラツキがある。`search_kb ツールを呼び出して 'pydantic-ai-v2' を調べ、その結果を踏まえて簡潔に答えてください。` と明示的に書くことで `sources` が空になる failure mode を最小化。CLAUDE.md `language: ja` および agent instructions が日本語であることとも整合 (mixed-language agent context は tool-call rate を下げる傾向がある)。
+
+- **`httpx.RequestError` を base catch に選定**。`ConnectError` / `TimeoutException` / `ReadError` を含む base class なので、daemon 不在系の典型エラー (Connection refused / DNS failure / read timeout) を 1 catch で網羅できる。`HTTPStatusError` は別系統 (response があった上での 4xx/5xx) で `response.status_code != 200` の分岐で別途扱う設計。`httpx.HTTPError` を catch すると status-error も同経路に流れて診断メッセージが汚染されるため、明示的に下位の `RequestError` を選ぶ方が正確な fail message が出る。
+
+### Learnings carried forward
+
+- **integration test は "本物 GREEN を観測しない GREEN" を許容する設計**。T11.1 完了時点での実観測は (a) default lane skip / (b) `RUN_INTEGRATION_OLLAMA=1` + 不到達 URL での fail-fast / (c) 4 ゲート集約 `mise run check` 全 green の 3 条件のみ。**真の round-trip GREEN** (本物の granite4.1:8b daemon に対する 200 + non-empty sources) は CI lane (T12.3) または operator が `ollama serve` + `ollama pull granite4.1:8b` を実施した端末でのみ観測可能。これは TDD の「test を書いて RED→GREEN を見る」原則と異なる別フェーズで、契約面 (gate / skip-vs-fail / cache reset / lifespan execution) の RED-GREEN-REFACTOR は本タスクで完結し、provider-side GREEN は外部依存の到達性と切り離して T12.3 が継承する分業構成。
+
+- **lru_cache 残留問題は process-shared テストの普遍的な落とし穴**。本タスクに限らず、`functools.lru_cache` を採用した singleton (Settings / chat agent / 将来の DB connection pool 等) を持つ project では、pytest 同一プロセス内で test 順序によって cache が予測不能な状態になる。各 test の **冒頭** で `cache_clear()` を呼ぶ規約を確立し、それを fixture 側に集約する代替案も検討に値するが、現状は test 側の責務として明示しておく方が「どの cache がどの test の前提に影響するか」が読み取りやすい。
+
+- **`pytest.fail` vs `pytest.skip` の選択基準**。**operator が gate を立てた = 走る覚悟を示した** という signal の有無で分ける。本テストの `RUN_INTEGRATION_OLLAMA=1` は典型例で、gate を立てた以上は daemon 不在を soft fail (skip) で隠すと CI summary の green が偽 green になる。逆に「環境依存だが operator のコミットを要求しない」ケース (例: `pytest.importorskip("optional_lib")`) は skip が正解。
+
+- **ruff `S113` (request without timeout) の自動防御**。`httpx.get(...)` を裸で書くと S113 が発火する。本テストでは `timeout=5.0` を最初から書いているが、既存コード (例: `logging_setup.py` の Logfire transport 構成) でも同じ pattern が走るため、新規 HTTP client 利用時は timeout 必須が project 規約。
+
+- **`with TestClient(app):` の lifespan execution は副作用検出の最良の場**。lifespan で `_build_fallback()` dry-run が走るため、`LLM_PROVIDER=fallback` + 全 stub 構成は TestClient 構築自体が `RuntimeError` で失敗する (T10.1 と同じ contract)。integration test を `with` 句で書くことで T10.2 の dry-run contract が integration lane でも literal に維持され、production 起動経路の shape を完全に再現する。
+
+#### Requirements covered
+
+T11.1 → 3.5, 6.2, 10.3
