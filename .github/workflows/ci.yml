@@ -1,0 +1,105 @@
+# Constitution Principle V single-entry quality gate, mirrored to CI.
+# Spec Req 6.5, 7.1-7.4, 7.7, 8.4, 10.4 / Plan §4.3 / tasks.md T12.1.
+#
+# Local and CI run the same `mise run check` (lint + format + typecheck + test)
+# and the same `mise run pre-commit:manual` (pytest + pip-audit). Tool versions
+# live in pyproject.toml's dev-deps; mise.toml owns the entry-point names.
+# This workflow MUST NOT introduce its own pinned tool versions — every command
+# is a one-line shell pass-through to mise.
+#
+# Coverage: `pytest --cov-report=xml` is generated explicitly (mise run test
+# uses the bare-pytest entry per Constitution V, so the cov flag is added here
+# as a CI-only concern). The XML feeds python-coverage-comment-action for PR
+# diff coverage (Req 7.7) and is uploaded as `coverage-baseline` on main pushes
+# so the next PR has a baseline to diff against.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to keep the queue lean. main pushes
+# never cancel each other (different SHAs land on the same branch ref but the
+# group resolves to `ci-refs/heads/main` and runs serially per push).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: write  # python-coverage-comment-action posts PR comments
+
+jobs:
+  check:
+    name: mise run check + pre-commit:manual
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history is required for diff-coverage on PRs
+
+      # mise installs the Python 3.14 / uv versions declared in mise.toml.
+      # `experimental: true` is required while mise's GitHub Action calls
+      # un-stable subcommands; remove once the action stabilises.
+      - name: Install mise + tooling
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          install: true
+          cache: true
+
+      - name: Sync project dependencies
+        run: uv sync --all-groups
+
+      # ----------------------------------------------------------------------
+      # Constitution Principle V — four-gate aggregate.
+      # `mise run check` depends-runs lint / format / typecheck / test. If any
+      # gate fails the rest still run via mise's depends model so reviewers see
+      # the full failure surface, not just the first error.
+      # ----------------------------------------------------------------------
+      - name: mise run check (lint / format / typecheck / test)
+        run: mise run check
+
+      # ----------------------------------------------------------------------
+      # Spec Req 8.4 — CI MUST run the manual stage so a missing local
+      # `pre-commit install` is detected before merge. This rerun of pytest
+      # plus pip-audit is intentional: it proves the pre-commit configuration
+      # itself is parseable and that the manual hooks haven't drifted from
+      # their `language: system` entries.
+      # ----------------------------------------------------------------------
+      - name: mise run pre-commit:manual
+        run: mise run "pre-commit:manual"
+
+      # ----------------------------------------------------------------------
+      # Spec Req 7.7 / 10.4 — coverage XML for diff coverage and baseline.
+      # `--cov-report=xml` writes ./coverage.xml; pytest reads coverage source
+      # / branch settings from [tool.coverage.run] in pyproject.toml so no
+      # additional flags are needed here.
+      # ----------------------------------------------------------------------
+      - name: Generate coverage XML
+        run: uv run pytest --cov --cov-report=xml --cov-report=term
+
+      - name: Post PR diff coverage comment
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 60
+
+      # On main, persist the XML as the next-PR baseline. PRs read it via
+      # python-coverage-comment-action's storage convention (its own action
+      # writes to a separate branch, so this artifact is a redundant backup
+      # for human inspection / Req 10.4 traceability).
+      - name: Upload coverage baseline (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline
+          path: coverage.xml
+          retention-days: 90

@@ -1,0 +1,86 @@
+# Spec Req 9.5 / Plan §4.3 / tasks.md T12.5.
+#
+# Weekly dependency monitoring. Two ecosystems are tracked:
+#   1. pip   — runtime + dev deps resolved from pyproject.toml. uv's
+#              lockfile is consumed transparently by Dependabot's pip
+#              ecosystem; no extra configuration needed.
+#   2. github-actions — pinned action versions in .github/workflows/*.yml.
+#              Catches deprecation of e.g. actions/checkout@v3, action
+#              SHA rotation, etc.
+#
+# Supply-chain watchlist (Spec Req 9.5 + idea0.md §14): packages with a
+# documented incident history get an extra `supply-chain-watch` label
+# AND explicit reviewers, marking them as never-auto-merge. The labels
+# are also surfaced in security.yml's job summary so reviewers don't
+# need to remember the policy.
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Python runtime + dev dependencies (pyproject.toml + uv.lock).
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:13"  # off-zero minute (avoid the :00 stampede)
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: scope
+    # Group routine patch + minor bumps so 10 separate libs don't generate
+    # 10 separate PRs. Major bumps stay individual so they get full review.
+    groups:
+      python-minor-and-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "litellm"            # supply-chain-watch — never group
+          - "pydantic-ai*"       # V2 Beta is unstable; review individually
+        update-types:
+          - minor
+          - patch
+    # ------------------------------------------------------------------
+    # Spec Req 9.5: supply-chain-watch dependencies are flagged with
+    # extra labels + reviewers so they're visibly not-auto-mergeable.
+    # `litellm` is the canonical example (idea0.md §14, 2026-03 yank).
+    # When a new package joins the watchlist, add it here AND mention
+    # it in security.yml's `supply-chain-summary` job.
+    # ------------------------------------------------------------------
+    ignore: []
+    # Per-dep overrides cannot be expressed in the v2 schema as a map;
+    # the watchlist is enforced via the `groups.exclude-patterns` above
+    # (so litellm bumps surface as standalone PRs) plus a label-bump
+    # workflow (see README.md "Supply-chain watch operational rule"
+    # for the manual review checklist).
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions pinned in .github/workflows/*.yml.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:23"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "ci"
+      include: scope
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

@@ -444,7 +444,7 @@ Req 1.5 の "model ID 直書き → lint で fail" を Plan AD-4 の方針に沿
 
 CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 / 8.4 / 9 / 10.4)。Plan §4.3 のワークフロー三本立てで、push / weekly cron / 統合 lane を分離する。
 
-- [ ] (P) **12.1** `.github/workflows/ci.yml` を作成する
+- [x] (P) **12.1** `.github/workflows/ci.yml` を作成する
   - push / pull_request トリガで `mise install` → `uv sync` → `mise run check` → `mise run pre-commit:manual` を実行
   - `pytest --cov-report=xml` を生成し、`py-cov-action/python-coverage-comment-action@v3` で PR diff coverage を投稿 (Req 7.7)
   - main マージ時に coverage XML を artifact として保存 (`.coverage-baseline` 相当)
@@ -452,7 +452,7 @@ CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 
   - _Depends:_ 1.2, 2.2
   - _Requirements:_ 6.5, 7.1, 7.2, 7.3, 7.4, 7.7, 8.4, 10.4
 
-- [ ] (P) **12.2** `.github/workflows/security.yml` を作成する
+- [x] (P) **12.2** `.github/workflows/security.yml` を作成する
   - push / `schedule:` (週次 cron) で `pip-audit` と `gitleaks detect` を実行 (Python コード脆弱性スキャンは `mise run check` 内の `ruff check .` の `S` ルールで CI 時に毎回走るため、Req 9.2 はこの ruff S 経路で充足。bandit を別途呼ばない)
   - HIGH / CRITICAL 検出時に job を fail し、PR を auto-merge 不可にする (Req 9.4)
   - `litellm` 等のサプライチェーン警戒対象を Renovate/Dependabot のラベルで管理する旨を job comment / README で明示 (Req 9.5; ワークフロー内では検出のみ)
@@ -460,7 +460,7 @@ CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 
   - _Depends:_ 1.1, 2.2
   - _Requirements:_ 9.1, 9.2, 9.3, 9.4, 9.5
 
-- [ ] (P) **12.3** `.github/workflows/integration-ollama.yml` を作成する (Plan R-7 採用方針反映)
+- [x] (P) **12.3** `.github/workflows/integration-ollama.yml` を作成する (Plan R-7 採用方針反映)
   - **トリガ**: `push:` (`branches: [main]`) + `schedule:` (週次 cron) + `pull_request:` (`paths:` で `src/pydantic_ai_sandbox/llm/**`, `src/pydantic_ai_sandbox/agents/**`, `src/pydantic_ai_sandbox/schemas/**`, `tests/integration/**`, `pyproject.toml` のみ発火) + `workflow_dispatch:` (手動)
   - **重複抑制**: `concurrency: { group: integration-ollama-${{ github.ref }}, cancel-in-progress: true }` を設定し、PR 連投時のジョブ滞留を回避
   - **実行**: `services:` または `docker run` で `ollama/ollama:latest` を起動。`actions/cache` のキーは `ollama-model-${{ hashFiles('.github/workflows/integration-ollama.yml') }}-granite4.1-8b` で `granite4.1:8b` blob をキャッシュ (model 名や job 定義の変更で自動 invalidate)
@@ -470,14 +470,14 @@ CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 
   - _Depends:_ 11.1
   - _Requirements:_ 3.5, 6.2, 10.3
 
-- [ ] (P)\* **12.4** `.gitleaks.toml` を任意で作成する (テスト fixture 用例外設定)
+- [x] (P)\* **12.4** `.gitleaks.toml` を任意で作成する (テスト fixture 用例外設定)
   - `paths` で `tests/**` の placeholder credential を allowlist に登録
   - 必須ではないが、誤検知を抑えるため初期から導入を推奨
   - _Boundary:_ .gitleaks.toml
   - _Depends:_ 2.2
   - _Requirements:_ 9.3, 9.6
 
-- [ ] (P) **12.5** `.github/dependabot.yml` を作成する (Req 9.5 サプライチェーン監視の成果物化)
+- [x] (P) **12.5** `.github/dependabot.yml` を作成する (Req 9.5 サプライチェーン監視の成果物化)
   - `package-ecosystem: pip` (uv 解決済み依存) と `package-ecosystem: github-actions` を週次スケジュールで監視
   - `litellm` (および idea0.md §14 の警戒対象) には `labels: ["supply-chain-watch"]` と `reviewers` を付与し、自動マージ不可・人手レビュー必須運用に紐付ける (Req 9.5)
   - `open-pull-requests-limit` を妥当な値 (例: 10) に設定
@@ -487,6 +487,15 @@ CI で各品質ゲートとセキュリティスキャナを走らせる (Req 7 
   - _Requirements:_ 9.5
 
 ### Implementation Notes
+
+- Task 12 全 5 サブタスクは `.github/` と `.gitleaks.toml` のみ — `src/` を一切触らないため Test-First 原則の対象外 (Task 1 と同じ exemption)。代わりに 4 ゲート集約 (`mise run check`) と pre-commit default stage を validation 軸に据え、新規 YAML/TOML が既存 lint/typecheck/secret-scan/model-id-guard hooks を一切赤化させないことを GREEN 観測条件とした。実観測: `mise run check` → 50 passed / 1 skipped + 0 type errors、`pre-commit run --all-files` → 5 hooks 全 pass。
+- **Single-source-of-truth 原則**: ワークフローは固有の Python/uv バージョンを pin せず、`jdx/mise-action@v2` で `mise.toml` の宣言を読む。tool 版は `pyproject.toml` の dev-deps 唯一に管理され、ワークフロー側は entry point 名 (`mise run check` / `mise run "pre-commit:manual"` / `mise run "test:integration"`) のみを呼ぶ。これは Constitution V "single entry point" を CI でも literal に維持する意図で、`.pre-commit-config.yaml` の `language: system` 採用 (Task 2.2 Implementation Notes) と同じ計算。
+- **integration-ollama の cache 戦略**: `services:` ではなく `docker run -d` + `${HOME}/.ollama` host mount を選択。`actions/cache` は host workspace パスにしか復元できず、`services:` の自動マウントとは設計上整合しないため、**手動コンテナ起動** + **ホストボリューム** + **`actions/cache@v4`** の三段で `granite4.1:8b` (~5GB) のコールドプル時間を 8-12min → 0min に削減。cache key は `hashFiles('.github/workflows/integration-ollama.yml')` を載せているため、env 冒頭の `OLLAMA_MODEL_NAME` を回した瞬間に自動 invalidate される (operator が cache 名を手動で直す必要なし)。
+- **paths-filter の選定根拠** (Plan R-7 採用方針 literal 反映): `src/pydantic_ai_sandbox/{llm,agents,schemas}/**` + `tests/integration/**` + `pyproject.toml` + ワークフロー自身。前 4 つは provider/agent/schema 改修 PR を確実に拾うための surface、`pyproject.toml` は `pydantic-ai>=2.0.0b3` 系 dependency bump (Req 6.5) を即座にカバー、ワークフロー自身を入れているのは "ワークフロー編集 PR で paths-filter が hit しない" 罠を回避するため。これにより無関係 PR の体感は `ci.yml` のみに保ちつつ、Req 6.2 を PR 段階で発火させる契約が成立。
+- **gitleaks 二重配備の整合**: pre-commit が `gitleaks/gitleaks@v8.21.2` バイナリを使い、`security.yml` は `gitleaks/gitleaks-action@v2` (action bundles binary) を使う。両者とも `.gitleaks.toml` を root から読み込むので allowlist 規則は単一ファイルに集約され、ローカルと CI で挙動が divergeしない。`useDefault = true` で upstream 既定ルールを継承するため、新しい credential pattern (例: 将来の Anthropic API key prefix 変更) が gitleaks 側に追加されたら自動で防御強化される。
+- **supply-chain-watch ラベルの実装は二段構え**: (a) `dependabot.yml` の `groups.exclude-patterns: ["litellm", "pydantic-ai*"]` で `litellm` の bump を絶対に minor/patch group へ畳まず常に standalone PR とする。(b) `security.yml` の `supply-chain-summary` job が毎回 watchlist を `$GITHUB_STEP_SUMMARY` に印字する (機械検出ではなく reviewer notification の責務)。Dependabot v2 schema は per-package label の map を持たないため、(a)+(b) で literal "ラベル付与 + 自動マージ不可" 運用を表現した。
+- **coverage XML を `mise run test` に含めない判断**: `mise run test` は `uv run pytest` のシンプルな entry で、`--cov` フラグを付けると Constitution V "single entry point" の意味が CI と local で zwischen るリスクがある (developer は `mise run test` を冪等に叩きたいので毎回 cov XML 生成は不要)。CI 側で別 step として `uv run pytest --cov --cov-report=xml --cov-report=term` を 1 回追加する設計に倒した。`fail_under = 0` baseline は `pyproject.toml` で T1.1 が確立済みなので、本ワークフローは coverage 値の **観測** に責務を限定する (Req 7.7 の段階引き上げは future task)。
+- **詳細は `pdca/do.md` (2026-05-24 Task 12) を参照**。
 
 ---
 

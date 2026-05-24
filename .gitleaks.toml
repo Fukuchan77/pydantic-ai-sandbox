@@ -1,0 +1,52 @@
+# Spec Req 9.3, 9.6 / Plan §4.3 / tasks.md T12.4.
+#
+# Custom gitleaks configuration. The default ruleset (extended below via
+# `[extend] useDefault = true`) is the authoritative source — this file
+# only adds allowlists for known false positives, never weakens detection.
+#
+# Allowlist scope:
+#   * tests/** — fixture credentials, deliberately fake API keys, placeholder
+#     tokens. The ruff per-file-ignore for S105/S106 in pyproject.toml
+#     already permits these in source; the same exemption here keeps the
+#     two security gates aligned.
+#   * .env.example — canonical contract for required env variables. By
+#     policy (Req 9.6) all values are blank or placeholder; gitleaks
+#     occasionally regex-matches placeholder strings like
+#     `your-token-here` against generic-secret patterns.
+#   * uv.lock — package metadata only; SHA digests sometimes match
+#     base64-shaped patterns.
+#
+# Anything outside the allowlist (production code, real config, commit
+# history) MUST still trigger gitleaks if a secret-shaped string appears.
+
+[extend]
+# Inherit the upstream default ruleset rather than redefining rules. This
+# keeps detection coverage in lock-step with new gitleaks releases — the
+# pinned binary version lives in .pre-commit-config.yaml; CI uses the
+# action's bundled binary (security.yml T12.2).
+useDefault = true
+
+[allowlist]
+description = "pydantic-ai-sandbox false-positive allowlist (tests + env example + uv lock)"
+
+# Path-based allowlist. Patterns are regex (RE2 syntax). All test fixtures
+# are exempt because S105/S106 in pyproject.toml already permit placeholder
+# credentials there; gitleaks should not contradict that policy.
+paths = [
+  '''tests/.*''',
+  '''\.env\.example$''',
+  '''uv\.lock$''',
+  # Spec/plan/research artifacts may quote env-var names like LOGFIRE_TOKEN
+  # which gitleaks' generic-api-key rule occasionally false-positives on.
+  '''specs/.*\.md$''',
+  '''\.sdd/.*''',
+]
+
+# Specific known-fake values that may appear in markdown / docstrings as
+# illustrative examples. Pattern matches the literal placeholder strings;
+# real tokens never look like these by convention.
+regexes = [
+  '''dummy-ollama-(model|api-key)''',
+  '''<your-[a-z-]+-here>''',
+  '''placeholder-[a-z0-9-]+''',
+]
