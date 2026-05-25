@@ -64,12 +64,32 @@ jobs:
       # `--strict` to surface advisories that pip-audit might otherwise demote
       # to warnings (e.g., "fix not yet available").
       #
-      # `--disable-pip` keeps the resolver consistent with uv's lockfile:
-      # without it pip-audit would re-resolve via pip and could disagree
-      # with `uv.lock` on transitive pins.
+      # Resolver-consistency strategy: pip-audit's recent releases require
+      # `--disable-pip` to be paired with `-r/--requirement`, so we export
+      # uv.lock to a requirements file first. `uv export` reproduces the lock
+      # exactly (no re-resolution), and `--disable-pip` keeps pip-audit from
+      # second-guessing the pinned set. This replaces the bare
+      # `pip-audit --disable-pip` form which now exits 2 with
+      # "The --disable-pip flag can only be used with --requirement (-r)".
       # ----------------------------------------------------------------------
+      # Hash-pinned export so pip-audit's `--disable-pip` is satisfied without
+      # `--no-deps` (pip-audit's own guidance: "users are encouraged to fully
+      # hash their pinned dependencies"). uv.lock already records hashes for
+      # every resolved artifact, so `uv export` faithfully reproduces them.
+      - name: Export uv.lock to requirements.txt (hash-pinned)
+        run: |
+          uv export \
+            --format requirements-txt \
+            --no-emit-project \
+            --all-groups \
+            -o requirements.txt
+
       - name: Run pip-audit
-        run: uv run pip-audit --strict --disable-pip
+        run: |
+          uv run pip-audit \
+            --strict \
+            --disable-pip \
+            --requirement requirements.txt
 
       # Job summary captures the same output for human review even when the
       # step exits 0 (no findings). pip-audit prints to stderr in some modes;
@@ -77,7 +97,11 @@ jobs:
       - name: pip-audit JSON summary
         if: always()
         run: |
-          uv run pip-audit --strict --disable-pip --format json \
+          uv run pip-audit \
+            --strict \
+            --disable-pip \
+            --requirement requirements.txt \
+            --format json \
             > pip-audit-report.json || true
           {
             echo '## pip-audit'
