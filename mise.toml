@@ -45,3 +45,11 @@ run = "uv run pre-commit run --all-files --hook-stage manual"
 [tasks."test:integration"]
 description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
 run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
+
+[tasks.dev]
+description = "Run the FastAPI app via uvicorn with hot reload (development)."
+run = "uv run uvicorn pydantic_ai_sandbox.main:app --reload --env-file .env"
+
+[tasks.serve]
+description = "Run the FastAPI app via uvicorn (production-style, no reload)."
+run = "uv run uvicorn pydantic_ai_sandbox.main:app --host 0.0.0.0 --port 8000 --env-file .env"
