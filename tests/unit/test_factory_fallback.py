@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic_ai.models.fallback import FallbackModel
 
-from pydantic_ai_sandbox.config import get_settings
+from pydantic_ai_sandbox.config import Settings, get_settings
 from pydantic_ai_sandbox.llm.fallback import (
     # Spec-mandated underscore-prefixed name (plan.md §2.4) exported via
     # ``llm.fallback.__all__``; mirrors the ``_MVP_STUB_PROVIDERS`` import
@@ -127,3 +127,36 @@ def test_build_fallback_skips_stub_members_when_real_members_remain(
         get_settings.cache_clear()
 
     assert isinstance(model, FallbackModel)
+
+
+def test_build_fallback_raises_runtime_error_on_empty_members_post_validator_drift() -> None:
+    """Empty ``fallback_order`` post-validator-drift surfaces ``RuntimeError``.
+
+    The Settings cross-field validator already rejects ``FALLBACK_ORDER=""``,
+    so this configuration cannot occur on the production path. The guard
+    inside :func:`_build_fallback` exists to defend against a *future*
+    refactor that loosens or removes the validator — adversarial review
+    flagged the previous ``assert members`` form as ``python -O``-strippable
+    (assertions are removed when CPython is invoked with optimisations on),
+    which would silently route an empty list to the ``default, *rest = ...``
+    unpacking and surface a confusing ``ValueError`` instead of an explicit
+    boundary error.
+
+    The test bypasses validation via :meth:`Settings.model_construct` to
+    construct exactly the post-drift state the guard targets, then asserts
+    the canonical :class:`RuntimeError` carries enough text for an operator
+    to grep logs (``FALLBACK_ORDER`` token).
+    """
+    # ``model_construct`` is Pydantic v2's documented escape hatch for
+    # building an instance without running validators — exactly what is
+    # needed to simulate "the validator has been weakened in a future
+    # refactor". Production code never hits this constructor.
+    drifted = Settings.model_construct(
+        llm_provider="fallback",
+        fallback_order="",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        _build_fallback(drifted)
+
+    assert "FALLBACK_ORDER" in str(exc_info.value)

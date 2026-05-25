@@ -157,3 +157,67 @@
 ## 8. 結論
 
 `001-agentic-platform` は **MVP スコープを構成的に完了** した。"動く" を超えて "再利用できる" 段階に到達している。本 Reflect で形式知化した Pattern A と Mistake-1 を起点に、次イテレーション (`002-multi-provider` 想定) で実 LLM プロバイダを順次追加していく際の地ならしは整った。
+
+---
+
+## 9. Amendment 2026-05-24T(post-Reflect): adversarial-review HIGH+MEDIUM 全消化
+
+`/code-reviewing` → `/adversarial-review` の二段レビューで抽出された HIGH 1 件 + MEDIUM 3 件を、ブランチ `fix/log-sensitive-payloads-scrubbing` 上に 2 コミットで完全消化した。LOW 5 件は spec `002-multi-provider` で構造が動く箇所と隣接するため意図的に未着手 (本 Amendment §9.4 参照)。
+
+### 9.1 消化したファインディング
+
+| Sev | 件名 | 出典 | コミット | 検出経路 |
+|-----|------|------|---------|---------|
+| HIGH | `LOG_SENSITIVE_PAYLOADS` が dead field — Req 5.4 SHALL 違反 | adversarial pass 1 | `bdeea39` | `grep` で field 参照箇所が config.py / .env.example / conftest 以外に無いことを確認 |
+| MEDIUM | シークレット env を `str` で保持 — `repr(settings)` / `exc_info=True` で leak | adversarial pass 1 | `f5d3466` | `__repr__` semantics 解析 + stdlib logger が Logfire scrubbing に通らない経路の特定 |
+| MEDIUM | `ChatRequest.message` 上限なし — body amplification | adversarial pass 1 | `f5d3466` | Starlette body-size cap が未配線である事実の確認 |
+| MEDIUM | `assert members` が `python -O` で strip される | adversarial pass 2 | `f5d3466` | `pyproject.toml::ignore` に `S101` が居る事実 + `-O` semantics の組み合わせ |
+
+### 9.2 適用した修正と TDD 観測
+
+**`bdeea39` (HIGH)**:
+- `logging_setup.py` に `settings.log_sensitive_payloads` 分岐を追加。default-deny は従来通り、opt-in は `scrubbing=False` (Logfire 公式 sentinel) + 第二の WARNING で audit-trail を残す
+- 新規テスト `test_configure_disables_scrubbing_when_log_sensitive_payloads_true` を RED 観測してから着地
+- 50 → 51 passed
+
+**`f5d3466` (MEDIUM ×3)**:
+- `config.py`: 4 シークレットフィールド (`ollama_api_key` / `watsonx_apikey` / `anthropic_api_key` / `logfire_token`) を `SecretStr | None` 化
+- `logging_setup.py` / `llm/providers/ollama.py`: SDK 境界でのみ `.get_secret_value()` 展開
+- `schemas/chat.py`: `_MESSAGE_MAX_LENGTH = 8192` 定数 + `Field(max_length=...)`
+- `llm/fallback.py`: `assert members, ...` → `if not members: raise RuntimeError(...)`
+- 新規テスト 4 件 (`test_build_fallback_raises_runtime_error_on_empty_members_post_validator_drift`, `exceeds-max-length` parametrise case, `test_secret_fields_redact_in_repr`, `test_secret_field_value_is_recoverable_via_get_secret_value`) を RED 観測してから着地
+- 51 → 55 passed
+
+### 9.3 副次的に観測された Pattern / Mistake
+
+- **Pattern (再確認)**: T2.1 の hardcoded-model-ID guard は今回 schemas/chat.py の docstring 中の `granite4.1:8b` リテラルを実際に検出して fail させた。「Pattern: two-layer ID guard」が想定どおり機能している実観測。新 Pattern として記述する必要なし。
+- **Mistake 候補**: `_INSTRUCTIONS` 系のドキュメンテーション中で本番モデル ID を例示文字列として書く誘惑がある。schemas/chat.py の `_MESSAGE_MAX_LENGTH` docstring を当初 `Matches granite4.1:8b's...` で書いて T2.1 が即座に止めた。`.sdd/mistakes/` への昇格は不要 (既存 mistake-1 と同系統で、防御層は機能している)。docstring 規約として「本番モデル ID リテラルは env 変数名経由で参照する」を **本 Amendment 内に明文化** することで足りる。
+
+### 9.4 未消化 LOW (`002-multi-provider` 同時処理推奨)
+
+| Sev | 件名 | 推奨タイミング |
+|-----|------|---------------|
+| LOW | factory dispatch の stub 各 branch を `return _build_<stub>()` 形式に統一 | 002 で stub 撤去と同時 (差分が同所に集約) |
+| LOW | `FALLBACK_ORDER` parser 重複 (config.py / fallback.py) | 002 の Settings 拡張時に `Settings.fallback_members` cached property に集約 |
+| LOW | `_INSTRUCTIONS` ↔ `ChatResponse` lockstep test | 002 の Vision/Tool 拡張で prompt 構造が動くタイミング |
+| LOW | `_MANAGED_ENV_KEYS` を `Settings.model_fields` から派生 | 002 の env 拡張時に同時更新 |
+| LOW | `_build_fallback` import 非対称 (eager / lazy) | 002 で `pydantic_ai_sandbox.llm` の re-export 整備時 |
+
+判断根拠: いずれも 002 で隣接ファイルが動くため独立対応すると同一行近傍を二度触ることになる。MVP の `git blame` 解読性も損なわれる。
+
+### 9.5 品質ゲート (本 Amendment 完了時点)
+
+```
+ruff check        ✅
+ruff format       ✅
+pyright (strict)  ✅ 0 errors
+pytest            ✅ 55 passed / 1 skipped (integration lane gated)
+```
+
+50 → 55 (+5 件、内訳: HIGH 1 / MEDIUM 4)。カバレッジ ratchet (`fail_under = 93`) は未到達リスクなし — 新規 src 行は約 30 行、対応テストが直接 cover している。
+
+### 9.6 次フェーズへの引き継ぎ
+
+- ブランチ `fix/log-sensitive-payloads-scrubbing` を `main` にマージしてから `002-multi-provider` を起票する。マージ前提が崩れると LOW 5 件のうち `_MANAGED_ENV_KEYS` 派生化が `SecretStr` 移行の影響範囲と再衝突する。
+- `002-multi-provider` の `/sdd-init` 入力ドラフト ([specs/inputs/idea1-002-multi-provider.md](../../inputs/idea1-002-multi-provider.md)) に **本 §9.4 の LOW 5 件を Cleanup タスクとして組み込む** ことを `/sdd-tasks` 段階で明文化すること。これを忘れると再び adversarial pass で同じ LOW が浮上する。
+- `Mistake` 候補としての「docstring 内本番モデル ID リテラル禁止」を `.sdd/mistakes/` に昇格させるかは、002 の最初の `/code-reviewing` で同じ guard が再発火したら判断する。一度きりの観測で昇格させると mistake DB が低 S/N 化する。

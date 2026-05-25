@@ -58,11 +58,17 @@ def _build_ollama(settings: Settings) -> Model:
         )
         raise TypeError(msg)
 
+    # Unwrap the ``SecretStr`` only at the SDK boundary — the wrapper
+    # keeps the value redacted in repr/str everywhere else. ``None``
+    # propagates unchanged so hosted-Ollama auth stays optional.
+    api_key = (
+        settings.ollama_api_key.get_secret_value() if settings.ollama_api_key is not None else None
+    )
     provider = OllamaProvider(
         # ``HttpUrl`` carries a trailing slash; OllamaProvider expects a
         # plain string and tolerates either form, so we hand it the
         # canonical str() rendering.
         base_url=str(settings.ollama_base_url),
-        api_key=settings.ollama_api_key,
+        api_key=api_key,
     )
     return OpenAIChatModel(model_name=settings.ollama_model_name, provider=provider)

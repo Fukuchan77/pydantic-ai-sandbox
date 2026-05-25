@@ -9,9 +9,13 @@ fail-soft Logfire init sequence:
    needing Logfire to be reachable.
 2. Call :func:`logfire.configure` with
    ``send_to_logfire='if-token-present'`` (research.md R-2 — the
-   officially-supported fail-soft API) and ``ScrubbingOptions`` extending
-   the default redaction patterns with ``prompt`` / ``tool_input`` /
-   ``tool_output`` (Req 5.4).
+   officially-supported fail-soft API) and a scrubbing argument selected
+   by ``settings.log_sensitive_payloads`` (Req 5.4 / plan.md §2.8 opt-in
+   branch): the default-deny path passes :class:`logfire.ScrubbingOptions`
+   extending the default redaction patterns with ``prompt`` /
+   ``tool_input`` / ``tool_output``; the opt-in path passes ``False`` to
+   disable redaction entirely AND emits a second ``WARNING`` naming the
+   override so operators cannot accidentally leave it on in production.
 3. Wire :func:`logfire.instrument_pydantic_ai`,
    :func:`logfire.instrument_fastapi`, and :func:`logfire.instrument_httpx`
    so every Pydantic-AI agent run, FastAPI request, and outbound HTTPX
@@ -35,7 +39,7 @@ lifespan; this module deliberately does not register itself.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import logfire
 
@@ -90,6 +94,15 @@ def configure_observability(app: FastAPI, settings: Settings) -> None:
         operators see the message even when the configure path itself
         succeeds quietly.
 
+        Req 5.4 opt-in branch (plan.md §2.8): when
+        ``settings.log_sensitive_payloads`` is ``True``, ``scrubbing=False``
+        is handed to :func:`logfire.configure` (Logfire's documented
+        sentinel for "disable redaction entirely") and a second
+        ``WARNING`` naming the env var is emitted via the stdlib
+        logger. Two warnings are intentional — one is the diagnostic
+        breadcrumb and the other is the audit-trail that the operator
+        explicitly opted into raw payload visibility.
+
         Req 5.5 (transport exceptions must not propagate): the
         configure + instrument sequence is wrapped in a single bare
         ``except Exception`` catch. ``BaseException`` (KeyboardInterrupt,
@@ -102,15 +115,38 @@ def configure_observability(app: FastAPI, settings: Settings) -> None:
             "LOGFIRE_TOKEN is unset; Logfire transport disabled (fail-soft mode).",
         )
 
+    # Req 5.4: scrubbing is default-on with extra patterns; the opt-in
+    # branch hands Logfire its documented ``False`` sentinel to disable
+    # redaction. The annotation widens the binding so pyright accepts
+    # both paths under strict mode without an assignment-type narrowing.
+    scrubbing_config: logfire.ScrubbingOptions | Literal[False]
+    if settings.log_sensitive_payloads:
+        logger.warning(
+            "LOG_SENSITIVE_PAYLOADS=true; payload scrubbing is DISABLED. "
+            "Raw prompts and tool I/O may flow to Logfire — keep this "
+            "off in production unless you are actively debugging.",
+        )
+        scrubbing_config = False
+    else:
+        scrubbing_config = logfire.ScrubbingOptions(
+            extra_patterns=list(_SCRUBBING_EXTRA_PATTERNS),
+        )
+
+    # Recover the raw secret only at the SDK boundary (``SecretStr`` keeps
+    # the value redacted in repr/str everywhere else — see config.py
+    # docstring). ``None`` propagates unchanged so the
+    # ``send_to_logfire='if-token-present'`` fail-soft branch still fires.
+    raw_token = (
+        settings.logfire_token.get_secret_value() if settings.logfire_token is not None else None
+    )
+
     try:
         logfire.configure(
             send_to_logfire="if-token-present",
-            token=settings.logfire_token,
+            token=raw_token,
             service_name="pydantic_ai_sandbox",
             environment=settings.app_env,
-            scrubbing=logfire.ScrubbingOptions(
-                extra_patterns=list(_SCRUBBING_EXTRA_PATTERNS),
-            ),
+            scrubbing=scrubbing_config,
         )
         logfire.instrument_pydantic_ai()
         logfire.instrument_fastapi(app)
