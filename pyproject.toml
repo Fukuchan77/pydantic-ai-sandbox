@@ -27,6 +27,19 @@ dev = [
     "ruff",
 ]
 
+# Hatchling is uv's recommended PEP 517 backend. Declaring it (a) flips this
+# project from uv's "virtual" mode into a real package so `uv sync` performs
+# the editable install on its own (CI was hitting ModuleNotFoundError without
+# this — see PDCA Act 2026-05-24 / Mistake-2), and (b) lets hatchling locate
+# the src-layout package without an explicit packages= override on most layouts;
+# we set it anyway so wheel builds are deterministic regardless of CWD.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pydantic_ai_sandbox"]
+
 [tool.uv]
 prerelease = "allow"
 
@@ -90,6 +103,16 @@ venv = "."
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Project root on sys.path so `from tests.support.model_fakes import ...`
+# resolves regardless of CWD or pytest's rootdir heuristics. Without this,
+# CI's `mise run check` lane (which fans out lint/format/typecheck/test in
+# parallel under mise's depends model) raced into a state where pytest's
+# rootdir-based sys.path insertion picked `tests/unit/` rather than the
+# project root, producing `ModuleNotFoundError: No module named 'tests'`
+# on the two files that runtime-import from `tests.support`. The other
+# tests survived because their `from tests.conftest import ...` lives
+# inside `if TYPE_CHECKING:` and never executes at import time.
+pythonpath = ["."]
 
 [tool.coverage.run]
 # Limit coverage measurement to first-party code; tests and stubs are excluded.
