@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic_ai.models import Model
+from pydantic_ai.models.ollama import OllamaModel
 
 from pydantic_ai_sandbox.config import get_settings
 from pydantic_ai_sandbox.llm import get_model
@@ -83,3 +84,19 @@ def test_get_model_ollama_does_not_touch_network(
     # accidentally returns ``None`` from a fast-fail branch the
     # "no exception raised" semantics alone would not catch it.
     assert isinstance(model, Model)
+    # The concrete class matters here — only ``OllamaModel`` carries the
+    # profile that sets ``supports_json_schema_output: True``, which the
+    # JSON-schema (NativeOutput) path in ``build_chat_agent`` keys off.
+    # ``OpenAIChatModel`` (the previous implementation) ships a profile
+    # whose default has the flag off, so the integration lane (T11.1)
+    # would silently fall back to tool-mode structured output and fail
+    # for ``granite4.1:8b``. ``OllamaModel`` *is* a subclass of
+    # ``OpenAIChatModel``, so an ``isinstance`` check rather than ``type
+    # is`` keeps the test compatible with future provider refactors that
+    # extend ``OllamaModel`` further.
+    assert isinstance(model, OllamaModel), (
+        f"_build_ollama must return an OllamaModel so the resolved "
+        f"profile carries supports_json_schema_output=True; got "
+        f"{type(model).__name__}. The Ollama integration lane depends "
+        f"on this profile to enable NativeOutput."
+    )

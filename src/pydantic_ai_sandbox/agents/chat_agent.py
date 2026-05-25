@@ -33,13 +33,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent, NativeOutput, RunContext
 
 from pydantic_ai_sandbox.llm import get_model
 from pydantic_ai_sandbox.schemas.chat import ChatResponse
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
+    from pydantic_ai.output import OutputSpec
 
 __all__ = ["build_chat_agent", "search_kb"]
 
@@ -103,13 +104,43 @@ def build_chat_agent(model: Model | None = None) -> Agent[None, ChatResponse]:
             (Req 10.2).
 
     Returns:
-        A fully-configured :class:`Agent` whose ``output_type`` is
-        :class:`ChatResponse`, with :func:`search_kb` registered as the
-        single MVP tool. The generic parameters spell the dependency
-        and output types so pyright strict catches output-type drift at
-        the call site rather than at first ``run_sync``.
+        A fully-configured :class:`Agent` with :func:`search_kb`
+        registered as the single MVP tool. The output type is
+        :class:`ChatResponse` for the explicit-injection path; on the
+        production (resolver) path it is wrapped in
+        :class:`pydantic_ai.NativeOutput` whenever the resolved model's
+        profile reports ``supports_json_schema_output: True`` (e.g.
+        :class:`pydantic_ai.models.ollama.OllamaModel` against a
+        v0.5.0+ daemon). The wrap forces the OpenAI-compatible request
+        to carry ``response_format=json_schema``, which Ollama's
+        ``llama.cpp`` decoder turns into a grammar-constrained
+        generation — without this, weaker local Granite-class models
+        fail the V2 default tool-mode structured output and the
+        integration lane (T11.1) flakes with
+        :class:`pydantic_core.ValidationError` ("Invalid JSON: expected
+        value at line 1 column 1").
+
+    Why the wrap is gated on ``model is None``:
+        :class:`pydantic_ai.models.test.TestModel` and
+        :class:`pydantic_ai.models.function.FunctionModel` ship
+        profiles with ``supports_json_schema_output: False``. Wrapping
+        in :class:`NativeOutput` for those would raise
+        :class:`pydantic_ai.exceptions.UserError` at ``agent.run`` time
+        and break every test that relies on the
+        ``app_with_overrides`` fixture or :func:`build_chat_agent` with
+        an explicit ``model=...`` arg. Restricting the wrap to the
+        resolver branch keeps the network-free test recipe untouched.
     """
     resolved = model if model is not None else get_model()
+    # The conditional gate: explicit-injection callers (tests) keep the
+    # plain class so TestModel/FunctionModel profiles do not trip
+    # NativeOutput's UserError. Resolver callers (production) opt in
+    # whenever the picked model advertises JSON-schema capability.
+    output_spec: OutputSpec[ChatResponse]
+    if model is None and resolved.profile.get("supports_json_schema_output"):
+        output_spec = NativeOutput(ChatResponse)
+    else:
+        output_spec = ChatResponse
     # ``deps_type=type(None)`` is load-bearing for pyright strict: the
     # ``Agent.__init__`` default is ``object``, which does not satisfy
     # the ``Agent[None, ...]`` type-arg annotation we declare in the
@@ -118,7 +149,7 @@ def build_chat_agent(model: Model | None = None) -> Agent[None, ChatResponse]:
     # resolver picks the ``deps_type=None`` flavour.
     return Agent[None, ChatResponse](
         model=resolved,
-        output_type=ChatResponse,
+        output_type=output_spec,
         instructions=_INSTRUCTIONS,
         deps_type=type(None),
         tools=[search_kb],
