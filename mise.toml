@@ -27,12 +27,12 @@ description = "Aggregate quality gate (Constitution V, Req 7.5)."
 depends = ["lint", "format", "typecheck", "test"]
 
 [tasks.setup]
-# `uv sync` resolves the lock file but does NOT seat the editable install of
-# this package — `from pydantic_ai_sandbox import ...` would fail in tests
-# until `uv pip install -e .` runs once. Folding it in here closes the gap
-# (PDCA Act 2026-05-24 / Mistake-2 carry-over fix).
-description = "Bootstrap a fresh checkout: sync deps, seat editable install, install pre-commit hooks."
-run = "uv sync && uv pip install -e . && uv run pre-commit install"
+# `uv sync` now installs the project editable on its own — pyproject.toml
+# declares hatchling as the build backend so uv treats this as a packaged
+# project rather than a virtual one (replaces the prior `uv pip install -e .`
+# workaround; PDCA Act 2026-05-24 / Mistake-2 — closed).
+description = "Bootstrap a fresh checkout: sync deps and install pre-commit hooks."
+run = "uv sync && uv run pre-commit install"
 
 [tasks."pre-commit:default"]
 description = "Run the default pre-commit stage (lint / format / pyright / gitleaks / forbid-hardcoded-model-ids)."
