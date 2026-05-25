@@ -58,12 +58,16 @@ and the `forbid-hardcoded-model-ids` pre-commit hook for the enforced rule.
 
 ## Running the FastAPI app
 
-Once the implementation tasks ship `app/main.py` (planned per
-[specs/001-agentic-platform/plan.md](specs/001-agentic-platform/plan.md) §2.9):
+The app entry point is `pydantic_ai_sandbox.main:app` (defined in
+[src/pydantic_ai_sandbox/main.py](src/pydantic_ai_sandbox/main.py)).
 
 ```bash
-uv run fastapi dev app/main.py    # hot-reload dev server
-uv run fastapi run app/main.py    # production-style server
+mise run dev      # uvicorn + --reload (development)
+mise run serve    # uvicorn on 0.0.0.0:8000 (production-style, no reload)
+
+# Equivalent without mise:
+uv run uvicorn pydantic_ai_sandbox.main:app --reload --env-file .env
+uv run uvicorn pydantic_ai_sandbox.main:app --host 0.0.0.0 --port 8000 --env-file .env
 ```
 
 ## Integration testing against a live Ollama

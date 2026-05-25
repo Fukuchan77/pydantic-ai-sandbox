@@ -24,11 +24,11 @@ shape of the application:
    declared in :mod:`pydantic_ai_sandbox.api.routes` and carry no app-
    global state, so the registration is order-insensitive.
 
-The module-level ``app = create_app()`` binding gives ``fastapi dev
-app/main.py`` and ``fastapi run app/main.py`` an importable target. It
-is built once at import time; tests that need a fresh app per scenario
-call :func:`create_app` directly (after :func:`get_settings.cache_clear`)
-to side-step the singleton.
+The module-level ``app = create_app()`` binding gives
+``uvicorn pydantic_ai_sandbox.main:app`` (and any other ASGI runner) an
+importable target. It is built once at import time; tests that need a
+fresh app per scenario call :func:`create_app` directly (after
+:func:`get_settings.cache_clear`) to side-step the singleton.
 
 Boundary contract from plan.md §2.9: this module *composes* — it
 contains no request-handling logic, no provider selection, and no
@@ -92,11 +92,12 @@ def create_app() -> FastAPI:
 
     Returns a fully-wired :class:`FastAPI` instance with the lifespan
     composed in :func:`_lifespan` and both routers registered. Callers
-    that exercise the lifespan (Uvicorn, ``fastapi dev``,
-    ``with TestClient(app)``) get the boot-time validation chain;
-    callers that bypass it (``TestClient(app)`` without ``with``) still
-    receive a functional app — the routes themselves do not depend on
-    lifespan side effects, by design.
+    that exercise the lifespan (``mise run dev`` / ``uv run uvicorn
+    pydantic_ai_sandbox.main:app``, ``with TestClient(app)``) get the
+    boot-time validation chain; callers that bypass it
+    (``TestClient(app)`` without ``with``) still receive a functional
+    app — the routes themselves do not depend on lifespan side effects,
+    by design.
 
     The function is deliberately small: every responsibility of any
     weight lives in a dedicated module (config / logging_setup /
@@ -116,7 +117,7 @@ def create_app() -> FastAPI:
 
 
 app: FastAPI = create_app()
-"""Module-level FastAPI binding for ``fastapi dev``/``fastapi run``.
+"""Module-level FastAPI binding for ``uvicorn pydantic_ai_sandbox.main:app``.
 
 Built once at import time. Tests that need a fresh app per scenario
 call :func:`create_app` directly (after :func:`get_settings.cache_clear`)
