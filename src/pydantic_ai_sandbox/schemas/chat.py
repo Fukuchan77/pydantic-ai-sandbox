@@ -22,6 +22,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+_MESSAGE_MAX_LENGTH: int = 8192
+"""Upper bound on ``ChatRequest.message`` length.
+
+Matches the default 8K-token context window of the production model
+configured via ``OLLAMA_MODEL_NAME`` so well-formed prompts never trip
+the validator while body-amplification abuse (e.g., multi-MB POST
+bodies designed to burn provider tokens or memory) is rejected at the
+FastAPI request stage with HTTP 422 — before the prompt ever reaches
+:func:`Agent.run`. Adjust together with the upstream model's context
+window when changing the production model selection.
+"""
+
 
 class ChatRequest(BaseModel):
     """Wire shape for ``POST /chat`` request bodies.
@@ -29,11 +41,17 @@ class ChatRequest(BaseModel):
     Attributes:
         message: User-supplied natural-language prompt. Constrained to
             ``min_length=1`` so the FastAPI request validator returns
-            422 (Req 3.6) for empty strings before the agent runs.
+            422 (Req 3.6) for empty strings before the agent runs, and
+            to ``max_length=_MESSAGE_MAX_LENGTH`` (8192 chars) so
+            unbounded bodies cannot amplify into provider-side token
+            burn or memory pressure — abuse fails fast at the FastAPI
+            validator stage rather than after the request has been
+            forwarded to the LLM backend.
     """
 
     message: str = Field(
         min_length=1,
+        max_length=_MESSAGE_MAX_LENGTH,
         description="User-supplied natural-language prompt routed into the chat agent.",
     )
 

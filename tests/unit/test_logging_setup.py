@@ -164,3 +164,53 @@ def test_configure_passes_scrubbing_extra_patterns(
     assert required.issubset(extra), (
         f"missing scrubbing patterns: required={required}, actual={extra}, diff={required - extra}"
     )
+
+
+def test_configure_disables_scrubbing_when_log_sensitive_payloads_true(
+    settings_factory: SettingsFactory,
+    patched_logfire: dict[str, MagicMock],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Req 5.4 opt-in — ``LOG_SENSITIVE_PAYLOADS=true`` bypasses scrubbing.
+
+    The flag exists so an operator debugging structured-output failures can
+    see raw model payloads without re-deploying. Two contracts are pinned:
+
+    1. ``logfire.configure`` receives ``scrubbing=False`` (Logfire's documented
+       sentinel for "disable redaction entirely") rather than the default
+       :class:`ScrubbingOptions` instance — anything else would silently
+       leave scrubbing on while advertising opt-in.
+    2. A single ``WARNING`` line naming ``LOG_SENSITIVE_PAYLOADS`` is
+       emitted via the stdlib logger so operators see the override in their
+       own aggregator even when Logfire transport works. The wording is
+       loosely asserted (``in``-check on the env-var name) so future
+       rephrasing does not break the test, but the var-name token is
+       load-bearing for log-grep workflows.
+    """
+    settings = settings_factory(
+        **_OLLAMA_BASE_ENV,
+        LOGFIRE_TOKEN="dummy-token",
+        LOG_SENSITIVE_PAYLOADS="true",
+    )
+
+    caplog.set_level(logging.WARNING, logger="pydantic_ai_sandbox.logging_setup")
+    configure_observability(FastAPI(), settings)
+
+    configure_call = patched_logfire["configure"].call_args
+    scrubbing = configure_call.kwargs.get("scrubbing")
+    assert scrubbing is False, (
+        f"LOG_SENSITIVE_PAYLOADS=true must pass scrubbing=False; got {scrubbing!r}"
+    )
+
+    override_warnings = [
+        rec
+        for rec in caplog.records
+        if rec.name == "pydantic_ai_sandbox.logging_setup"
+        and rec.levelno == logging.WARNING
+        and "LOG_SENSITIVE_PAYLOADS" in rec.getMessage()
+    ]
+    assert len(override_warnings) == 1, (
+        f"expected exactly one WARNING naming LOG_SENSITIVE_PAYLOADS, "
+        f"got {len(override_warnings)}: "
+        f"{[r.getMessage() for r in override_warnings]}"
+    )

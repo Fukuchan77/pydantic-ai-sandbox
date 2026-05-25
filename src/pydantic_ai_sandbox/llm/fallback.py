@@ -71,10 +71,22 @@ def _build_fallback(settings: Settings) -> Model:
             ``/chat`` call instead of failing fast at startup.
     """
     members = [m.strip() for m in settings.fallback_order.split(",") if m.strip()]
-    # Settings already rejected the empty/all-unknown cases; the assert
-    # is redundant in production but guards against a future refactor
-    # that loosens the validator without updating this function.
-    assert members, "Settings._check_provider_constraints should reject empty FALLBACK_ORDER"
+    # Settings already rejects the empty/all-unknown cases; this guard is
+    # redundant on the production path but defends against a future
+    # refactor that loosens the validator without updating this function.
+    # ``raise`` (not ``assert``) is load-bearing — Python's ``-O`` flag
+    # strips assertions, which would silently route an empty list to the
+    # ``default, *rest = real_models`` unpacking below and surface a
+    # confusing ``ValueError`` instead of an explicit boundary error.
+    if not members:
+        msg = (
+            "FALLBACK_ORDER parsed to an empty member list — the Settings "
+            "cross-field validator should have rejected this configuration. "
+            "If this fires in production, the validator was weakened in a "
+            "refactor; restore the empty-string check in "
+            "Settings._check_provider_constraints."
+        )
+        raise RuntimeError(msg)
 
     if all(member in _MVP_STUB_PROVIDERS for member in members):
         msg = (

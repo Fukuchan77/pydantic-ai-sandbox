@@ -152,6 +152,67 @@ def test_logfire_token_optional(settings_factory: SettingsFactory) -> None:
     assert hasattr(settings, "logfire_token")
 
 
+def test_secret_fields_redact_in_repr(
+    settings_factory: SettingsFactory,
+) -> None:
+    """Secret fields render as redacted in ``repr(settings)`` and ``str(...)``.
+
+    Adversarial review (MEDIUM) flagged that plain ``str | None`` typing
+    leaks tokens whenever a Settings instance is interpolated into a log
+    line or unhandled-traceback frame — the stdlib ``logger.warning(...,
+    exc_info=True)`` path in :mod:`logging_setup` is *not* Logfire-scrubbed
+    at the formatter layer, so a leaked token propagates to whatever log
+    aggregator is configured. ``pydantic.SecretStr`` overrides
+    ``__repr__`` / ``__str__`` to return ``"**********"`` regardless of
+    payload, eliminating the leak surface end-to-end.
+
+    This test pins the four secret-bearing fields. Adding a new credential
+    field that bypasses ``SecretStr`` will fail this assertion immediately,
+    keeping the leak guard in lockstep with the schema.
+    """
+    leak_canary = "k-mvp-credential-DO-NOT-LOG"
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        OLLAMA_API_KEY=leak_canary,
+        WATSONX_APIKEY=leak_canary,
+        ANTHROPIC_API_KEY=leak_canary,
+        LOGFIRE_TOKEN=leak_canary,
+    )
+
+    rendered = repr(settings) + "|" + str(settings)
+    assert leak_canary not in rendered, (
+        f"secret token leaked into repr/str output of Settings; "
+        f"all four secret fields MUST be SecretStr-typed. "
+        f"Rendered={rendered!r}"
+    )
+
+
+def test_secret_field_value_is_recoverable_via_get_secret_value(
+    settings_factory: SettingsFactory,
+) -> None:
+    """``SecretStr.get_secret_value()`` returns the raw token at SDK call sites.
+
+    The SecretStr wrapper hides values at repr time but MUST surface them
+    on demand for SDK construction (e.g., ``OllamaProvider(api_key=...)``,
+    ``logfire.configure(token=...)``). Asserting via
+    :meth:`SecretStr.get_secret_value` rather than ``str(settings.field)``
+    is the documented Pydantic v2 contract; relying on ``str(...)`` would
+    only return the redacted form.
+    """
+    raw = "k-recovered-secret"
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        LOGFIRE_TOKEN=raw,
+    )
+
+    assert settings.logfire_token is not None
+    assert settings.logfire_token.get_secret_value() == raw
+
+
 def test_get_settings_is_cached(
     monkeypatch: pytest.MonkeyPatch,
     settings_factory: SettingsFactory,  # used for env-clearing side-effect; clear cache below.

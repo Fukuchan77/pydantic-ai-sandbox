@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         pytest.param({}, "empty-body", id="empty-body"),
         pytest.param({"message": 123}, "wrong-type", id="wrong-type-int"),
         pytest.param({"message": ""}, "empty-string", id="empty-string"),
+        pytest.param({"message": "x" * 8193}, "too-long", id="exceeds-max-length"),
     ],
 )
 def test_chat_invalid_request_body_returns_422(
@@ -49,12 +50,18 @@ def test_chat_invalid_request_body_returns_422(
 ) -> None:
     """FastAPI request validation rejects invalid ``ChatRequest`` bodies (Req 3.6).
 
-    All three cases exercise the same surface (FastAPI body validation against
-    :class:`ChatRequest`) but cover three orthogonal failure modes: missing
-    required field, wrong type for the field, and a value that violates the
-    ``min_length=1`` constraint on ``message``. The ``case_id`` arg is a
-    breadcrumb for failure messages — pytest's parametrise ``id`` would
-    give the same context but only in collection output.
+    Four cases exercise the same surface (FastAPI body validation against
+    :class:`ChatRequest`) covering orthogonal failure modes: missing
+    required field, wrong type for the field, a value that violates
+    ``min_length=1``, and a value that violates ``max_length=8192`` (the
+    ceiling matches ``granite4.1:8b``'s default 8K context window — one
+    past it is enough to trip the validator). The ``max_length`` cap
+    exists to fail fast on body-amplification abuse before the prompt
+    reaches the agent: without it, a multi-MB body would be parsed and
+    forwarded to the provider, which would either refuse at protocol
+    level or burn tokens. The ``case_id`` arg is a breadcrumb for failure
+    messages — pytest's parametrise ``id`` would give the same context
+    but only in collection output.
     """
     client = app_with_overrides(TestModel())
 

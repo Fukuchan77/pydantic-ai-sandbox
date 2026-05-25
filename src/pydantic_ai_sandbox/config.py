@@ -19,7 +19,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import HttpUrl, model_validator
+from pydantic import HttpUrl, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["ollama", "watsonx", "anthropic", "bedrock", "fallback"]
@@ -81,15 +81,21 @@ class Settings(BaseSettings):
 
     ollama_base_url: HttpUrl = HttpUrl("http://localhost:11434")
     ollama_model_name: str | None = None
-    ollama_api_key: str | None = None
+    # Secret-typed credentials: ``SecretStr`` overrides ``__repr__`` /
+    # ``__str__`` to return ``"**********"`` so a stray ``logger.warning(
+    # ..., exc_info=True)`` or interpolated ``f"{settings}"`` cannot
+    # leak the raw value. Recover the literal at SDK call sites via
+    # :meth:`SecretStr.get_secret_value` (see ``llm/providers/ollama.py``
+    # and ``logging_setup.py``).
+    ollama_api_key: SecretStr | None = None
 
     watsonx_url: str | None = None
-    watsonx_apikey: str | None = None
+    watsonx_apikey: SecretStr | None = None
     watsonx_project_id: str | None = None
     watsonx_model_id: str | None = None
     watsonx_transport: Literal["sdk", "litellm"] | None = None
 
-    anthropic_api_key: str | None = None
+    anthropic_api_key: SecretStr | None = None
     anthropic_model: str | None = None
 
     bedrock_region: str | None = None
@@ -97,7 +103,7 @@ class Settings(BaseSettings):
     bedrock_inference_profile_id: str | None = None
 
     fallback_order: str = ""
-    logfire_token: str | None = None
+    logfire_token: SecretStr | None = None
     log_sensitive_payloads: bool = False
 
     @model_validator(mode="after")
