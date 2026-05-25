@@ -16,18 +16,32 @@ Hosts cross-cutting test infrastructure declared by tasks.md T3.1:
 The ``app_with_overrides`` builder composes three primitives:
 
 1. ``settings_factory(LLM_PROVIDER='ollama', OLLAMA_MODEL_NAME='dummy-...')``
-   — seats env so :class:`Settings` validation passes. The actual model is
-   replaced via override, so no Ollama HTTP traffic is generated.
+   — seats env so :class:`Settings` validation passes. The actual model
+   is replaced via FastAPI's dependency-override mechanism, so no Ollama
+   HTTP traffic is generated.
 2. ``get_settings.cache_clear()`` + ``get_chat_agent.cache_clear()`` — both
    are :func:`functools.lru_cache` singletons; clearing them makes the
-   freshly-overridden agent observable to the route handler. Without
-   this, a stale agent from a prior test would survive in cache and
-   ignore the fixture's override.
-3. ``ExitStack.enter_context(agent.override(model=...))`` — the override is
-   tracked by a per-test :class:`contextlib.ExitStack` so fixture teardown
-   exits all entered overrides in LIFO order. Calling the builder twice
-   inside the same test stacks overrides (last call wins), which is the
-   intuitive semantics for a "swap the model again" scenario.
+   per-test agent observable to the route handler. Without this, a stale
+   agent from a prior test would survive in cache and bypass the override
+   path below.
+3. ``app.dependency_overrides[get_chat_agent] = lambda: build_chat_agent(
+   model=model)`` — FastAPI-native dep override. Each call to the builder
+   rebuilds a fresh agent via :func:`build_chat_agent` with the test
+   ``model`` injected explicitly. Going through ``build_chat_agent``
+   (rather than ``Agent.override`` on a cached singleton) is **load-
+   bearing**: ``build_chat_agent``'s production path wraps
+   ``output_type`` in :class:`pydantic_ai.NativeOutput` whenever the
+   resolved model's profile reports ``supports_json_schema_output: True``
+   (i.e. the real :class:`pydantic_ai.models.ollama.OllamaModel`). The
+   :class:`pydantic_ai.models.test.TestModel` /
+   :class:`pydantic_ai.models.function.FunctionModel` profiles report
+   ``False`` for the same flag, so passing them via the explicit-model
+   branch deliberately routes the factory to keep plain
+   :class:`ChatResponse` and avoid ``UserError`` ("Native structured
+   output is not supported by this model.") at run time. ``Agent.override``
+   would have kept the production-built NativeOutput agent and only
+   swapped the model — that combination is exactly the run-time error
+   condition the new branch is designed to skip.
 
 The TestClient is built with ``raise_server_exceptions=False`` so the 5xx
 path (Req 3.4) is observable as a status code rather than a re-raised
@@ -47,19 +61,17 @@ focused on the request layer rather than re-testing T10.1's contract.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Protocol
 
 import pytest
 from fastapi.testclient import TestClient
 
+from pydantic_ai_sandbox.agents.chat_agent import build_chat_agent
 from pydantic_ai_sandbox.api.deps import get_chat_agent
 from pydantic_ai_sandbox.config import Settings, get_settings
 from pydantic_ai_sandbox.main import create_app
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from pydantic_ai.models import Model
 
 
@@ -146,23 +158,36 @@ def settings_factory(monkeypatch: pytest.MonkeyPatch) -> SettingsFactory:
 @pytest.fixture
 def app_with_overrides(
     settings_factory: SettingsFactory,
-) -> Iterator[AppWithOverrides]:
-    """Yield a builder that wires the chat route to an overridden agent.
+) -> AppWithOverrides:
+    """Yield a builder that wires the chat route to a per-test agent.
 
     The builder seats minimal Ollama-only env (so :class:`Settings`
-    validates), clears the ``get_settings`` and ``get_chat_agent`` caches,
-    enters ``agent.override(model=model)`` on the cached chat-agent
-    singleton, and returns a TestClient over a fresh FastAPI app with the
-    chat router included.
+    validates), clears the ``get_settings`` and ``get_chat_agent``
+    caches, builds a fresh agent via :func:`build_chat_agent` with the
+    caller-supplied ``model``, and registers an FastAPI
+    ``app.dependency_overrides`` entry so the route handler resolves
+    ``Depends(get_chat_agent)`` to the test agent instead of the
+    cached production singleton.
 
-    Calling the builder more than once in a single test stacks overrides
-    on the same agent singleton (the ExitStack tracks each entry); the
-    final teardown exits all of them in LIFO order. Each call also
-    rebuilds the FastAPI app, which is intentional — different tests may
-    want different ``raise_server_exceptions`` semantics in the future,
-    and rebuilding keeps that future change cheap.
+    Why ``build_chat_agent(model=...)`` rather than the previous
+    ``agent.override(model=...)``: the production path of
+    :func:`build_chat_agent` wraps :class:`ChatResponse` in
+    :class:`pydantic_ai.NativeOutput` whenever the resolved model's
+    profile reports ``supports_json_schema_output: True`` (the real
+    :class:`pydantic_ai.models.ollama.OllamaModel`). The test models
+    (:class:`pydantic_ai.models.test.TestModel`,
+    :class:`pydantic_ai.models.function.FunctionModel`) report ``False``
+    for that flag and would raise ``UserError`` at run time if reached
+    through a ``NativeOutput``-wrapped agent. Rebuilding via
+    :func:`build_chat_agent` with the explicit model arg deliberately
+    routes through the factory's "plain ``ChatResponse``" branch so
+    each test sees a wiring that matches its model's profile.
+
+    Calling the builder more than once in a single test rebuilds the
+    app and replaces the dependency override (last call wins); fixture
+    teardown is implicit because ``app.dependency_overrides`` lives on
+    the per-test app instance and is garbage-collected with it.
     """
-    stack = contextlib.ExitStack()
 
     def _build(model: Model) -> TestClient:
         settings_factory(
@@ -171,25 +196,27 @@ def app_with_overrides(
         )
         # Both caches must be cleared: get_settings so the route's
         # Depends chain reads the per-test env, get_chat_agent so the
-        # singleton is rebuilt on top of the new Settings before we
-        # enter the override below.
+        # singleton does not retain a NativeOutput-wrapped agent from a
+        # prior test (which would otherwise leak through to later runs
+        # that hit the real dep before the override below registers).
         get_settings.cache_clear()
         get_chat_agent.cache_clear()
 
-        agent = get_chat_agent()
-        stack.enter_context(agent.override(model=model))
+        # Fresh per-test agent built directly via the factory's
+        # explicit-model branch — this is the branch that keeps plain
+        # ``ChatResponse`` output_type and stays compatible with
+        # ``TestModel`` / ``FunctionModel`` profiles.
+        test_agent = build_chat_agent(model=model)
 
         # T10.2 folded ``include_router(chat_router)`` into create_app().
         # The chat route is wired automatically; the fixture stays focused
-        # on env seating, cache clearing, and agent override.
+        # on env seating, cache clearing, and dep-override registration.
         app = create_app()
+        app.dependency_overrides[get_chat_agent] = lambda: test_agent
         # raise_server_exceptions=False keeps the 5xx path (Req 3.4)
         # observable as a response status code rather than a re-raised
         # UnexpectedModelBehavior. The 422 path is unaffected — those
         # are client errors and never re-raised regardless of this flag.
         return TestClient(app, raise_server_exceptions=False)
 
-    try:
-        yield _build
-    finally:
-        stack.close()
+    return _build

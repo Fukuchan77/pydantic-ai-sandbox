@@ -1,11 +1,21 @@
 """Ollama provider builder (plan.md §2.3).
 
-Wraps Pydantic AI's ``OpenAIChatModel`` with an ``OllamaProvider`` so the
+Wraps Pydantic AI's ``OllamaModel`` over an ``OllamaProvider`` so the
 local Ollama daemon can be addressed through the OpenAI-compatible
 chat-completions surface (research.md R-1). Construction is pure: no
 HTTP call leaves this function — the Ollama HTTP round-trip is deferred
 until ``agent.run(...)`` so a stopped daemon cannot break process start
 (Req 2.6).
+
+``OllamaModel`` (vs the underlying ``OpenAIChatModel`` it subclasses) is
+load-bearing: its profile sets ``supports_json_schema_output: True``,
+which the agent factory keys off to wrap the output type in
+:class:`pydantic_ai.NativeOutput`. Self-hosted Ollama v0.5.0+ honours
+``response_format`` with ``json_schema`` via ``llama.cpp``'s
+grammar-constrained decoder, so the JSON-schema mode produces
+schema-valid output at generation time — without it, weaker local
+Granite-class models under-perform at the V2 default tool-mode
+structured output and the integration lane (T11.1) flakes.
 
 The model-ID literal is **not** spelled here; it lives in
 ``OLLAMA_MODEL_NAME`` and reaches us through :class:`Settings`. Hardcoded
@@ -18,7 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.providers.ollama import OllamaProvider
 
 if TYPE_CHECKING:
@@ -71,4 +81,4 @@ def _build_ollama(settings: Settings) -> Model:
         base_url=str(settings.ollama_base_url),
         api_key=api_key,
     )
-    return OpenAIChatModel(model_name=settings.ollama_model_name, provider=provider)
+    return OllamaModel(model_name=settings.ollama_model_name, provider=provider)
