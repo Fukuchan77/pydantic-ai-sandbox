@@ -209,7 +209,7 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 4
 _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3, 8.4, 8.6
 
-_Status:_ 🔄 In progress — **5.1, 5.2 ✅ Done (2026-06-08)**; 5.3–5.6 pending.
+_Status:_ 🔄 In progress — **5.1, 5.2, 5.3 ✅ Done (2026-06-08)**; 5.4–5.6 pending.
 
 - [x] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
@@ -219,7 +219,7 @@ _Status:_ 🔄 In progress — **5.1, 5.2 ✅ Done (2026-06-08)**; 5.3–5.6 pen
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.1
   _Requirements:_ 5.4, 6.1
-- [ ] 5.3 Implement `request` mapping `list[ModelMessage]` → OpenAI-shaped dicts, calling async `ModelInference.achat(...)`, and building `ModelResponse` from the returned dict (`choices[0].message` parts incl. tool_calls, `usage`, `finish_reason`, `id`) with exhaustive part handling and no silent drops
+- [x] 5.3 Implement `request` mapping `list[ModelMessage]` → OpenAI-shaped dicts, calling async `ModelInference.achat(...)`, and building `ModelResponse` from the returned dict (`choices[0].message` parts incl. tool_calls, `usage`, `finish_reason`, `id`) with exhaustive part handling and no silent drops
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.2
   _Requirements:_ 2.1, 2.7
@@ -291,6 +291,42 @@ _Status:_ 🔄 In progress — **5.1, 5.2 ✅ Done (2026-06-08)**; 5.3–5.6 pen
   side-effect SDK import needs both `# noqa: F401` and
   `# pyright: ignore[reportUnusedImport]`. Beware: `ruff --select RUF100 --fix`
   strips legitimate `# noqa: F401` because that run disables F401.
+
+- **5.3 (2026-06-08): `request` happy path landed — message mapping, `achat`,
+  response build.** 7 RED→GREEN tests added to `test_watsonx_sdk_construction.py`
+  (text/tool-call/mixed response mapping; full request-history mapping incl.
+  instructions→system, assistant tool_calls, tool returns; tool-definition
+  forwarding; multimodal-rejection). Canonical `mise run check` green: lint+format
+  clean, pyright 0 errors, **113 passed / 1 skipped**.
+- **Tool definitions ARE forwarded (deliberate scope call).** The agent backs
+  `/chat` with tool-mode structured output (`WatsonxSDKModel.profile` reports
+  `supports_json_schema_output: False`, so `build_chat_agent` keeps the plain
+  `ChatResponse` output tool, not `NativeOutput`) plus the `search_kb` tool.
+  Both reach `achat` via `tools=` mapped from `model_request_parameters`
+  (`function_tools + output_tools`); dropping them would silently disable tool
+  calling and break structured output. This is the "no silent drops" half of
+  Req 2.7 on the request side, beyond the literal "messages → dicts".
+- **System prompt arrives as `instructions`, not `SystemPromptPart`.** The agent
+  uses `instructions=...`, which pydantic_ai puts on `ModelRequest.instructions`.
+  The mapper takes the last non-`None` instructions and inserts one leading
+  `system` message (after any explicit system prompts), mirroring pydantic_ai's
+  OpenAI adapter.
+- **`ModelSettings` intentionally ignored** (temperature/max-tokens not mapped to
+  `achat` params) per `models/CLAUDE.md` rule 912 (silent-ignore unsupported
+  settings) — documented in the `request` docstring, not a silent gap.
+- **Pyright-strict gotchas for SDK-dict handling:** `ModelInference.achat` is
+  typed as a bare `dict` → `cast("dict[str, Any]", ...)` + a line-level
+  `# pyright: ignore[reportUnknownMemberType]` on the call. `dict.get` widens to
+  `Any | None`, so the `finish_reason` key is collapsed via an `Any`-typed local
+  before the map lookup. Exhaustive part dispatch uses union-narrowing (no
+  redundant trailing `isinstance` — pyright's `reportUnnecessaryIsInstance` flags
+  it; a future part-type addition surfaces as a type error instead).
+- **Coverage caveat (unchanged):** `mise run check` (bare pytest) is the green
+  gate. A standalone `pytest --cov` run on this file currently aborts with a
+  pytest-cov ↔ beartype import-hook circular import; CI's dedicated `--cov` step
+  and the ≥98% confirmation remain Task 11.1's job (plan 9.10 split). Defensive
+  branches not yet hit (`_build_response` no-choices raise, `ThinkingPart` skip,
+  unsupported-part raises) are owned by Task 7.1's exhaustive tests.
 
 ---
 

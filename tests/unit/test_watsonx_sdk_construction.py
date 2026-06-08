@@ -41,7 +41,18 @@ import httpx
 # ``TypeError`` at import time.
 import ibm_watsonx_ai.foundation_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import pytest
-from pydantic_ai.models import Model
+from pydantic_ai.messages import (
+    ImageUrl,
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
+from pydantic_ai.models import Model, ModelRequestParameters
+from pydantic_ai.tools import ToolDefinition
 
 from pydantic_ai_sandbox.config import Settings
 from pydantic_ai_sandbox.llm.providers.watsonx import WatsonxSDKModel
@@ -334,3 +345,320 @@ def test_build_client_missing_apikey_raises_typeerror(
 
     with pytest.raises(TypeError, match="watsonx_apikey is None"):
         model._build_client()  # pyright: ignore[reportPrivateUsage]
+
+
+# ---------------------------------------------------------------------------
+# Task 5.3 — ``request``: message mapping → ``achat`` → ``ModelResponse``
+#
+# ``request`` is the live inference path. It maps the pydantic_ai
+# ``list[ModelMessage]`` history (rendered instructions / system / user / tool
+# parts and prior assistant tool-calls) to OpenAI-shaped dicts, hands them to
+# the async ``ModelInference.achat`` built by ``_build_client`` (Task 5.2), and
+# rebuilds a ``ModelResponse`` from the returned dict — text parts, tool-call
+# parts, ``usage``, ``finish_reason`` and the provider response id (Req 2.7 /
+# 9.11). These tests stay hermetic by substituting ``_build_client`` with a fake
+# whose ``achat`` records the request payload and returns a canned response, so
+# the mapping is asserted in both directions with zero egress. Error wrapping is
+# Task 5.4; these exercise the happy path only.
+# ---------------------------------------------------------------------------
+
+
+class _FakeAchatClient:
+    """Stand-in for ``ModelInference`` recording the ``achat`` request payload.
+
+    ``achat`` captures every keyword argument into the shared ``recorder`` (so a
+    test can assert the mapped ``messages`` / ``tools``) and returns the canned
+    OpenAI-shaped ``response`` dict, mirroring the real async coroutine's
+    signature without any network call.
+    """
+
+    def __init__(self, response: dict[str, Any], recorder: dict[str, Any]) -> None:
+        self._response = response
+        self._recorder = recorder
+
+    async def achat(self, **kwargs: Any) -> dict[str, Any]:
+        self._recorder.update(kwargs)
+        return self._response
+
+
+def _stub_achat(
+    monkeypatch: pytest.MonkeyPatch,
+    model: WatsonxSDKModel,
+    response: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace ``model._build_client`` with a recording fake; return the recorder.
+
+    Keeps the request path hermetic: ``request`` calls ``_build_client`` then
+    awaits ``achat`` on the result, so swapping the builder for one that yields
+    a :class:`_FakeAchatClient` exercises the real mapping code without touching
+    the SDK or the network.
+    """
+    recorder: dict[str, Any] = {}
+    client = _FakeAchatClient(response, recorder)
+    monkeypatch.setattr(model, "_build_client", lambda: client)
+    return recorder
+
+
+_TEXT_RESPONSE: dict[str, Any] = {
+    "id": "chatcmpl-watsonx-text",
+    "choices": [
+        {
+            "index": 0,
+            "message": {"role": "assistant", "content": "Hello from watsonx"},
+            "finish_reason": "stop",
+        },
+    ],
+    "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+}
+
+_TOOL_CALL_RESPONSE: dict[str, Any] = {
+    "id": "chatcmpl-watsonx-tool",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_kb_1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_kb",
+                            "arguments": '{"query": "weather"}',
+                        },
+                    },
+                ],
+            },
+            "finish_reason": "tool_calls",
+        },
+    ],
+    "usage": {"prompt_tokens": 20, "completion_tokens": 4, "total_tokens": 24},
+}
+
+
+async def test_request_maps_text_response(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A text ``achat`` response maps to a ``ModelResponse`` text part (Req 2.7/9.11).
+
+    Pins the response-mapping contract: the assistant ``content`` becomes a
+    single :class:`TextPart`, ``usage`` maps prompt/completion → input/output
+    tokens, ``finish_reason`` normalises ``"stop"`` → ``"stop"``, ``id`` →
+    ``provider_response_id`` and the observability identity fields
+    (``model_name`` / ``provider_name``) are stamped.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hello")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert len(result.parts) == 1
+    part = result.parts[0]
+    assert isinstance(part, TextPart)
+    assert part.content == "Hello from watsonx"
+    assert result.finish_reason == "stop"
+    assert result.usage.input_tokens == 11
+    assert result.usage.output_tokens == 7
+    assert result.provider_response_id == "chatcmpl-watsonx-text"
+    assert result.model_name == WATSONX_TEST_MODEL_ID
+    assert result.provider_name == "watsonx"
+
+
+async def test_request_maps_tool_call_response(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A tool-call ``achat`` response maps to a ``ToolCallPart`` (Req 2.7/9.11).
+
+    The OpenAI-shaped ``tool_calls`` entry must surface as a
+    :class:`ToolCallPart` carrying the function name, the raw JSON arguments
+    (parsed on demand via ``args_as_dict``) and the provider tool-call id, with
+    ``finish_reason`` normalising ``"tool_calls"`` → ``"tool_call"``. Dropping
+    the tool call would silently break the agent's tool / structured-output loop.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, _TOOL_CALL_RESPONSE)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("天気は?")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert len(result.parts) == 1
+    part = result.parts[0]
+    assert isinstance(part, ToolCallPart)
+    assert part.tool_name == "search_kb"
+    assert part.tool_call_id == "call_kb_1"
+    assert part.args_as_dict() == {"query": "weather"}
+    assert result.finish_reason == "tool_call"
+
+
+async def test_request_maps_text_and_tool_calls_together(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """Text and tool-call parts coexist, in order, with no drops (Req 2.7).
+
+    A response carrying both ``content`` and ``tool_calls`` must yield a
+    :class:`TextPart` followed by a :class:`ToolCallPart` — neither is preferred
+    over nor silently swallows the other.
+    """
+    response: dict[str, Any] = {
+        "id": "chatcmpl-mixed",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "let me check",
+                    "tool_calls": [
+                        {
+                            "id": "c1",
+                            "type": "function",
+                            "function": {"name": "search_kb", "arguments": "{}"},
+                        },
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            },
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+    }
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, response)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert [type(p).__name__ for p in result.parts] == ["TextPart", "ToolCallPart"]
+
+
+async def test_request_maps_message_history_to_openai_dicts(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """instructions / user / assistant-tool-call / tool-return map to OpenAI roles (Req 2.7).
+
+    Drives the full request-side mapping: the rendered ``instructions`` become a
+    leading ``system`` message, a ``UserPromptPart`` becomes a ``user`` message,
+    a prior ``ModelResponse`` carrying a ``ToolCallPart`` becomes an
+    ``assistant`` message with an OpenAI ``tool_calls`` array, and a
+    ``ToolReturnPart`` becomes a ``tool`` message keyed by ``tool_call_id`` — no
+    part silently dropped.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(
+            parts=[UserPromptPart("天気は?")],
+            instructions="be helpful",
+        ),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="search_kb",
+                    args='{"query": "weather"}',
+                    tool_call_id="c1",
+                ),
+            ],
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="search_kb",
+                    content="sunny",
+                    tool_call_id="c1",
+                ),
+            ],
+        ),
+    ]
+
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [
+        {"role": "system", "content": "be helpful"},
+        {"role": "user", "content": "天気は?"},
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "search_kb",
+                        "arguments": '{"query": "weather"}',
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "sunny"},
+    ]
+
+
+async def test_request_forwards_tool_definitions(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """Tool definitions reach ``achat`` as OpenAI tool specs (Req 2.7).
+
+    The agent's tool-mode structured output and the ``search_kb`` tool only work
+    if the tool *definitions* from ``ModelRequestParameters`` are forwarded;
+    omitting them would silently disable tool calling for the watsonx provider.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    params = ModelRequestParameters(
+        function_tools=[
+            ToolDefinition(
+                name="search_kb",
+                parameters_json_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                description="kb lookup",
+            ),
+        ],
+    )
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    await model.request(messages, None, params)
+
+    assert recorder["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_kb",
+                "description": "kb lookup",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            },
+        },
+    ]
+
+
+async def test_request_rejects_multimodal_user_content(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """Non-text user content fails loud rather than being silently dropped (Req 2.7).
+
+    Vision / multimodal input is out of scope for the SDK transport; an
+    ``ImageUrl`` in the user prompt must raise ``NotImplementedError`` rather
+    than vanish from the mapped payload.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(
+            parts=[UserPromptPart(content=[ImageUrl(url="https://example.com/a.png")])],
+        ),
+    ]
+
+    with pytest.raises(NotImplementedError, match="multimodal"):
+        await model.request(messages, None, ModelRequestParameters())

@@ -329,3 +329,77 @@ installer. Re-run → clean RED (missing `_build_client`).
   `--select RUF100 --fix` stripped a legitimate `# noqa: F401` because F401 was
   disabled in that run. Re-add suppressions after a narrow autofix and re-run the
   full lint.
+
+### 5.3 — `request`: message mapping → `achat` → `ModelResponse` (2026-06-08)
+
+**What landed.** The live (non-streaming) inference path in `watsonx.py`:
+`request` maps the `list[ModelMessage]` history + tool definitions to the
+OpenAI-shaped payload `ModelInference.achat` expects, awaits it on the lazily
+built SDK client (5.2), and `_build_response` rebuilds a `ModelResponse` from the
+returned dict — text parts, tool-call parts, `usage`, `finish_reason`, `id`
+(Req 2.7 / 9.11). Mapping is factored into pure module helpers (`_map_messages`,
+`_map_request_part`, `_map_user_prompt`, `_map_assistant_message`, `_map_tools`,
+`_map_usage`, `_FINISH_REASON_MAP`) for testability and to keep `request` lean.
+
+**Scope decision — tool definitions are forwarded.** `WatsonxSDKModel.profile`
+reports `supports_json_schema_output: False`, so `build_chat_agent` keeps the
+plain `ChatResponse` output tool (tool-mode structured output) rather than
+`NativeOutput`. That output tool plus `search_kb` must reach `achat` via `tools=`
+(mapped from `function_tools + output_tools`), or tool calling / structured
+output silently breaks — the request-side half of "no silent drops" (Req 2.7).
+
+**System prompt source.** The agent uses `instructions=`, landing on
+`ModelRequest.instructions` (not a `SystemPromptPart`). The mapper takes the last
+non-`None` instructions and inserts one leading `system` message after explicit
+system prompts — mirroring pydantic_ai's OpenAI adapter.
+
+### TDD evidence (RED → GREEN)
+
+7 new tests in `test_watsonx_sdk_construction.py` (RED = `request`'s Task-4
+`NotImplementedError` placeholder; GREEN = all passing):
+
+- `test_request_maps_text_response` — text→`TextPart`, usage, `finish_reason`
+  `stop`, `id`→`provider_response_id`, `model_name`/`provider_name` stamped.
+- `test_request_maps_tool_call_response` — `tool_calls`→`ToolCallPart`
+  (name/args/id), `finish_reason` `tool_calls`→`tool_call`.
+- `test_request_maps_text_and_tool_calls_together` — both parts, in order.
+- `test_request_maps_message_history_to_openai_dicts` — instructions→system,
+  user, assistant `tool_calls`, tool return — exact payload.
+- `test_request_forwards_tool_definitions` — `function_tools`→OpenAI tool specs.
+- `test_request_rejects_multimodal_user_content` — `ImageUrl` → `NotImplementedError`.
+
+**Pyright-strict friction → fixes (no blind retry).** Three errors on first
+`mise run check`: (1) `ModelInference.achat` is typed as bare `dict` → wrapped in
+`cast("dict[str, Any]", ...)` with a line-level
+`# pyright: ignore[reportUnknownMemberType]`; (2) `dict.get` widening to
+`Any | None` failed the `_FINISH_REASON_MAP` key (`str`) → collapsed via an
+`Any`-typed local; (3) `reportUnnecessaryIsInstance` on the trailing
+`RetryPromptPart` / `ModelResponse` checks (closed unions) → switched to
+union-narrowing so a future part-type addition surfaces as a *type* error rather
+than a runtime drop. Also a `C901` complexity hit on `_map_messages` → extracted
+`_map_request_part`.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_watsonx_sdk_construction.py` | ✅ 15 passed |
+| Aggregate (canonical) | `mise run check` | ✅ **113 passed / 1 skipped**; ruff lint clean; ruff format clean; pyright **0 errors** |
+| Coverage (CI-only) | `pytest --cov` | ⚠️ deferred to Task 11.1 (plan 9.10 split). Standalone `--cov` on this file currently aborts with a pytest-cov ↔ beartype import-hook circular import; the canonical bare-pytest gate is green. Defensive branches (`_build_response` no-choices raise, `ThinkingPart` skip, unsupported-part raises) are owned by Task 7.1. |
+
+### Learnings for Act phase
+
+- **Mirror pydantic_ai's own OpenAI Chat adapter for OpenAI-shaped providers.**
+  `achat` returns OpenAI-shaped dicts, so `models/openai.py`'s `_process_response`
+  / `_map_messages` are the authoritative reference for finish-reason mapping
+  (`tool_calls`→`tool_call`), tool-call shape and the instructions-as-system-
+  message rule — re-deriving them risks subtle drops.
+- **The agent's output mode dictates the request contract.** Because the Model's
+  profile says `supports_json_schema_output: False`, structured output flows as an
+  *output tool*, not `response_format` — so `tools=` wiring (not JSON-schema) is
+  the load-bearing path. Verify a provider's profile before deciding what the
+  request must carry.
+- **Prefer union-narrowing over a redundant final `isinstance` under pyright
+  strict.** A trailing `isinstance` on the last union member trips
+  `reportUnnecessaryIsInstance`; relying on narrowing keeps exhaustiveness a
+  compile-time guarantee (a new member becomes a type error) without a dead branch.
