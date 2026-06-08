@@ -131,3 +131,43 @@ Full-suite run after GREEN: **4 failed**. Investigated rather than retried.
   (`anthropic`/`bedrock`), never a provider under active promotion.
 - Adding the two timeout keys to `_MANAGED_ENV_KEYS` (residual of Task 3.1) was
   required for the default-timeout test to be hermetic; pulled forward here.
+
+---
+
+## Task 3 — Test infrastructure (fixtures & doubles) — 2026-06-08
+
+**Scope:** 3.1 (`tests/conftest.py`) + 3.2 (`tests/support/model_fakes.py`).
+
+### What landed
+
+- **3.1 fixture:** `watsonx_settings_factory` + `WATSONX_TEST_{URL,MODEL_ID,APIKEY,PROJECT_ID}`
+  constants + `WatsonxSettingsFactory` Protocol in `conftest.py`. Seats a valid
+  watsonx cred set + `LLM_PROVIDER=watsonx`, applies caller overrides (incl.
+  `None` → unset), delegates to `settings_factory` for ambient-env isolation.
+  The `_MANAGED_ENV_KEYS` half was already done in Task 2 (timeout keys pulled
+  forward there) — no change needed.
+- **3.2 double:** `watsonx_function_model_failing(*, message, model_name="watsonx")`
+  in `model_fakes.py`, a thin wrapper over `function_model_raising` pre-built
+  with `ModelAPIError(model_name="watsonx")` so `FallbackModel` recovers it.
+
+### TDD evidence (RED → GREEN)
+
+- RED: `tests/unit/test_watsonx_test_infrastructure.py` failed at collection
+  (`ImportError: cannot import name 'WATSONX_TEST_APIKEY'`) — symbols absent.
+- GREEN: 6 tests pass after implementing fixture + double.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| New infra tests | `uv run pytest tests/unit/test_watsonx_test_infrastructure.py -q` | ✅ 6 passed |
+| Aggregate | `mise run check` (lint+format+typecheck+test) | ✅ 97 passed / 1 skipped; ruff clean; pyright 0 errors |
+
+### Learnings for Act phase
+
+- Test infrastructure is TDD-able: assert the fixture/double's *behaviour*
+  (valid Settings built; `ModelAPIError` recovered by `FallbackModel`) in a
+  dedicated test that fails at import before the support code exists.
+- Reuse-over-duplicate: 3.2 specialises `function_model_raising` rather than
+  reimplementing a raising `FunctionModel`, keeping the "raise `ModelAPIError`
+  → recover; else → propagate" failover contract in one place.

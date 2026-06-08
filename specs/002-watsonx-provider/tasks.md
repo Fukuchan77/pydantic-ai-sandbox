@@ -119,19 +119,39 @@ _Boundary:_ `tests/conftest.py`, `tests/support/model_fakes.py`
 _Depends:_ none
 _Requirements:_ 7.4
 
-- [ ] 3.1 (P) Add the watsonx env vars (`WATSONX_APIKEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `WATSONX_MODEL_ID`, `WATSONX_TRANSPORT`, `WATSONX_TIMEOUT_CONNECT`, `WATSONX_TIMEOUT_READ`) to `_MANAGED_ENV_KEYS` and add watsonx fixtures for unit tests
+- [x] 3.1 (P) Add the watsonx env vars (`WATSONX_APIKEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`, `WATSONX_MODEL_ID`, `WATSONX_TRANSPORT`, `WATSONX_TIMEOUT_CONNECT`, `WATSONX_TIMEOUT_READ`) to `_MANAGED_ENV_KEYS` and add watsonx fixtures for unit tests
   _Boundary:_ `tests/conftest.py`
   _Depends:_ none
   _Requirements:_ 7.4
-- [ ] 3.2 (P) Add watsonx `FunctionModel` test doubles that raise `ModelAPIError` for failover tests
+- [x] 3.2 (P) Add watsonx `FunctionModel` test doubles that raise `ModelAPIError` for failover tests
   _Boundary:_ `tests/support/model_fakes.py`
   _Depends:_ none
   _Requirements:_ 7.4
 
+_Status:_ ✅ Done (2026-06-08). 6 new infra tests (RED→GREEN); `mise run check` green (97 passed / 1 skipped, lint+format+pyright clean).
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **3.1's `_MANAGED_ENV_KEYS` half was already landed by Task 2** (see Task 2
+  notes: the `WATSONX_TIMEOUT_CONNECT/READ` keys were added there for the
+  default-timeout test's determinism, alongside the other five watsonx keys).
+  3.1's net-new work was therefore the **fixture**: `watsonx_settings_factory`
+  + canonical `WATSONX_TEST_*` constants in `conftest.py`. The factory layers
+  caller overrides on a valid watsonx cred set and delegates to
+  `settings_factory`, inheriting ambient-env isolation. `None` threads through
+  to "unset" so Task 7.8 can drive the credential gate via the same builder.
+- **3.2 is a thin specialisation, not a parallel reimplementation.**
+  `watsonx_function_model_failing` wraps the existing `function_model_raising`
+  primitive with a pre-built `ModelAPIError(model_name="watsonx")`. Reusing the
+  primitive keeps the single failover contract (raise `ModelAPIError` → recover;
+  anything else → propagate) in one place. The `model_name="watsonx"` default is
+  what surfaces in the `FallbackModel` chain span for Task 7.6's
+  `FALLBACK_ORDER=ollama,watsonx` assertion.
+- **TDD on test infrastructure:** validated the fixture+double behaviourally in
+  a dedicated `tests/unit/test_watsonx_test_infrastructure.py` (RED = import
+  error; GREEN = 6 passing). This file is intentionally separate from Task 7's
+  seven `test_watsonx_*.py` files (no collision) and also gives the new support
+  code direct coverage for the 98% ratchet.
 
 ---
 
