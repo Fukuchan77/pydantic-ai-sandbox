@@ -472,3 +472,56 @@ Mapping helpers stay outside the try (before/after) so `NotImplementedError` /
 - **Scope the catch; test the boundary.** A boundary test asserting a non-API
   error propagates unwrapped documents that we don't mask programming bugs as
   recoverable model errors — over-catching would silently trigger failover on bugs.
+
+---
+
+## Task 5.5 — `request_stream` deliberate out-of-scope fail-loud — 2026-06-08
+
+### Plan (Do-phase intent)
+
+Override `WatsonxSDKModel.request_stream` to raise `NotImplementedError` with a
+watsonx-specific *out-of-scope* message (streaming is out of scope — spec.md
+"Out of Scope"; `/chat` issues a single non-streaming `request`). Req 2.1.
+
+### What changed
+
+- `src/.../watsonx.py`: added the `request_stream` override
+  (`@asynccontextmanager`, base-mirroring signature incl. `run_context`), raising
+  `NotImplementedError` before the unreachable generator `yield`. Added
+  `contextlib.asynccontextmanager` (runtime) + TYPE_CHECKING
+  `AsyncGenerator` / `RunContext` / `StreamedResponse` imports.
+- `tests/unit/test_watsonx_sdk_construction.py`: +1 test
+  (`test_request_stream_raises_out_of_scope`) entering the async CM and asserting
+  `NotImplementedError` matching `"out of scope"`.
+
+### Design decisions (root-caused, not guessed)
+
+- **Genuine RED despite the ABC already raising.** `Model.request_stream`'s
+  default raises a *generic* `NotImplementedError` ("Streamed requests not
+  supported by this WatsonxSDKModel"). Matching on `"out of scope"` (absent from
+  the base message, present in ours) makes the RED real — it fails against the
+  inherited default and passes only once the deliberate override lands.
+- **`AsyncGenerator`, not `AsyncIterator`, return annotation.** The base ABC
+  annotates `-> AsyncIterator[StreamedResponse]`, but pyright-strict flags that
+  combined with `@asynccontextmanager` as `reportDeprecated` (use
+  `AsyncGenerator`). `AsyncGenerator` is a subtype of `AsyncIterator`, so the
+  override stays Liskov-covariant while clearing the type gate.
+- **Signature mirrors the base exactly** (incl. `run_context=None`) for LSP
+  compatibility; `del` of all params documents intentional non-use; the trailing
+  `yield` (unreachable, `# pragma: no cover`) keeps it a generator for the
+  `@asynccontextmanager` contract.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task test | `uv run pytest ...::test_request_stream_raises_out_of_scope` | ✅ RED→GREEN (1 passed) |
+| Aggregate (canonical) | `mise run check` | ✅ **122 passed / 1 skipped**; ruff lint `All checks passed!`; ruff format `44 files already formatted`; pyright **0 errors, 0 warnings** |
+
+### Learnings for Act phase
+
+- **Override an ABC default only with a distinguishing message** — otherwise the
+  RED is hollow (the base already raises). Assert on text unique to the override.
+- **`@asynccontextmanager` + return annotation is a pyright-strict trap**: prefer
+  `AsyncGenerator[T]` over `AsyncIterator[T]` to avoid `reportDeprecated`, even
+  when mirroring an upstream ABC that still uses `AsyncIterator`.
