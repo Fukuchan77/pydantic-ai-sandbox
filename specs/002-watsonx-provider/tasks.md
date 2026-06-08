@@ -161,23 +161,45 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`, `src/pydantic_ai
 _Depends:_ 1, 2
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 7.3, 9.1, 9.2, 12.1
 
-- [ ] 4.1 Create the watsonx provider module with module docstring stating its boundary contract (what it does NOT own: env parsing/validation, fallback composition, litellm install)
+- [x] 4.1 Create the watsonx provider module with module docstring stating its boundary contract (what it does NOT own: env parsing/validation, fallback composition, litellm install)
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 1
   _Requirements:_ 1.3
-- [ ] 4.2 Remove `"watsonx"` from `_MVP_STUB_PROVIDERS` and route the `"watsonx"` case to `return _build_watsonx(settings)`, preserving the silent-drop logic for the remaining stubs
+- [x] 4.2 Remove `"watsonx"` from `_MVP_STUB_PROVIDERS` and route the `"watsonx"` case to `return _build_watsonx(settings)`, preserving the silent-drop logic for the remaining stubs
   _Boundary:_ `src/pydantic_ai_sandbox/llm/factory.py`
   _Depends:_ 4.1
   _Requirements:_ 1.2, 1.3, 7.3
-- [ ] 4.3 Update the dispatch test so the watsonx case asserts a Model instance (no `NotImplementedError`), keep anthropic/bedrock asserting `NotImplementedError`, assert the `LLMProvider` vocabulary unchanged, and update/remove `test_mvp_stub_providers_lock` — atomic with 4.2
+- [x] 4.3 Update the dispatch test so the watsonx case asserts a Model instance (no `NotImplementedError`), keep anthropic/bedrock asserting `NotImplementedError`, assert the `LLMProvider` vocabulary unchanged, and update/remove `test_mvp_stub_providers_lock` — atomic with 4.2
   _Boundary:_ `tests/unit/test_factory_dispatch.py`
   _Depends:_ 4.2
   _Requirements:_ 1.1, 1.4, 9.1, 9.2, 12.1
 
+_Status:_ ✅ Done (2026-06-08). RED→GREEN on `test_factory_dispatch.py` (3 failing → 8 passing); full gate green (98 passed / 1 skipped, lint+format clean, pyright 0 errors).
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **Activation requires a minimal `WatsonxSDKModel` skeleton — Task 4.3 forced
+  it.** 4.3 mandates the dispatch test assert `isinstance(get_model("watsonx"),
+  Model)`, so `_build_watsonx` had to return a real `Model`, not a placeholder.
+  Verified against the installed `pydantic-ai 2.0.0b6` ABC: the abstract members
+  are `{model_name, system, request}` (`request_stream` is **not** abstract), so
+  the minimal instantiable skeleton implements exactly those three. The lazy SDK
+  client, the `achat` request body, `ModelAPIError` wrapping and the `request_stream`
+  override land in **Task 5** — `request` here raises `NotImplementedError`
+  (fail-loud, never exercised by the dispatch test). This means Task 5.1's
+  skeleton (`__init__` + `system`/`model_name`) is effectively already landed;
+  5.1 should verify/extend rather than re-create.
+- **Base-class attribute clash avoided.** `Model.__init__` stores `self._settings`
+  for per-request `ModelSettings` defaults. The plan's contract used `self._settings`
+  for the app `Settings`, which would clobber that slot and corrupt model-settings
+  merging. The app `Settings` is therefore held under `self._app_settings`, and
+  `super().__init__()` is called so the base slots initialise normally.
+- **`_MVP_STUB_PROVIDERS` dual-lock honoured.** The frozenset (now
+  `{"anthropic", "bedrock"}`) is the same constant `fallback._build_fallback`
+  reads to silent-drop stubs; the factory edit and the constant-lock test were
+  changed atomically (4.2 ⇄ 4.3) so the guard cannot drift. Added a
+  `test_llm_provider_vocabulary_unchanged` guard proving de-stubbing did not
+  widen/narrow the `LLMProvider` literal (all five names remain valid).
 
 ---
 

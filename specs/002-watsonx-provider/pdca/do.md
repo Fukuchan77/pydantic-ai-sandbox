@@ -171,3 +171,55 @@ Full-suite run after GREEN: **4 failed**. Investigated rather than retried.
 - Reuse-over-duplicate: 3.2 specialises `function_model_raising` rather than
   reimplementing a raising `FunctionModel`, keeping the "raise `ModelAPIError`
   → recover; else → propagate" failover contract in one place.
+
+---
+
+## Task 4 — Provider activation & factory dispatch (2026-06-08)
+
+Subtasks 4.1 → 4.2 → 4.3 (a chain; 4.2 ⇄ 4.3 atomic).
+
+### What landed
+
+- **4.1** `llm/providers/watsonx.py` rewritten: module docstring now states the
+  boundary contract (does NOT own env parsing/validation, fallback composition,
+  or litellm install). Added a minimal `WatsonxSDKModel(Model)` activation
+  skeleton — I/O-free `__init__` storing `Settings` under `_app_settings`,
+  `system` → `"watsonx"`, `model_name` → `watsonx_model_id` (None-guard).
+- **4.2** `llm/factory.py`: dropped `"watsonx"` from `_MVP_STUB_PROVIDERS`
+  (now `{"anthropic", "bedrock"}`); watsonx branch changed from a `Never` call
+  to `return _build_watsonx(settings)`; stale stub docstrings corrected.
+- **4.3** `tests/unit/test_factory_dispatch.py`: watsonx case now asserts a
+  `Model` instance; anthropic/bedrock still assert `NotImplementedError`;
+  constant-lock test updated to `{"anthropic", "bedrock"}`; added
+  `test_llm_provider_vocabulary_unchanged` (all five providers still valid).
+
+### Decisions / root-cause notes
+
+- **Skeleton was mandatory, not scope creep.** 4.3 requires a real `Model` from
+  `_build_watsonx`. Confirmed against `pydantic-ai 2.0.0b6`: abstract members =
+  `{model_name, system, request}` (`request_stream` NOT abstract). The skeleton
+  implements exactly those; `request` raises `NotImplementedError` until Task 5.
+- **`_app_settings`, not `_settings`.** `Model.__init__` reserves `self._settings`
+  for `ModelSettings`; storing the app `Settings` there would corrupt settings
+  merging. Deviated from the plan contract (which used `_settings`) deliberately.
+
+### TDD evidence (RED → GREEN)
+
+- RED: `uv run pytest tests/unit/test_factory_dispatch.py -q` → 3 failed, 6 passed
+  (watsonx → `NotImplementedError`; stub constant still held `watsonx`).
+- GREEN: same command → 8 passed after 4.1 + 4.2.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Dispatch tests | `uv run pytest tests/unit/test_factory_dispatch.py -q` | ✅ 8 passed |
+| Aggregate | `mise run check` (lint+format+typecheck+test) | ✅ 98 passed / 1 skipped; ruff clean; pyright 0 errors |
+
+### Learnings for Act phase
+
+- When an "activation" task asserts a real `Model`, the minimal ABC skeleton is
+  part of that task even if a later task "owns" the full Model — pin the abstract
+  surface against the installed lib version, not the plan prose.
+- Plan contracts can collide with library internals (`_settings`); verify base
+  `__init__` attributes before copying a contract verbatim.
