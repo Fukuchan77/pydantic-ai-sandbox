@@ -6,7 +6,10 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi",
-    "ibm-watsonx-ai",
+    # ADR-1 (spec 002-watsonx-provider): 1.5.12 cannot import
+    # foundation_models.ModelInference on Python 3.14.5 (StrEnum/utils.py:1191
+    # TypeError); >=1.5.13 (requires_python <3.15,>=3.11) fixes the import.
+    "ibm-watsonx-ai>=1.5.13",
     "logfire[fastapi,httpx]",
     # V2 Beta is the project target; the slim[openai] extra pulls the
     # OpenAI-compatible chat client used by the Ollama provider (Plan AD-6 / research.md R-1).
@@ -15,6 +18,13 @@ dependencies = [
     "pydantic-settings",
     "uvicorn",
 ]
+
+# Optional LiteLLM transport for the watsonx provider (WATSONX_TRANSPORT=litellm,
+# Req 2.6 / 11.5). Kept out of the default install to minimize supply-chain
+# footprint; the builder import-guards on it and SDK-only deployments never
+# need it. Install via `uv sync --extra litellm`.
+[project.optional-dependencies]
+litellm = ["litellm"]
 
 [dependency-groups]
 dev = [
@@ -124,6 +134,9 @@ branch = true
 # set to measured−5pt = 93 to absorb noise from upcoming watsonx/Anthropic/Bedrock
 # stubs being replaced (Spec 002-multi-provider). Plan R-6 ratchet adds +5pt per
 # Req-implementation task; raise this together with each provider-impl task.
-fail_under = 93
+# Raised 93 → 98 for the watsonx provider implementation (spec 002-watsonx-provider
+# task 1.1, Req 9.10): the new SDK/LiteLLM branches must be well-covered or the
+# gate regresses (see plan.md §Performance Goals / tech.md coverage ratchet).
+fail_under = 98
 show_missing = true
 skip_covered = false

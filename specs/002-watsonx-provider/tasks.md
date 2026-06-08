@@ -22,20 +22,40 @@ Conventions:
 _Boundary:_ `pyproject.toml`, `.github/dependabot.yml`
 _Depends:_ none
 _Requirements:_ 9.10, 11.4, 11.5
+_Status:_ ✅ Done (2026-06-08) — see Implementation Notes.
 
-- [ ] 1.1 (P) Bump `ibm-watsonx-ai` 1.5.12 → `>=1.5.13` (ADR-1 py3.14 import fix), add `litellm` under `[project.optional-dependencies]`, raise `[tool.coverage.report] fail_under` 93 → 98, then regenerate `uv.lock` via `uv sync` and confirm `ibm-watsonx-ai>=1.5.13` imports cleanly on Python 3.14.5
+> **Status:** Done (2026-06-08). RED captured (1.5.12 `TypeError` at
+> `utils/utils.py:1191` importing `ModelInference` on py3.14.5), GREEN verified
+> (1.5.13 imports cleanly). `uv.lock` regenerated; litellm 1.89.0rc1 locked.
+
+- [x] 1.1 (P) Bump `ibm-watsonx-ai` 1.5.12 → `>=1.5.13` (ADR-1 py3.14 import fix), add `litellm` under `[project.optional-dependencies]`, raise `[tool.coverage.report] fail_under` 93 → 98, then regenerate `uv.lock` via `uv sync` and confirm `ibm-watsonx-ai>=1.5.13` imports cleanly on Python 3.14.5
   _Boundary:_ `pyproject.toml`
   _Depends:_ none
   _Requirements:_ 9.10, 11.5
-- [ ] 1.2 (P) Register `ibm-watsonx-ai` and `litellm` in dependabot config with supply-chain-watch labels
+- [x] 1.2 (P) Register `ibm-watsonx-ai` and `litellm` in dependabot config with supply-chain-watch labels
   _Boundary:_ `.github/dependabot.yml`
   _Depends:_ none
   _Requirements:_ 11.4
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- ADR-1 confirmed empirically: `ibm-watsonx-ai==1.5.12` raises
+  `TypeError: object.__init__() takes exactly one argument` at
+  `ibm_watsonx_ai/utils/utils.py:1191` when constructing `StrEnum` members
+  while importing `foundation_models.ModelInference` on Python 3.14.5.
+  `1.5.13` imports cleanly (verified). `litellm` resolved to `1.89.0rc1`.
+- **Coverage-ratchet ordering caveat:** raising `fail_under` 93 → 98 in 1.1
+  outruns the not-yet-written watsonx tests (tasks 5–7). Current measured
+  coverage is **97.40%**. `mise run test` is bare `pytest` (no `--cov`, per
+  Constitution V) so the canonical `mise run check` gate stays GREEN; only
+  CI's dedicated `pytest --cov` step (ci.yml:85) reports red until task 11.1
+  confirms ≥98%. This matches the plan's Req 9.10 → (1.1 raise, 11.1 confirm)
+  split. Revert to 93 only if intermediate-commit CI must be green.
+- Dependabot v2 cannot apply per-dependency labels (a second `pip` block for
+  `/` overlaps and is rejected; `labels` are per-block). `ibm-watsonx-ai`
+  therefore joins `litellm` on the watchlist via `groups.exclude-patterns`
+  (forces standalone, never-auto-grouped PRs); the `supply-chain-watch` label
+  itself is applied by the external label-bump workflow.
 
 ---
 
