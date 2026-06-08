@@ -209,13 +209,13 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 4
 _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3, 8.4, 8.6
 
-_Status:_ 🔄 In progress — **5.1 ✅ Done (2026-06-08)**; 5.2–5.6 pending.
+_Status:_ 🔄 In progress — **5.1, 5.2 ✅ Done (2026-06-08)**; 5.3–5.6 pending.
 
 - [x] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 4
   _Requirements:_ 1.5, 3.4, 8.1, 8.3, 8.4, 8.6
-- [ ] 5.2 Implement lazy `_build_client` constructing `APIClient(credentials=..., project_id=..., async_httpx_client=httpx.AsyncClient(timeout=Timeout(connect, read)))` then `ModelInference(model_id=..., api_client=..., max_retries=0, validate=False)`; client built on first request to keep `__init__` I/O-free. `validate=False` is mandatory (plan.md §Entity 2): the default `validate=True` fires an extra network validation round-trip on the first request, adding latency and a second failure surface
+- [x] 5.2 Implement lazy `_build_client` constructing `APIClient(credentials=..., project_id=..., async_httpx_client=httpx.AsyncClient(timeout=Timeout(connect, read)))` then `ModelInference(model_id=..., api_client=..., max_retries=0, validate=False)`; client built on first request to keep `__init__` I/O-free. `validate=False` is mandatory (plan.md §Entity 2): the default `validate=True` fires an extra network validation round-trip on the first request, adding latency and a second failure surface
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.1
   _Requirements:_ 5.4, 6.1
@@ -259,6 +259,38 @@ _Status:_ 🔄 In progress — **5.1 ✅ Done (2026-06-08)**; 5.2–5.6 pending.
   CI's dedicated `pytest --cov` still reports <98% (95.26%) because `watsonx.py`
   lines 126-128 are the `request` `NotImplementedError` body owned by Tasks
   5.3/5.4; the ratchet is confirmed at Task 11.1, per the plan's 9.10 split.
+
+- **5.2 (2026-06-08): lazy `_build_client` landed; SDK imported function-locally,
+  not at module scope.** `factory.py` imports `watsonx.py` unconditionally, so a
+  module-level `import ibm_watsonx_ai` would force the heavy SDK on every
+  deployment (incl. ollama-only). The SDK import therefore lives *inside*
+  `_build_client`, which is itself only reached on the first request — keeping
+  both module import and `__init__` cheap and I/O-free. The client is memoised on
+  `self._client` (added to `__init__`; `ModelInference | None`).
+- **`httpx.Timeout(connect, read)` is invalid** — httpx rejects a partial spec
+  ("must include a default, or set all four"). Resolved as
+  `httpx.Timeout(read, connect=connect)`: the read value seeds the
+  read/write/pool default and `connect` overrides the connect phase. Empirically
+  confirmed before coding (the tasks.md/plan literal `Timeout(connect, read)`
+  would have raised at runtime).
+- **Hermetic test of a network-authenticating constructor.** `APIClient`
+  authenticates at construction, so the 5 RED→GREEN tests substitute
+  `Credentials`/`APIClient`/`ModelInference`/`httpx.AsyncClient` with recording
+  spies and assert the *wiring* (`max_retries=0`, `validate=False`, sourced
+  `model_id`/`project_id`/url, unwrapped apikey, timeout phases) with zero
+  egress. **Ordering gotcha:** the SDK's `httpx_wrapper` does
+  `class HTTPXAsyncClient(httpx.AsyncClient)` at import time — a function-typed
+  spy installed *before* that import raises `TypeError: argument 'code' must be
+  code, not str`. Fixed by importing `ibm_watsonx_ai.foundation_models` at the
+  test module's top (binding the subclass to the real `httpx.AsyncClient`) and
+  patching `httpx.AsyncClient` last.
+- **Lint/typecheck friction (recorded for 5.3+):** `SLF001` is *not* in the ruff
+  select set, so private-method access from tests needs no `# noqa` (a stray one
+  trips `RUF100`); but pyright strict *does* flag it — each `model._build_client()`
+  call carries `# pyright: ignore[reportPrivateUsage]` (tech.md convention). The
+  side-effect SDK import needs both `# noqa: F401` and
+  `# pyright: ignore[reportUnusedImport]`. Beware: `ruff --select RUF100 --fix`
+  strips legitimate `# noqa: F401` because that run disables F401.
 
 ---
 
