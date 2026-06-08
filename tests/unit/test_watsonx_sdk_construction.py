@@ -41,6 +41,8 @@ import httpx
 # ``TypeError`` at import time.
 import ibm_watsonx_ai.foundation_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import pytest
+from ibm_watsonx_ai.wml_client_error import WMLClientError
+from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.messages import (
     ImageUrl,
     ModelMessage,
@@ -661,4 +663,170 @@ async def test_request_rejects_multimodal_user_content(
     ]
 
     with pytest.raises(NotImplementedError, match="multimodal"):
+        await model.request(messages, None, ModelRequestParameters())
+
+
+# ---------------------------------------------------------------------------
+# Task 5.4 — SDK-failure wrapping into ``ModelAPIError`` (no retries)
+#
+# ``request`` MUST translate every SDK failure — the SDK base
+# ``WMLClientError`` (and its subclasses: ``ApiRequestFailure``,
+# ``AuthenticationError``, rate-limit, …) and the underlying httpx errors
+# (``TimeoutException`` / ``ConnectError`` / any ``httpx.HTTPError``) — into
+# :class:`pydantic_ai.exceptions.ModelAPIError`. ``FallbackModel``'s default
+# ``fallback_on`` is ``(ModelAPIError,)`` (pydantic_ai 2.0.0b6), so a raw SDK or
+# httpx error would *not* trigger failover and Req 7.1/7.2/9.8 would break in the
+# real chain even while passing in isolation (plan.md Entity 2 — "the single
+# highest-risk correctness point in the feature"). There are **no provider-level
+# retries** (Req 6.1/6.3/6.4): the failing call is made exactly once. The error
+# wrapping covers both the lazy first-call client build (Req 4.4 — unreachable
+# endpoint / DNS failure on the first API call) and the ``achat`` call itself.
+# These tests stay hermetic by substituting ``_build_client`` / ``achat`` with
+# fakes that raise; no SDK construction or network egress occurs.
+# ---------------------------------------------------------------------------
+
+
+class _FakeSDKSubError(WMLClientError):
+    """A stand-in ``WMLClientError`` subclass with the plain base constructor.
+
+    The real SDK subclasses (``ApiRequestFailure`` / ``AuthenticationError``)
+    require a ``response`` argument, which is awkward to fabricate hermetically.
+    This local subclass inherits ``WMLClientError``'s ``(error_msg, ...)``
+    constructor unchanged, so it proves the ``except WMLClientError`` catch
+    covers *every* SDK error subclass without coupling the test to a specific
+    SDK error's signature.
+    """
+
+
+class _FailingAchatClient:
+    """Stand-in for ``ModelInference`` whose ``achat`` always raises.
+
+    Counts invocations so a test can prove the failing call is made exactly
+    once — the no-retry contract (Req 6.1): there is no provider-level retry
+    loop, the first failure propagates immediately.
+    """
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+        self.calls = 0
+
+    async def achat(self, **_kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        raise self._exc
+
+
+def _stub_failing_achat(
+    monkeypatch: pytest.MonkeyPatch,
+    model: WatsonxSDKModel,
+    exc: Exception,
+) -> _FailingAchatClient:
+    """Replace ``model._build_client`` with a client whose ``achat`` raises ``exc``."""
+    client = _FailingAchatClient(exc)
+    monkeypatch.setattr(model, "_build_client", lambda: client)
+    return client
+
+
+@pytest.mark.parametrize(
+    ("exc", "label"),
+    [
+        (WMLClientError("watsonx api request failed"), "WMLClientError"),
+        (_FakeSDKSubError("auth rejected"), "WMLClientError subclass"),
+        (httpx.ReadTimeout("read timed out"), "httpx timeout"),
+        (httpx.ConnectError("connection refused"), "httpx connect error"),
+        (httpx.HTTPError("generic transport error"), "httpx.HTTPError base"),
+    ],
+)
+async def test_request_wraps_sdk_failures_in_model_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+    exc: Exception,
+    label: str,
+) -> None:
+    """Every SDK / httpx failure from ``achat`` surfaces as ``ModelAPIError``.
+
+    Pins the load-bearing failover contract (plan.md Entity 2): the SDK base
+    ``WMLClientError`` and any subclass, plus the underlying httpx errors
+    (timeout → Req 5.6, connect → Req 4.4, and the ``HTTPError`` base covering
+    the rest), are all caught and re-raised as
+    :class:`pydantic_ai.exceptions.ModelAPIError` so ``FallbackModel.fallback_on``
+    recovers them. The original error is chained via ``__cause__`` (debugging is
+    not lost) and its class name is carried in the message; ``model_name`` is the
+    configured watsonx model so the span's ``gen_ai.request.model`` stays correct.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_failing_achat(monkeypatch, model, exc)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(ModelAPIError) as excinfo:
+        await model.request(messages, None, ModelRequestParameters())
+
+    assert excinfo.value.__cause__ is exc, label
+    assert excinfo.value.model_name == WATSONX_TEST_MODEL_ID
+    assert type(exc).__name__ in str(excinfo.value)
+
+
+async def test_request_wraps_first_call_client_build_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A failure building the SDK client on the first call wraps too (Req 4.4).
+
+    The SDK client is built lazily on the first request and its ``APIClient``
+    authenticates over the network, so an unreachable endpoint or DNS failure
+    surfaces from ``_build_client`` — not ``achat``. That first-call failure must
+    also become a :class:`ModelAPIError` so failover still recovers it.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    boom = httpx.ConnectError("name resolution failed")
+
+    def _raise() -> Any:
+        raise boom
+
+    monkeypatch.setattr(model, "_build_client", _raise)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(ModelAPIError) as excinfo:
+        await model.request(messages, None, ModelRequestParameters())
+
+    assert excinfo.value.__cause__ is boom
+
+
+async def test_request_does_not_retry_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """The failing ``achat`` is invoked exactly once — no retries (Req 6.1/6.3/6.4).
+
+    Provider-level resilience is delegated entirely to the fallback chain (the
+    Ollama-consistent decision); ``request`` must not retry the failed call. The
+    counting fake proves a single invocation.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    client = _stub_failing_achat(monkeypatch, model, WMLClientError("boom"))
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(ModelAPIError):
+        await model.request(messages, None, ModelRequestParameters())
+
+    assert client.calls == 1
+
+
+async def test_request_propagates_unexpected_error_unwrapped(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A non-SDK / non-httpx error is *not* wrapped — fail loud (boundary).
+
+    The wrapping is deliberately scoped to ``WMLClientError`` + ``httpx.HTTPError``
+    (plan.md Entity 2). An unexpected error type (here a programming-bug
+    ``RuntimeError``) must propagate unchanged rather than be masked as a
+    recoverable ``ModelAPIError``; over-catching would hide real defects and
+    silently trigger failover on bugs.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    sentinel = RuntimeError("unexpected non-API failure")
+    _stub_failing_achat(monkeypatch, model, sentinel)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(RuntimeError, match="unexpected non-API failure"):
         await model.request(messages, None, ModelRequestParameters())
