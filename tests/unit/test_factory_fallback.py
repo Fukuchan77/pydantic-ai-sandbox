@@ -75,16 +75,20 @@ def test_build_fallback_with_only_stub_members_raises_runtime_error(
 ) -> None:
     """All-stub configurations fail fast at build time (Req 4.5).
 
-    ``watsonx`` and ``anthropic`` are both members of
+    ``anthropic`` and ``bedrock`` are both members of
     ``_MVP_STUB_PROVIDERS``. plan.md §2.4 mandates that ``_build_fallback``
     detect this configuration and raise ``RuntimeError`` instead of
     deferring the ``NotImplementedError`` until the first ``/chat`` call.
     The error message names the offending construct so the operator can
     locate the env var responsible.
+
+    Uses ``anthropic,bedrock`` (the still-stub providers after
+    002-watsonx-provider) so the all-stub scenario does not trip the new
+    watsonx credential gate (config Task 2.2).
     """
     settings = settings_factory(
         LLM_PROVIDER="fallback",
-        FALLBACK_ORDER="watsonx,anthropic",
+        FALLBACK_ORDER="anthropic,bedrock",
     )
     get_settings.cache_clear()
     try:
@@ -107,16 +111,20 @@ def test_build_fallback_skips_stub_members_when_real_members_remain(
     """Mixed configurations build successfully, ignoring stub members.
 
     plan.md §2.4 frames the all-stub case as the only build-time fail.
-    A user staging a 002-multi-provider rollout (e.g.
-    ``FALLBACK_ORDER=ollama,watsonx``) would otherwise hit the watsonx
-    stub's ``NotImplementedError`` during recursive ``get_model`` calls
+    A user staging a multi-provider rollout (e.g.
+    ``FALLBACK_ORDER=ollama,anthropic``) would otherwise hit the stub's
+    ``NotImplementedError`` during recursive ``get_model`` calls
     — the implementation must therefore filter stubs out *before*
     iterating, leaving the FallbackModel chain populated with the real
     providers in their original order.
+
+    Uses ``anthropic`` as the stub member (watsonx is promoted to a real,
+    credential-gated provider by 002-watsonx-provider, so it can no longer
+    stand in as an uncredentialled stub here).
     """
     settings = settings_factory(
         LLM_PROVIDER="fallback",
-        FALLBACK_ORDER="ollama,watsonx",
+        FALLBACK_ORDER="ollama,anthropic",
         OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
         OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
     )

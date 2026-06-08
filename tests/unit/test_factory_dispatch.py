@@ -117,13 +117,20 @@ def test_get_model_no_arg_consults_settings_llm_provider(
 ) -> None:
     """``get_model()`` with no argument routes through ``Settings.llm_provider``.
 
-    We seat a watsonx-selected Settings (no Ollama vars required because
-    the watsonx field validator does not gate on ollama_model_name) and
-    expect the watsonx stub branch to fire — proving the dispatch reads
+    We seat a watsonx-selected Settings — supplying the four watsonx
+    credentials now required by the boot-time gate (config Task 2.2) — and
+    expect the watsonx stub branch to fire (watsonx is still a member of
+    ``_MVP_STUB_PROVIDERS`` until Task 4.2), proving the dispatch reads
     ``Settings.llm_provider`` rather than defaulting to a hardcoded
-    provider.
+    provider. Task 4.3 rewrites this case to assert a real Model instance.
     """
-    settings_factory(LLM_PROVIDER="watsonx")
+    settings_factory(
+        LLM_PROVIDER="watsonx",
+        WATSONX_APIKEY="k-watsonx-dispatch-secret",
+        WATSONX_PROJECT_ID="proj-0000",
+        WATSONX_URL="https://us-south.ml.cloud.ibm.com",
+        WATSONX_MODEL_ID="dummy-watsonx-model",
+    )
     get_settings.cache_clear()
     try:
         with pytest.raises(NotImplementedError) as exc_info:

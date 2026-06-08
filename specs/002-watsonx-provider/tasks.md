@@ -65,31 +65,51 @@ _Boundary:_ `src/pydantic_ai_sandbox/config.py`
 _Depends:_ none
 _Requirements:_ 2.2, 2.4, 2.5, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.5
 
-- [ ] 2.1 Add `watsonx_timeout_connect` (default 30) and `watsonx_timeout_read` (default 120) fields to the `Settings` class, sourced from `WATSONX_TIMEOUT_CONNECT` / `WATSONX_TIMEOUT_READ`
+- [x] 2.1 Add `watsonx_timeout_connect` (default 30) and `watsonx_timeout_read` (default 120) fields to the `Settings` class, sourced from `WATSONX_TIMEOUT_CONNECT` / `WATSONX_TIMEOUT_READ`
   _Boundary:_ `src/pydantic_ai_sandbox/config.py`
   _Depends:_ none
   _Requirements:_ 5.1, 5.2, 5.3
-- [ ] 2.2 Add the watsonx credential gate that fires when watsonx is selected directly (`LLM_PROVIDER=watsonx`) OR is a member of `FALLBACK_ORDER`; require all of `WATSONX_APIKEY` / `WATSONX_PROJECT_ID` / `WATSONX_URL` / `WATSONX_MODEL_ID`, raising `ValueError` naming the specific missing variable and failing within 2 seconds at construction
+- [x] 2.2 Add the watsonx credential gate that fires when watsonx is selected directly (`LLM_PROVIDER=watsonx`) OR is a member of `FALLBACK_ORDER`; require all of `WATSONX_APIKEY` / `WATSONX_PROJECT_ID` / `WATSONX_URL` / `WATSONX_MODEL_ID`, raising `ValueError` naming the specific missing variable and failing within 2 seconds at construction
   _Boundary:_ `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 2.1
   _Requirements:_ 3.1, 3.2, 3.3
-- [ ] 2.3 Add the transport normalization validator (`field_validator(mode="before")`): lower-case `WATSONX_TRANSPORT`, default to `"sdk"` when unset, and raise `ValueError` listing valid values `("sdk", "litellm")` for any out-of-set value
+- [x] 2.3 Add the transport normalization validator (`field_validator(mode="before")`): lower-case `WATSONX_TRANSPORT`, default to `"sdk"` when unset, and raise `ValueError` listing valid values `("sdk", "litellm")` for any out-of-set value
   _Boundary:_ `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 2.2
   _Requirements:_ 2.2, 2.4, 2.5
-- [ ] 2.4 Add the `WATSONX_URL` format validator using `urllib.parse.urlparse` (protocol + netloc), raising a detailed `ValueError` on invalid structure and performing no network/reachability call
+- [x] 2.4 Add the `WATSONX_URL` format validator using `urllib.parse.urlparse` (protocol + netloc), raising a detailed `ValueError` on invalid structure and performing no network/reachability call
   _Boundary:_ `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 2.3
   _Requirements:_ 4.1, 4.2, 4.3
-- [ ] 2.5 Add the timeout validators rejecting non-positive / non-numeric `watsonx_timeout_connect` and `watsonx_timeout_read` with a clear `ValueError`
+- [x] 2.5 Add the timeout validators rejecting non-positive / non-numeric `watsonx_timeout_connect` and `watsonx_timeout_read` with a clear `ValueError`
   _Boundary:_ `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 2.4
   _Requirements:_ 5.5
 
+_Status:_ ✅ Done (2026-06-08). 34 new config tests (RED→GREEN); full gate green (91 passed / 1 skipped, lint clean, pyright 0 errors).
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **Credential gate breaks the stub-era fallback tests — by design.** Per
+  plan Entity 1 the gate fires on `watsonx ∈ FALLBACK_ORDER` (when
+  `LLM_PROVIDER=fallback`), which is incompatible with three 001-era tests that
+  used `watsonx` as an *uncredentialled stub* member. The plan's File Structure
+  Plan marked `test_factory_fallback.py` / `test_app_lifespan_fallback_dryrun.py`
+  `[NO CHANGE]` — an oversight. Resolution (do NOT narrow the gate — that would
+  violate 2.2): migrated those stub scenarios to `anthropic`/`bedrock` (which
+  remain stubs), and gave the direct-watsonx dispatch test valid creds. Task 4.3
+  will further rewrite `test_factory_dispatch.py`'s watsonx case to assert a real
+  Model instance.
+- **Transport field made non-optional** (`Literal["sdk","litellm"] = "sdk"`,
+  was `… | None = None`): the `mode="before"` validator maps unset/blank/None →
+  `"sdk"` so Req 2.2's default is structural, not deferred to consumers.
+- **Conftest support edit (necessary for determinism):** added
+  `WATSONX_TIMEOUT_CONNECT` / `WATSONX_TIMEOUT_READ` to `_MANAGED_ENV_KEYS` so the
+  default-timeout test (30/120) is hermetic against ambient shell env. This is
+  the residual of Task 3.1; 3.1 now only needs the remaining fixtures.
+- Gate uses `not val` truthiness; `is None` is the practical case. An explicitly
+  empty `WATSONX_APIKEY=""` (SecretStr, always truthy) would slip the gate, but
+  the SDK rejects an empty key at runtime — out of scope for fail-fast here.
 
 ---
 
