@@ -209,7 +209,7 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 4
 _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3, 8.4, 8.6
 
-_Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4, 5.5 ✅ Done (2026-06-08)**; 5.6 pending.
+_Status:_ ✅ Done (2026-06-08) — **5.1–5.6 complete**.
 
 - [x] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
@@ -231,7 +231,7 @@ _Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4, 5.5 ✅ Done (2026-06-08)**
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.1
   _Requirements:_ 2.1
-- [ ] 5.6 Implement `_build_watsonx(settings) -> Model` with the SDK transport branch (`transport == "sdk"` → `WatsonxSDKModel(settings)`), I/O-free
+- [x] 5.6 Implement `_build_watsonx(settings) -> Model` with the SDK transport branch (`transport == "sdk"` → `WatsonxSDKModel(settings)`), I/O-free
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.4
   _Requirements:_ 2.1
@@ -371,6 +371,17 @@ _Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4, 5.5 ✅ Done (2026-06-08)**
   `reportDeprecated` — annotated `-> AsyncGenerator[StreamedResponse]` instead
   (a subtype, so LSP-covariant with the base's `AsyncIterator`). Signature mirrors
   the base exactly (incl. `run_context`) for Liskov compatibility.
+
+- **5.6 (2026-06-08): transport dispatch landed; litellm fails loud until Task 6.**
+  `_build_watsonx` now branches on the validated `watsonx_transport` Literal
+  (`"sdk"` → `WatsonxSDKModel`; `"litellm"` → greppable `NotImplementedError`)
+  instead of returning the SDK model unconditionally. 4 tests added to
+  `test_watsonx_sdk_construction.py`. Canonical `mise run check` green:
+  lint+format clean, pyright 0 errors, **126 passed / 1 skipped**. The only real
+  RED was the litellm fail-loud (the SDK branch already returned the right type
+  pre-change, so its three tests are regression guards); a silent fall-through
+  would have shipped the SDK transport under a litellm selector. Task 6 replaces
+  the raise with the real litellm branch + its import-guard.
 
 ---
 

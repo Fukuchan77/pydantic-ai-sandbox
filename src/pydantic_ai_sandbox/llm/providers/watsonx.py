@@ -582,10 +582,19 @@ def _build_watsonx(settings: Settings) -> Model:
     """Build a watsonx-backed ``Model`` per ``WATSONX_TRANSPORT``. I/O-free.
 
     Follows the established ``_build_ollama(settings) -> Model`` shape
-    (``structure.md``). Task 4 wires the SDK transport (the default) so the
-    factory returns a real ``Model`` instance for ``LLM_PROVIDER=watsonx``; the
-    explicit transport dispatch (sdk vs litellm) and the litellm branch land in
-    Tasks 5.6 / 6.
+    (``structure.md``) and is the factory's entry point for
+    ``LLM_PROVIDER=watsonx`` (:func:`llm.factory.get_model`). Dispatches on the
+    already-validated ``watsonx_transport`` selector (config Task 2.3 normalises
+    it to one of ``"sdk"`` / ``"litellm"``, defaulting to ``"sdk"``):
+
+    * ``"sdk"`` → :class:`WatsonxSDKModel`, the ``ibm-watsonx-ai`` transport
+      (Task 5). Construction is I/O-free — the SDK client is built lazily on the
+      first request (Req 1.5).
+    * ``"litellm"`` → the LiteLLM transport, which lands in **Task 6** (with its
+      optional-dependency import-guard). Until then this selector fails loud
+      rather than silently falling through to the SDK model: shipping the wrong
+      transport would be a silent correctness bug, so the unbuilt branch raises
+      a greppable :class:`NotImplementedError`.
 
     Args:
         settings: Frozen runtime settings; the credential gate has already
@@ -594,5 +603,18 @@ def _build_watsonx(settings: Settings) -> Model:
     Returns:
         A ``pydantic_ai.models.Model`` ready to be passed to
         :class:`pydantic_ai.Agent`.
+
+    Raises:
+        NotImplementedError: For ``watsonx_transport == "litellm"`` until the
+            Task 6 branch lands.
     """
-    return WatsonxSDKModel(settings)
+    if settings.watsonx_transport == "sdk":
+        return WatsonxSDKModel(settings)
+    # ``watsonx_transport`` is a validated ``Literal["sdk", "litellm"]`` (config
+    # Task 2.3), so the only remaining value is ``"litellm"`` — the Task 6
+    # transport not yet wired here.
+    msg = (
+        "watsonx litellm transport is not yet implemented (Task 6); "
+        f"WATSONX_TRANSPORT={settings.watsonx_transport!r}."
+    )
+    raise NotImplementedError(msg)
