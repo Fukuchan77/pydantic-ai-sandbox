@@ -228,7 +228,7 @@ Subtasks 4.1 → 4.2 → 4.3 (a chain; 4.2 ⇄ 4.3 atomic).
 
 ## Task 5 — SDK transport: WatsonxSDKModel
 
-**Date:** 2026-06-08 · **Status:** 🔄 In progress (5.1 ✅) · **Boundary:** `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
+**Date:** 2026-06-08 · **Status:** 🔄 In progress (5.1, 5.2 ✅) · **Boundary:** `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 
 ### 5.1 — Activation skeleton (`__init__` + `system`/`model_name`)
 
@@ -268,3 +268,64 @@ the file Task 7.1 extends with request/response-mapping once 5.2/5.3 land.
 - `Settings.model_construct` is the project's established way to cover defensive
   guards whose production path the validator makes unreachable (mirrors
   `test_factory_fallback.py`).
+
+### 5.2 — Lazy `_build_client` (SDK client construction)
+
+**Scope:** a `_build_client` method that builds and memoises the
+`ibm-watsonx-ai` `ModelInference` client on first request (never in `__init__`),
+wiring the configured timeouts (Req 5.4), `max_retries=0` (Req 6.1 / ADR-2), and
+`validate=False` (plan §Entity 2). `request` still raises `NotImplementedError`
+(owned by 5.3/5.4) — `_build_client` is exercised directly by the tests.
+
+**Pre-coding empirical checks** (avoid the "tasks.md literal compiles" trap):
+- `inspect.signature` confirmed `Credentials(*, url, api_key, …)`,
+  `APIClient(credentials, project_id, …, async_httpx_client)`,
+  `ModelInference(*, model_id, api_client, validate=True, max_retries=None, …)`.
+- `httpx.Timeout(connect=30, read=120)` **raises** `ValueError` — partial spec
+  rejected. Used `httpx.Timeout(read, connect=connect)` (read seeds
+  read/write/pool; connect overrides).
+- SDK ships `py.typed` → pyright strict type-checks the usage.
+
+- **RED**: 5 new tests → `AttributeError: no attribute '_build_client'`
+  (after fixing an initial test-harness ordering bug, below).
+- **GREEN**: `uv run pytest tests/unit/test_watsonx_sdk_construction.py` → 9 passed
+  (4 from 5.1 + 5 new):
+  - `test_build_client_wires_credentials_no_retry_and_no_validate` — full wiring
+    chain incl. `max_retries=0` / `validate=False` / unwrapped apikey.
+  - `test_build_client_applies_default_timeouts` — connect=30 / read=120 (Req 5.4).
+  - `test_build_client_applies_overridden_timeouts` — env overrides 15/200 (Req 5.4).
+  - `test_build_client_is_lazily_cached` — built once, reused (Req 1.5).
+  - `test_build_client_missing_apikey_raises_typeerror` — `SecretStr` unwrap guard.
+
+**Error encountered → root cause → fix (no blind retry):** the first RED run
+failed with `TypeError: function() argument 'code' must be code, not str` at
+`ibm_watsonx_ai/_wrappers/httpx_wrapper.py:344` (`class HTTPXAsyncClient(httpx.AsyncClient)`),
+**not** the expected missing-attribute error. Root cause: the spy patched
+`httpx.AsyncClient` to a *function* before the SDK's `httpx_wrapper` was imported,
+so the subclass statement received a non-class base. Fix: import
+`ibm_watsonx_ai.foundation_models` at the test module's top (binds the subclass to
+the real `httpx.AsyncClient`) and patch `httpx.AsyncClient` last in the spy
+installer. Re-run → clean RED (missing `_build_client`).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_watsonx_sdk_construction.py` | ✅ 9 passed |
+| Aggregate (canonical) | `mise run check` | ✅ 107 passed / 1 skipped; ruff clean; pyright 0 errors |
+| Coverage (CI-only) | `pytest --cov` | ⚠️ deferred to Task 11.1 (plan 9.10 split); only `watsonx.py` `request` `NotImplementedError` body (5.3/5.4) remains uncovered. `_build_client` is fully exercised (happy/cache/guard). Note: standalone `--cov` currently hits an unrelated beartype claw circular-import; canonical bare-pytest gate is green. |
+
+### Learnings for Act phase
+
+- **Import the heavy SDK function-locally, not at module scope.** `factory.py`
+  imports every provider module unconditionally, so a top-level
+  `import ibm_watsonx_ai` taxes ollama-only deployments. Defer it into
+  `_build_client` (first-request only) to keep module import + `__init__` cheap.
+- **A network-authenticating constructor can still be unit-tested hermetically**
+  by substituting all of `Credentials`/`APIClient`/`ModelInference`/`AsyncClient`
+  with recording spies and asserting the wiring — but watch import-time base-class
+  binding (the `httpx_wrapper` subclass gotcha above).
+- **Restricted ruff `--select X --fix` deletes valid `# noqa` for other rules.**
+  `--select RUF100 --fix` stripped a legitimate `# noqa: F401` because F401 was
+  disabled in that run. Re-add suppressions after a narrow autofix and re-run the
+  full lint.

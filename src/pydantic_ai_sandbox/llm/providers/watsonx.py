@@ -37,9 +37,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import httpx
 from pydantic_ai.models import Model
 
 if TYPE_CHECKING:
+    from ibm_watsonx_ai.foundation_models import ModelInference
     from pydantic_ai.messages import ModelMessage, ModelResponse
     from pydantic_ai.models import ModelRequestParameters
     from pydantic_ai.settings import ModelSettings
@@ -79,6 +81,9 @@ class WatsonxSDKModel(Model):
         """
         super().__init__()
         self._app_settings = settings
+        # Lazily built on the first request (Task 5.2 / Req 1.5); ``None`` until
+        # then so ``__init__`` performs no network I/O.
+        self._client: ModelInference | None = None
 
     @property
     def system(self) -> str:
@@ -105,6 +110,85 @@ class WatsonxSDKModel(Model):
             )
             raise TypeError(msg)
         return model_id
+
+    def _build_client(self) -> ModelInference:
+        """Build (once) and cache the ``ibm-watsonx-ai`` inference client.
+
+        Invoked lazily on the first request (Task 5.3), never in ``__init__``:
+        the SDK's ``APIClient`` authenticates over the network at construction,
+        so deferring it keeps ``WatsonxSDKModel`` construction I/O-free (Req 1.5)
+        and lets a stopped or unreachable watsonx endpoint fail at request time
+        rather than at process start. The built client is memoised on
+        ``self._client`` so subsequent requests reuse the same authenticated
+        session.
+
+        Wiring (research.md R3):
+
+        * Timeouts (Req 5.4) inject via the async httpx client handed to
+          ``APIClient`` — ``Credentials`` carries no timeout argument.
+          ``httpx.Timeout`` rejects a partial ``(connect, read)`` spec, so the
+          read value seeds the overall default (covering write/pool) and
+          ``connect`` overrides the connect phase.
+        * ``max_retries=0`` (Req 6.1 / ADR-2) disables the SDK's default retry
+          loop; the fallback chain is the sole resilience layer.
+        * ``validate=False`` (plan.md §Entity 2) suppresses the SDK's extra
+          network validation round-trip, removing a second failure surface on
+          the first call.
+
+        Returns:
+            The memoised :class:`~ibm_watsonx_ai.foundation_models.ModelInference`
+            client, built against the validated watsonx settings.
+
+        Raises:
+            TypeError: If ``watsonx_apikey`` is ``None`` — unreachable when
+                watsonx is selected because the credential gate (config Task 2.2)
+                rejects it at boot; the guard keeps the ``SecretStr`` unwrap
+                total and fails loud against a future validator change.
+        """
+        if self._client is not None:
+            return self._client
+
+        settings = self._app_settings
+        apikey = settings.watsonx_apikey
+        if apikey is None:
+            msg = (
+                "watsonx_apikey is None at WatsonxSDKModel._build_client time — "
+                "the credential gate (config) should have rejected this "
+                "configuration; did the cross-field validator change?"
+            )
+            raise TypeError(msg)
+
+        # Import the SDK lazily so importing this module (and the factory that
+        # pulls it in unconditionally) stays cheap for non-watsonx deployments;
+        # the heavy SDK only loads when a watsonx request is actually served.
+        from ibm_watsonx_ai import APIClient, Credentials
+        from ibm_watsonx_ai.foundation_models import ModelInference
+
+        # Unwrap the SecretStr only here, at the SDK boundary (tech.md secrets
+        # convention); the value is never logged.
+        credentials = Credentials(
+            url=settings.watsonx_url,
+            api_key=apikey.get_secret_value(),
+        )
+        async_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                settings.watsonx_timeout_read,
+                connect=settings.watsonx_timeout_connect,
+            ),
+        )
+        api_client = APIClient(
+            credentials=credentials,
+            project_id=settings.watsonx_project_id,
+            async_httpx_client=async_http_client,
+        )
+        client = ModelInference(
+            model_id=settings.watsonx_model_id,
+            api_client=api_client,
+            max_retries=0,
+            validate=False,
+        )
+        self._client = client
+        return client
 
     async def request(
         self,
