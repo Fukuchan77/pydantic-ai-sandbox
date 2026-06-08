@@ -7,6 +7,6 @@
   "approvals": {
     "requirements": { "generated": true, "approved": true },
     "design": { "generated": true, "approved": true },
-    "tasks": { "generated": true, "approved": false }
+    "tasks": { "generated": true, "approved": true }
   }
 }
