@@ -57,7 +57,10 @@ from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.tools import ToolDefinition
 
 from pydantic_ai_sandbox.config import Settings
-from pydantic_ai_sandbox.llm.providers.watsonx import WatsonxSDKModel
+from pydantic_ai_sandbox.llm.providers.watsonx import (
+    WatsonxSDKModel,
+    _build_watsonx,  # pyright: ignore[reportPrivateUsage]
+)
 from tests.conftest import (
     WATSONX_TEST_APIKEY,
     WATSONX_TEST_MODEL_ID,
@@ -862,3 +865,79 @@ async def test_request_stream_raises_out_of_scope(
     with pytest.raises(NotImplementedError, match="out of scope"):
         async with model.request_stream(messages, None, ModelRequestParameters()):
             pass  # pragma: no cover — context entry raises before the body runs
+
+
+# ---------------------------------------------------------------------------
+# Task 5.6 — ``_build_watsonx`` transport dispatch (SDK branch)
+#
+# ``_build_watsonx`` is the factory entry point (``llm.factory.get_model`` routes
+# ``LLM_PROVIDER=watsonx`` here). It dispatches on the validated
+# ``WATSONX_TRANSPORT`` selector: ``"sdk"`` (the default) builds a
+# ``WatsonxSDKModel`` (Req 2.1). The ``"litellm"`` branch — with its dependency
+# import-guard — is Task 6's; until it lands ``_build_watsonx`` must fail loud on
+# that selector rather than silently returning the SDK model (which would mask
+# the unbuilt transport). Construction stays I/O-free (Req 1.5): the dispatch
+# only constructs the lazy-client Model, it issues no network call.
+# ---------------------------------------------------------------------------
+
+
+def test_build_watsonx_sdk_transport_returns_sdk_model(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """``transport="sdk"`` builds a :class:`WatsonxSDKModel` (Req 2.1).
+
+    The explicit selector resolves to the SDK transport — the same Model the
+    factory dispatch test asserts for the default provider, here pinned to the
+    concrete subtype so a future transport addition cannot silently reroute the
+    SDK selector.
+    """
+    model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="sdk"))
+
+    assert isinstance(model, WatsonxSDKModel)
+
+
+def test_build_watsonx_defaults_to_sdk_transport(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """An unset ``WATSONX_TRANSPORT`` defaults to the SDK transport (Req 2.1).
+
+    The config validator maps unset → ``"sdk"`` (Task 2.3), so ``_build_watsonx``
+    with no transport override must still build a :class:`WatsonxSDKModel`.
+    """
+    model = _build_watsonx(watsonx_settings_factory())
+
+    assert isinstance(model, WatsonxSDKModel)
+
+
+def test_build_watsonx_is_io_free(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """``_build_watsonx`` performs no network I/O (Req 1.5).
+
+    Dispatch constructs the lazy-client :class:`WatsonxSDKModel` only; the SDK
+    client is built on the first request (Task 5.2). Detonating both httpx
+    transport hooks proves the builder issues no egress at construction.
+    """
+    monkeypatch.setattr(httpx.Client, "send", _explode_sync)
+    monkeypatch.setattr(httpx.AsyncClient, "send", _explode_async)
+
+    model = _build_watsonx(watsonx_settings_factory())
+
+    assert isinstance(model, Model)
+
+
+def test_build_watsonx_litellm_transport_not_yet_implemented(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """``transport="litellm"`` fails loud until Task 6 lands the branch (Req 2.1).
+
+    The litellm transport and its dependency import-guard belong to Task 6.
+    Until then ``_build_watsonx`` must raise rather than silently fall through to
+    the SDK model on a litellm selector — a silent fall-through would ship the
+    wrong transport. Task 6 replaces this raise with the real litellm branch.
+    """
+    settings = watsonx_settings_factory(WATSONX_TRANSPORT="litellm")
+
+    with pytest.raises(NotImplementedError, match="litellm"):
+        _build_watsonx(settings)

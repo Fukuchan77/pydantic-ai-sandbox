@@ -525,3 +525,47 @@ watsonx-specific *out-of-scope* message (streaming is out of scope — spec.md
 - **`@asynccontextmanager` + return annotation is a pyright-strict trap**: prefer
   `AsyncGenerator[T]` over `AsyncIterator[T]` to avoid `reportDeprecated`, even
   when mirroring an upstream ABC that still uses `AsyncIterator`.
+
+---
+
+## Task 5.6 — `_build_watsonx` transport dispatch (SDK branch) — 2026-06-08
+
+### What changed
+
+- `src/.../watsonx.py`: `_build_watsonx` now dispatches on the validated
+  `settings.watsonx_transport` selector instead of unconditionally returning
+  `WatsonxSDKModel`. `"sdk"` (the default) → `WatsonxSDKModel(settings)`;
+  `"litellm"` raises a greppable `NotImplementedError` (Task 6's branch).
+  Docstring updated with the dispatch contract and a `Raises:` section.
+- `tests/unit/test_watsonx_sdk_construction.py`: +4 tests (Task 5.6 section) and
+  added `_build_watsonx` to the module import. Covers SDK selector → subtype,
+  unset → SDK default, I/O-free dispatch (detonated httpx hooks), and the
+  litellm fail-loud.
+
+### Design decisions (root-caused, not guessed)
+
+- **Litellm must fail loud, not fall through.** Before 5.6 the builder ignored
+  the selector and always returned the SDK model, so a `litellm` selector would
+  have silently shipped the SDK transport. The only meaningful RED was therefore
+  the litellm test (the three SDK guards passed pre-change). Raising
+  `NotImplementedError` matches the codebase's fail-loud idiom (cf. `request`'s
+  Task-4 stub and `request_stream`); Task 6 replaces the raise with the real
+  branch.
+- **No `else`/exhaustiveness ceremony.** `watsonx_transport` is a validated
+  `Literal["sdk", "litellm"]` (config Task 2.3), so the post-`if` path is
+  provably the litellm case — a guard-clause `if "sdk"` + trailing raise reads
+  cleaner than an `elif` and needs no `assert_never`.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task test | `uv run pytest ...test_watsonx_sdk_construction.py -k build_watsonx` | ✅ RED→GREEN (4 passed: litellm RED→GREEN, 3 SDK guards) |
+| Aggregate (canonical) | `mise run check` | ✅ **126 passed / 1 skipped**; ruff lint + format clean; pyright 0 errors |
+
+### Learnings for Act phase
+
+- **A guard task can have only one real RED.** When the pre-existing code already
+  satisfies most of a new contract (here: SDK branch already returned the right
+  type), pin the *behavioural delta* (litellm fail-loud) as the RED and keep the
+  rest as regression guards — don't fabricate REDs that were never red.
