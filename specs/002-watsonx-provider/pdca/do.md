@@ -403,3 +403,72 @@ than a runtime drop. Also a `C901` complexity hit on `_map_messages` → extract
   strict.** A trailing `isinstance` on the last union member trips
   `reportUnnecessaryIsInstance`; relying on narrowing keeps exhaustiveness a
   compile-time guarantee (a new member becomes a type error) without a dead branch.
+
+---
+
+## Task 5.4 — SDK/httpx failure wrapping → `ModelAPIError` (no retries) — 2026-06-08
+
+### Plan (Do-phase intent)
+
+Wrap every SDK failure in `WatsonxSDKModel.request` into
+`pydantic_ai.exceptions.ModelAPIError` with no provider-level retries, so
+`FallbackModel.fallback_on=(ModelAPIError,)` recovers it (plan.md Entity 2 — the
+single highest-risk correctness point). Cover the SDK base `WMLClientError` (all
+subclasses) and the underlying httpx errors (timeout/connect/HTTPError);
+preserve the cause via `raise ... from`. Reqs 4.4/5.6/6.2/6.3/6.4/8.2.
+
+### TDD cycle
+
+**RED** — appended a Task 5.4 section to `test_watsonx_sdk_construction.py`
+(7 net-new tests). Initial run: 7 failed (raw SDK/httpx errors propagated
+unwrapped), boundary test passed (RuntimeError correctly not caught).
+
+- `test_request_wraps_sdk_failures_in_model_api_error` (parametrized ×5):
+  `WMLClientError`, a local `WMLClientError` subclass, `httpx.ReadTimeout`,
+  `httpx.ConnectError`, `httpx.HTTPError` base → all become `ModelAPIError`
+  with `__cause__` chained, `model_name` = configured id, original class name
+  in the message.
+- `test_request_wraps_first_call_client_build_failure` — `_build_client` raising
+  `httpx.ConnectError` (lazy first-call auth, Req 4.4) is wrapped too.
+- `test_request_does_not_retry_on_failure` — counting fake proves `achat` is
+  invoked exactly once (Req 6.1/6.3/6.4).
+- `test_request_propagates_unexpected_error_unwrapped` — boundary: a
+  `RuntimeError` propagates unwrapped (no over-catch; fail loud).
+
+**GREEN** — in `request`, wrapped `_build_client()` + `await achat(...)` in
+`try / except (WMLClientError, httpx.HTTPError)` re-raising
+`ModelAPIError(model_name=self.model_name, message=...) from exc`. `WMLClientError`
+imported function-locally (keep module import cheap for non-watsonx deployments).
+Mapping helpers stay outside the try (before/after) so `NotImplementedError` /
+`UnexpectedModelBehavior` are not swallowed. Added `ModelAPIError` to the
+`pydantic_ai.exceptions` import.
+
+**Design decisions (root-caused, not guessed):**
+- Verified empirically that all SDK errors subclass `WMLClientError` and all
+  httpx transport errors subclass `httpx.HTTPError`, so two bases are exhaustive
+  without enumerating the three named httpx subtypes.
+- Guarded block spans `_build_client()` too, because `APIClient` authenticates at
+  lazy construction → DNS/connect failures surface there on the first call (Req 4.4).
+- `error.class` carries `ModelAPIError`; the underlying cause is chained. Per
+  Clarification 2026-06-08, timeouts surface solely via `error.class`, no
+  duration attribute (Req 5.6).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_watsonx_sdk_construction.py` | ✅ 23 passed |
+| Aggregate (canonical) | `mise run check` | ✅ **121 passed / 1 skipped**; ruff lint `All checks passed!`; ruff format `2 files already formatted`; pyright **0 errors, 0 warnings** |
+| Coverage (CI-only) | `pytest --cov` | ⚠️ deferred to Task 11.1 (plan 9.10 split) — canonical bare-pytest gate is green |
+
+### Learnings for Act phase
+
+- **Catch by base class after verifying the hierarchy.** Enumerating named
+  exception subtypes is fragile; one `python -c "issubclass(...)"` probe confirmed
+  two bases (`WMLClientError`, `httpx.HTTPError`) catch the whole matrix.
+- **Wrap the lazy client build, not just the call.** When client construction is
+  deferred and authenticates over the network, the *first* failure surfaces from
+  the builder — the error guard must enclose it or Req 4.4 leaks an unwrapped error.
+- **Scope the catch; test the boundary.** A boundary test asserting a non-API
+  error propagates unwrapped documents that we don't mask programming bugs as
+  recoverable model errors — over-catching would silently trigger failover on bugs.

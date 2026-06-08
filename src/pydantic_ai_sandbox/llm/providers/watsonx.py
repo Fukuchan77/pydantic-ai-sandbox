@@ -38,7 +38,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -424,25 +424,63 @@ class WatsonxSDKModel(Model):
             The mapped :class:`ModelResponse` (text parts, tool-call parts,
             usage, finish reason and provider response id).
 
-        Note:
-            SDK-failure wrapping into :class:`ModelAPIError` is Task 5.4; this
-            method maps the happy path only. Mapping errors (unsupported parts,
-            malformed responses) surface as ``NotImplementedError`` /
-            :class:`UnexpectedModelBehavior` and are not swallowed.
+        Every SDK failure — the SDK base ``WMLClientError`` (covering its
+        subclasses: ``ApiRequestFailure``, ``AuthenticationError``,
+        ``ExceededLimitOfAPICalls`` [rate limit], ``ReadingDataTimeoutError``, …)
+        and the underlying httpx errors (``TimeoutException`` / ``ConnectError``
+        and any other ``httpx.HTTPError``) — is wrapped into
+        :class:`pydantic_ai.exceptions.ModelAPIError` with **no retries**
+        (Req 4.4/5.6/6.2/6.3/6.4/8.2). ``FallbackModel``'s default ``fallback_on``
+        is ``(ModelAPIError,)``, so an *unwrapped* SDK / httpx error would break
+        failover (plan.md Entity 2). Both the lazy first-call client build (whose
+        ``APIClient`` authenticates over the network — Req 4.4) and the ``achat``
+        call sit inside the guarded block; the original error is chained via
+        ``raise ... from`` so ``error.class`` carries the wrapper while the cause
+        preserves the underlying failure for debugging.
+
+        Args:
+            messages: The full conversation history to send.
+            model_settings: Per-request settings; intentionally unused here.
+            model_request_parameters: Carries the tool definitions advertised to
+                the model (function tools + output tools).
+
+        Returns:
+            The mapped :class:`ModelResponse` (text parts, tool-call parts,
+            usage, finish reason and provider response id).
+
+        Raises:
+            ModelAPIError: For every SDK / httpx transport failure, so the
+                fallback chain can recover it. Mapping errors (unsupported parts,
+                malformed responses) are *not* wrapped — they surface as
+                ``NotImplementedError`` / :class:`UnexpectedModelBehavior` and are
+                not swallowed.
         """
         del model_settings  # not mapped to chat params (see docstring)
         openai_messages = _map_messages(messages)
         tools = _map_tools(model_request_parameters)
-        client = self._build_client()
-        # ``ModelInference.achat`` is typed by the SDK as returning a bare
-        # ``dict`` (no key/value generics), so pyright sees its member type as
-        # partially unknown; cast the result to the concrete shape ``_build_
-        # response`` consumes and silence the single member warning rather than
-        # letting the unknown propagate into the mapper.
-        raw = cast(
-            "dict[str, Any]",
-            await client.achat(messages=openai_messages, tools=tools),  # pyright: ignore[reportUnknownMemberType]
-        )
+        # Import the SDK error base lazily (same rationale as ``_build_client``):
+        # keep importing this module cheap for non-watsonx deployments — the SDK
+        # only loads when a watsonx request is actually served.
+        from ibm_watsonx_ai.wml_client_error import WMLClientError
+
+        try:
+            client = self._build_client()
+            # ``ModelInference.achat`` is typed by the SDK as returning a bare
+            # ``dict`` (no key/value generics), so pyright sees its member type
+            # as partially unknown; cast the result to the concrete shape
+            # ``_build_response`` consumes and silence the single member warning
+            # rather than letting the unknown propagate into the mapper.
+            raw = cast(
+                "dict[str, Any]",
+                await client.achat(messages=openai_messages, tools=tools),  # pyright: ignore[reportUnknownMemberType]
+            )
+        except (WMLClientError, httpx.HTTPError) as exc:
+            # ``httpx.HTTPError`` is the base of ``TimeoutException`` /
+            # ``ConnectError`` / ``HTTPStatusError``, so the two bases together
+            # cover every SDK and transport failure the call can raise. Anything
+            # else (e.g. a programming bug) propagates unwrapped — fail loud.
+            msg = f"watsonx request failed ({type(exc).__name__}): {exc}"
+            raise ModelAPIError(model_name=self.model_name, message=msg) from exc
         return self._build_response(raw)
 
     def _build_response(self, raw: dict[str, Any]) -> ModelResponse:
