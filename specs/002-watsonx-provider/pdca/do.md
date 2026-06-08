@@ -223,3 +223,48 @@ Subtasks 4.1 → 4.2 → 4.3 (a chain; 4.2 ⇄ 4.3 atomic).
   surface against the installed lib version, not the plan prose.
 - Plan contracts can collide with library internals (`_settings`); verify base
   `__init__` attributes before copying a contract verbatim.
+
+---
+
+## Task 5 — SDK transport: WatsonxSDKModel
+
+**Date:** 2026-06-08 · **Status:** 🔄 In progress (5.1 ✅) · **Boundary:** `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
+
+### 5.1 — Activation skeleton (`__init__` + `system`/`model_name`)
+
+**Verify-not-create.** Task 4 already landed the skeleton so `_build_watsonx`
+could return a real `Model` for the dispatch test. Reread against the 5.1
+contract (Req 1.5/3.4/8.1/8.3/8.4/8.6) — it matches exactly, so **no `src/`
+edit was required**. 5.1's contribution is the dedicated test coverage.
+
+**TDD framing.** The dispatch test (`test_factory_dispatch.py`) only asserts
+`isinstance(model, Model)`; `system`, `model_name`, and the defensive
+`None`-guard had **zero direct coverage**. New
+`tests/unit/test_watsonx_sdk_construction.py` (4 tests) closes that gap and is
+the file Task 7.1 extends with request/response-mapping once 5.2/5.3 land.
+
+- RED: `test_watsonx_sdk_construction.py` absent → skeleton properties +
+  `model_name` `None`-branch uncovered.
+- GREEN: `uv run pytest tests/unit/test_watsonx_sdk_construction.py -v` → 4 passed.
+  - `test_system_property_returns_watsonx` — `system == "watsonx"` (Req 8.6).
+  - `test_model_name_is_sourced_from_settings` — `model_name == WATSONX_TEST_MODEL_ID` (Req 3.4/8.6).
+  - `test_construction_is_io_free` — detonated `httpx.{Client,AsyncClient}.send`; ctor still returns (Req 1.5).
+  - `test_model_name_none_guard_raises_typeerror` — `Settings.model_construct(watsonx_model_id=None)` → `TypeError`.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Skeleton tests | `uv run pytest tests/unit/test_watsonx_sdk_construction.py -v` | ✅ 4 passed |
+| Aggregate (canonical) | `mise run check` | ✅ 102 passed / 1 skipped; ruff clean; pyright 0 errors |
+| Coverage (CI-only) | `pytest --cov` | ⚠️ 95.26% < 98% — `watsonx.py:126-128` (`request` `NotImplementedError`) owned by 5.3/5.4; confirmed at Task 11.1 per plan 9.10 split |
+
+### Learnings for Act phase
+
+- A "skeleton" subtask that a prior activation task already satisfied becomes a
+  **coverage task**: the deliverable is the direct unit tests proving the
+  contract, not a source rewrite. Verify the source against the requirement IDs
+  before assuming work remains.
+- `Settings.model_construct` is the project's established way to cover defensive
+  guards whose production path the validator makes unreachable (mirrors
+  `test_factory_fallback.py`).
