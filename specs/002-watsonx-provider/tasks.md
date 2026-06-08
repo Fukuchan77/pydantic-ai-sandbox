@@ -209,7 +209,9 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 4
 _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3, 8.4, 8.6
 
-- [ ] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
+_Status:_ 🔄 In progress — **5.1 ✅ Done (2026-06-08)**; 5.2–5.6 pending.
+
+- [x] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 4
   _Requirements:_ 1.5, 3.4, 8.1, 8.3, 8.4, 8.6
@@ -236,8 +238,27 @@ _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2,
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **5.1 was a verify-not-create task — source landed in Task 4.** Per Task 4's
+  notes, the activation skeleton (`__init__` storing `Settings` under
+  `_app_settings`, `system` → `"watsonx"`, `model_name` → `watsonx_model_id`)
+  was already written so `_build_watsonx` could return a real `Model` for the
+  dispatch test. Reread against the 5.1 contract (Req 1.5/3.4/8.1/8.3/8.4/8.6):
+  it matches exactly, so **no `src/` change was needed**. 5.1's net-new work was
+  the dedicated test coverage proving it.
+- **New `tests/unit/test_watsonx_sdk_construction.py` (4 tests, RED→GREEN).**
+  Covers `system == "watsonx"`, `model_name` sourced from `Settings` (Req 3.4),
+  I/O-free construction via detonated `httpx.{Client,AsyncClient}.send` hooks
+  (Req 1.5), and the defensive `model_name` `None`-guard via
+  `Settings.model_construct` (the same escape-hatch pattern as
+  `test_factory_fallback.py`). The dispatch test only asserted `isinstance`, so
+  these branches had **zero direct coverage** before — they now do. This is the
+  file **Task 7.1 extends** with the request/response-mapping tests once 5.2/5.3
+  wire the lazy SDK client; 5.1 owns construction only.
+- **Coverage caveat (unchanged from Task 1).** Canonical `mise run check` (bare
+  pytest) is GREEN: 102 passed / 1 skipped, lint+format clean, pyright 0 errors.
+  CI's dedicated `pytest --cov` still reports <98% (95.26%) because `watsonx.py`
+  lines 126-128 are the `request` `NotImplementedError` body owned by Tasks
+  5.3/5.4; the ratchet is confirmed at Task 11.1, per the plan's 9.10 split.
 
 ---
 
