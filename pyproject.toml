@@ -10,8 +10,8 @@ dependencies = [
     "logfire[fastapi,httpx]",
     # V2 Beta is the project target; the slim[openai] extra pulls the
     # OpenAI-compatible chat client used by the Ollama provider (Plan AD-6 / research.md R-1).
-    "pydantic-ai>=2.0.0b3",
-    "pydantic-ai-slim[openai]>=2.0.0b3",
+    "pydantic-ai>=2.0.0b6",
+    "pydantic-ai-slim[openai]>=2.0.0b6",
     "pydantic-settings",
     "uvicorn",
 ]
