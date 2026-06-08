@@ -830,3 +830,35 @@ async def test_request_propagates_unexpected_error_unwrapped(
     messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
     with pytest.raises(RuntimeError, match="unexpected non-API failure"):
         await model.request(messages, None, ModelRequestParameters())
+
+
+# ---------------------------------------------------------------------------
+# Task 5.5 — ``request_stream`` is a deliberate fail-loud (streaming out of scope)
+#
+# The ``Model`` ABC supplies a default ``request_stream`` that raises a *generic*
+# ``NotImplementedError`` ("Streamed requests not supported by this ...").
+# Task 5.5 overrides it with a watsonx-specific *out-of-scope* message so the
+# refusal is an intentional design decision (streaming is out of scope for the
+# ``/chat`` single-request transport — spec.md "Out of Scope") rather than an
+# inherited accident. The match asserts on text unique to our override (absent
+# from the base message) so this is a genuine RED before the override lands.
+# ---------------------------------------------------------------------------
+
+
+async def test_request_stream_raises_out_of_scope(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """``request_stream`` fails loud as out of scope (Req 2.1).
+
+    Streaming is out of scope for the watsonx SDK transport; entering the
+    ``request_stream`` async context manager must raise ``NotImplementedError``
+    with a watsonx-specific out-of-scope message (not the base ABC's generic
+    one), so a future caller wiring streaming gets an explicit, greppable
+    refusal rather than a silent or misleading default.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(NotImplementedError, match="out of scope"):
+        async with model.request_stream(messages, None, ModelRequestParameters()):
+            pass  # pragma: no cover — context entry raises before the body runs

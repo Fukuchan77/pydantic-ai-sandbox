@@ -209,7 +209,7 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 4
 _Requirements:_ 1.5, 2.1, 2.7, 3.4, 4.4, 5.4, 5.6, 6.1, 6.2, 6.3, 6.4, 8.1, 8.2, 8.3, 8.4, 8.6
 
-_Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4 ✅ Done (2026-06-08)**; 5.5–5.6 pending.
+_Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4, 5.5 ✅ Done (2026-06-08)**; 5.6 pending.
 
 - [x] 5.1 Implement the `WatsonxSDKModel(Model)` skeleton: I/O-free `__init__` storing validated `Settings`, plus `system` property (`"watsonx"`) and `model_name` property (`watsonx_model_id`) so instrumentation derives `gen_ai.system` / `gen_ai.request.model`; source all credentials/model IDs from settings with no hardcoded values
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
@@ -227,7 +227,7 @@ _Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4 ✅ Done (2026-06-08)**; 5.5
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.3
   _Requirements:_ 4.4, 5.6, 6.2, 6.3, 6.4, 8.2
-- [ ] 5.5 Override `request_stream` to raise `NotImplementedError` with a clear out-of-scope message (defensive fail-loud)
+- [x] 5.5 Override `request_stream` to raise `NotImplementedError` with a clear out-of-scope message (defensive fail-loud)
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5.1
   _Requirements:_ 2.1
@@ -360,6 +360,17 @@ _Status:_ 🔄 In progress — **5.1, 5.2, 5.3, 5.4 ✅ Done (2026-06-08)**; 5.5
   the catch. `raise ... from exc` chains the original for debugging while
   `error.class` carries `ModelAPIError` (Req 8.2); per Clarification 2026-06-08
   timeouts surface solely via `error.class` with no duration attribute (Req 5.6).
+
+- **5.5 (2026-06-08): `request_stream` deliberate out-of-scope override landed.**
+  1 RED→GREEN test added to `test_watsonx_sdk_construction.py`. Canonical
+  `mise run check` green: lint+format clean, pyright 0 errors, **122 passed / 1
+  skipped**. Two gotchas: (1) the `Model` ABC's default `request_stream` already
+  raises a *generic* `NotImplementedError`, so the RED matches on `"out of scope"`
+  (unique to our message) to fail against the base and pass only on the override;
+  (2) pyright-strict flags `@asynccontextmanager` + `-> AsyncIterator[...]` as
+  `reportDeprecated` — annotated `-> AsyncGenerator[StreamedResponse]` instead
+  (a subtype, so LSP-covariant with the base's `AsyncIterator`). Signature mirrors
+  the base exactly (incl. `run_context`) for Liskov compatibility.
 
 ---
 

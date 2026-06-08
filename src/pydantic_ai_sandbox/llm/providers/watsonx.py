@@ -35,6 +35,7 @@ be caught by ``tests/unit/test_no_hardcoded_model_ids.py`` and the pre-commit
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -53,14 +54,17 @@ from pydantic_ai.models import Model
 from pydantic_ai.usage import RequestUsage
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from ibm_watsonx_ai.foundation_models import ModelInference
+    from pydantic_ai import RunContext
     from pydantic_ai.messages import (
         FinishReason,
         ModelMessage,
         ModelRequestPart,
         ModelResponsePart,
     )
-    from pydantic_ai.models import ModelRequestParameters
+    from pydantic_ai.models import ModelRequestParameters, StreamedResponse
     from pydantic_ai.settings import ModelSettings
 
     from pydantic_ai_sandbox.config import Settings
@@ -540,6 +544,38 @@ class WatsonxSDKModel(Model):
                 _FINISH_REASON_MAP.get(finish_reason_key) if finish_reason_key else None
             ),
         )
+
+    @asynccontextmanager
+    async def request_stream(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+        run_context: RunContext[Any] | None = None,
+    ) -> AsyncGenerator[StreamedResponse]:
+        """Reject streaming — out of scope for the watsonx SDK transport (Req 2.1).
+
+        The ``Model`` ABC's default ``request_stream`` already raises a *generic*
+        ``NotImplementedError``; this override makes the refusal deliberate and
+        watsonx-specific. Streaming is explicitly out of scope (spec.md "Out of
+        Scope"): the ``/chat`` endpoint issues a single non-streaming
+        :meth:`request`. Failing loud here means a future caller wiring streaming
+        gets an explicit, greppable signal rather than a silent or misleading
+        default. The signature mirrors the base exactly so the override stays
+        Liskov-compatible; the unreachable ``yield`` keeps it an async generator
+        for the ``@asynccontextmanager`` contract.
+
+        Raises:
+            NotImplementedError: Always — streaming is unsupported.
+        """
+        del messages, model_settings, model_request_parameters, run_context
+        msg = (
+            "watsonx SDK transport does not support streaming responses "
+            "(out of scope); the /chat endpoint issues a single non-streaming "
+            "request via WatsonxSDKModel.request."
+        )
+        raise NotImplementedError(msg)
+        yield  # pragma: no cover — unreachable; required to type as a generator
 
 
 def _build_watsonx(settings: Settings) -> Model:
