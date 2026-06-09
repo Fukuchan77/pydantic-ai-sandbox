@@ -21,35 +21,48 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_s
 _Depends:_ none
 _Requirements:_ 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 11.1, 11.2, 11.3, 11.4
 
-- [ ] 1.1 Create `_openai_mapping.py` and move the message-mapping helpers (`_map_messages`, `_map_request_part`, `_map_user_prompt`, `_map_assistant_message`) out of `watsonx.py`, preserving signatures verbatim.
+- [x] 1.1 Create `_openai_mapping.py` and move the message-mapping helpers (`_map_messages`, `_map_request_part`, `_map_user_prompt`, `_map_assistant_message`) out of `watsonx.py`, preserving signatures verbatim.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ none
   _Requirements:_ 2.1, 2.3, 11.1, 11.2
-- [ ] 1.2 Move the tool/usage/finish-reason helpers (`_map_tools` with `model_request_parameters` signature, `_map_usage`, `_FINISH_REASON_MAP`) into `_openai_mapping.py`.
+- [x] 1.2 Move the tool/usage/finish-reason helpers (`_map_tools` with `model_request_parameters` signature, `_map_usage`, `_FINISH_REASON_MAP`) into `_openai_mapping.py`.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 1.1
   _Requirements:_ 2.2, 3.2, 11.1, 11.2
-- [ ] 1.3 Generalize `WatsonxSDKModel._build_response` into a free function `build_response(raw: dict, *, model_name: str, provider_name: str)` in `_openai_mapping.py`, lifting the hard-coded identity fields to parameters.
+- [x] 1.3 Generalize `WatsonxSDKModel._build_response` into a free function `build_response(raw: dict, *, model_name: str, provider_name: str)` in `_openai_mapping.py`, lifting the hard-coded identity fields to parameters.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 1.1
   _Requirements:_ 3.1, 3.3, 3.4, 11.1, 11.2
-- [ ] 1.4 Update `watsonx.py` to import the shared utilities (re-export via `__all__` with `# pyright: ignore[reportPrivateUsage]` per the cross-module underscore convention); confirm `WatsonxSDKModel` calls the shared `build_response` with `model_name=self.model_name, provider_name="watsonx"` and behaves byte-for-byte as before.
+- [x] 1.4 Update `watsonx.py` to import the shared utilities (re-export via `__all__` with `# pyright: ignore[reportPrivateUsage]` per the cross-module underscore convention); confirm `WatsonxSDKModel` calls the shared `build_response` with `model_name=self.model_name, provider_name="watsonx"` and behaves byte-for-byte as before.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 1.2, 1.3
   _Requirements:_ 11.3, 11.4
-- [ ] 1.5 Add hermetic, transport-agnostic tests for the shared utilities: message/tool/usage maps, finish-reason coverage, unsupported part raises `NotImplementedError`, empty choices raise `UnexpectedModelBehavior`, absent usage returns zeroed `RequestUsage`, and tool-call `arguments` preserved as a raw JSON string.
+- [x] 1.5 Add hermetic, transport-agnostic tests for the shared utilities: message/tool/usage maps, finish-reason coverage, unsupported part raises `NotImplementedError`, empty choices raise `UnexpectedModelBehavior`, absent usage returns zeroed `RequestUsage`, and tool-call `arguments` preserved as a raw JSON string.
   _Boundary:_ `tests/unit/test_openai_mapping_shared.py`
   _Depends:_ 1.4
   _Requirements:_ 2.1, 2.2, 2.3, 2.4, 3.1, 3.2, 3.3, 3.4, 11.1, 11.2
-- [ ] 1.6 Verify the existing watsonx SDK test suites pass unmodified (extraction refactor changed no SDK behavior).
+- [x] 1.6 Verify the existing watsonx SDK test suites pass unmodified (extraction refactor changed no SDK behavior).
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 1.4
   _Requirements:_ 11.4
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- Tasks 1.1–1.3 already extracted the helpers + generalised `build_response`;
+  1.4's production delta was minimal — the import + `build_response(model_name=…,
+  provider_name="watsonx")` wiring was already in place, so 1.4 reduced to the
+  `__all__` re-export (preserving watsonx.py's pre-extraction public mapping
+  surface for backward compat) plus byte-for-byte verification.
+- Existing SDK suites exercise the mapping **through** `WatsonxSDKModel.request()`
+  (mocked `achat`), never importing `_map_*` directly — so the extraction needed
+  no test edits to satisfy Req 11.4; `git diff --stat tests/` confirms zero
+  modifications to existing test files (only the new shared-mapping file added).
+- `_openai_mapping` is transport-agnostic: the 1.5 tests stamp a non-watsonx
+  identity (`some-provider`) to prove `build_response` was genuinely generalised
+  rather than re-hardcoding `"watsonx"` (Req 11 / future LiteLLMModel parity).
+- Env quirk: `pytest --cov` trips a beartype-claw circular import via conftest's
+  FastAPI `TestClient` import; the default `uv run pytest` (no `--cov`) is clean.
+  The coverage ratchet is owned by Task 7.1 — flag the invocation there.
 
 ---
 

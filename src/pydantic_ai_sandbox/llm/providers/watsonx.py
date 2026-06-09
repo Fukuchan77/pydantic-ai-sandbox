@@ -39,229 +39,45 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
-from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
-from pydantic_ai.messages import (
-    ModelRequest,
-    ModelResponse,
-    SystemPromptPart,
-    TextPart,
-    ThinkingPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
+from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.models import Model
-from pydantic_ai.usage import RequestUsage
+
+# Shared OpenAI-shaped mapping (Req 11 / ADR-1): the helpers and ``build_response``
+# now live in ``llm._openai_mapping`` so this transport and ``LiteLLMModel`` consume
+# one implementation. The ``_map_*`` names are spec-mandated underscore helpers
+# imported across the module boundary; the scoped pyright suppressions acknowledge
+# that hop without weakening the strict ruleset (tech.md typing convention).
+from pydantic_ai_sandbox.llm._openai_mapping import (
+    _map_messages,  # pyright: ignore[reportPrivateUsage]
+    _map_tools,  # pyright: ignore[reportPrivateUsage]
+    build_response,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     from ibm_watsonx_ai.foundation_models import ModelInference
     from pydantic_ai import RunContext
-    from pydantic_ai.messages import (
-        FinishReason,
-        ModelMessage,
-        ModelRequestPart,
-        ModelResponsePart,
-    )
+    from pydantic_ai.messages import ModelMessage, ModelResponse
     from pydantic_ai.models import ModelRequestParameters, StreamedResponse
     from pydantic_ai.settings import ModelSettings
 
     from pydantic_ai_sandbox.config import Settings
 
-# Spec-mandated underscore-prefixed name (plan.md §2.3); exported via
-# ``__all__`` so pyright treats it as the module's public surface and does
-# not flag the cross-module import in ``llm.factory`` as unused.
-__all__ = ["_build_watsonx"]
-
-# OpenAI-style ``finish_reason`` keys (as returned in ``achat``'s response dict)
-# → pydantic_ai's normalised ``FinishReason`` literal. An absent or unmapped key
-# yields ``None``, matching pydantic_ai's own OpenAI Chat adapter rather than
-# inventing a watsonx-specific value.
-_FINISH_REASON_MAP: dict[str, FinishReason] = {
-    "stop": "stop",
-    "length": "length",
-    "tool_calls": "tool_call",
-    "content_filter": "content_filter",
-    "function_call": "tool_call",
-}
-
-
-def _map_user_prompt(part: UserPromptPart) -> dict[str, Any]:
-    """Map a :class:`UserPromptPart` to an OpenAI ``user`` message.
-
-    Only text content is in scope for the SDK transport. Multimodal items
-    (images, audio, documents) raise :class:`NotImplementedError` naming the
-    offending type rather than being dropped from the payload — vision is
-    explicitly out of scope (spec.md "Out of Scope") and a silent drop would
-    send the model a prompt missing context (Req 2.7, no silent drops).
-    """
-    content = part.content
-    if isinstance(content, str):
-        return {"role": "user", "content": content}
-
-    segments: list[str] = []
-    for item in content:
-        if isinstance(item, str):
-            segments.append(item)
-        else:
-            msg = (
-                "watsonx SDK transport supports text user content only; "
-                f"multimodal item {type(item).__name__!r} is out of scope."
-            )
-            raise NotImplementedError(msg)
-    return {"role": "user", "content": "".join(segments)}
-
-
-def _map_assistant_message(response: ModelResponse) -> dict[str, Any]:
-    """Map a prior :class:`ModelResponse` to an OpenAI ``assistant`` message.
-
-    Replays the model's own earlier turn — text plus tool-call parts — back into
-    the request history so multi-step tool loops keep their context. Thinking
-    parts are reasoning artefacts, not API-required content, so they are
-    intentionally not resent; any other part type is unsupported and raises
-    rather than being silently dropped (Req 2.7).
-    """
-    segments: list[str] = []
-    tool_calls: list[dict[str, Any]] = []
-    for part in response.parts:
-        if isinstance(part, TextPart):
-            segments.append(part.content)
-        elif isinstance(part, ToolCallPart):
-            tool_calls.append(
-                {
-                    "id": part.tool_call_id,
-                    "type": "function",
-                    "function": {
-                        "name": part.tool_name,
-                        "arguments": part.args_as_json_str(),
-                    },
-                },
-            )
-        elif isinstance(part, ThinkingPart):
-            # Reasoning trace — not part of the OpenAI assistant message contract;
-            # deliberately omitted (documented, not a silent drop).
-            continue
-        else:
-            msg = f"Unsupported assistant message part: {type(part).__name__!r}."
-            raise NotImplementedError(msg)
-
-    message: dict[str, Any] = {"role": "assistant"}
-    if segments:
-        message["content"] = "".join(segments)
-    if tool_calls:
-        message["tool_calls"] = tool_calls
-    return message
-
-
-def _map_request_part(part: ModelRequestPart) -> dict[str, Any]:
-    """Map a single :class:`ModelRequest` part to an OpenAI message dict.
-
-    Exhaustively covers the four request-side parts of the ``ModelRequestPart``
-    union — system prompts, user prompts, tool returns and retry prompts — so no
-    part is silently dropped (Req 2.7); a future addition to the union would
-    surface as a pyright error here rather than a runtime drop.
-    """
-    if isinstance(part, SystemPromptPart):
-        return {"role": "system", "content": part.content}
-    if isinstance(part, UserPromptPart):
-        return _map_user_prompt(part)
-    if isinstance(part, ToolReturnPart):
-        return {
-            "role": "tool",
-            "tool_call_id": part.tool_call_id,
-            "content": part.model_response_str(),
-        }
-    # ``RetryPromptPart`` is the only remaining member of the ``ModelRequestPart``
-    # union; pyright proves exhaustiveness, so handling it here (rather than via a
-    # redundant ``isinstance``) keeps the type-checker happy while still covering
-    # every emitted part. A retry without a tool name is feedback on free-text /
-    # native output (→ ``user``); with one it targets a specific tool call (→
-    # ``tool``).
-    if part.tool_name is None:
-        return {"role": "user", "content": part.model_response()}
-    return {
-        "role": "tool",
-        "tool_call_id": part.tool_call_id,
-        "content": part.model_response(),
-    }
-
-
-def _map_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
-    """Map the pydantic_ai message history to OpenAI-shaped ``achat`` messages.
-
-    Handles every request/response part the agent can emit — system prompts,
-    rendered ``instructions``, user prompts, tool returns, retry prompts and
-    prior assistant turns — raising on anything unmapped so a part is never
-    silently dropped (Req 2.7). The rendered ``instructions`` string (the
-    agent's system prompt, which arrives on :class:`ModelRequest` rather than as
-    a :class:`SystemPromptPart`) is inserted as a leading ``system`` message,
-    after any explicit system prompts, mirroring pydantic_ai's OpenAI adapter.
-    """
-    openai_messages: list[dict[str, Any]] = []
-    instructions: str | None = None
-    for message in messages:
-        if isinstance(message, ModelRequest):
-            if message.instructions is not None:
-                instructions = message.instructions
-            openai_messages.extend(_map_request_part(part) for part in message.parts)
-        else:
-            # Only ``ModelResponse`` remains in the ``ModelMessage`` union — a
-            # prior assistant turn replayed into the request history.
-            openai_messages.append(_map_assistant_message(message))
-
-    if instructions is not None:
-        insert_at = next(
-            (i for i, m in enumerate(openai_messages) if m.get("role") != "system"),
-            len(openai_messages),
-        )
-        openai_messages.insert(insert_at, {"role": "system", "content": instructions})
-    return openai_messages
-
-
-def _map_tools(
-    model_request_parameters: ModelRequestParameters,
-) -> list[dict[str, Any]] | None:
-    """Map function + output tool definitions to OpenAI tool specs, or ``None``.
-
-    The agent registers ordinary tools (e.g. ``search_kb``) and, in tool-mode
-    structured output, an output tool; both must be advertised to ``achat`` for
-    the model to call them — dropping them would silently disable tool calling
-    and structured output (Req 2.7). Returns ``None`` when there are no tools so
-    the SDK's optional ``tools`` argument stays unset.
-    """
-    definitions = [
-        *model_request_parameters.function_tools,
-        *model_request_parameters.output_tools,
-    ]
-    if not definitions:
-        return None
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": definition.name,
-                "description": definition.description or "",
-                "parameters": definition.parameters_json_schema,
-            },
-        }
-        for definition in definitions
-    ]
-
-
-def _map_usage(raw_usage: dict[str, Any] | None) -> RequestUsage:
-    """Map the OpenAI-shaped ``usage`` block to a :class:`RequestUsage`.
-
-    watsonx returns ``prompt_tokens`` / ``completion_tokens``; an absent usage
-    block yields a zeroed :class:`RequestUsage` rather than failing (the response
-    is still usable — usage is observability metadata, not load-bearing output).
-    """
-    if not raw_usage:
-        return RequestUsage()
-    return RequestUsage(
-        input_tokens=raw_usage.get("prompt_tokens", 0),
-        output_tokens=raw_usage.get("completion_tokens", 0),
-    )
+# ``_build_watsonx`` is the spec-mandated underscore-prefixed factory entry
+# (plan.md §2.3). The three shared mapping utilities are **re-exported** here
+# (Task 1.4): they were part of ``watsonx.py``'s public surface in feature
+# ``002`` before the C1 extraction, so listing them in ``__all__`` preserves
+# that surface byte-for-byte (Req 11.3/11.4) and marks the cross-module imports
+# as intentional re-exports (pyright/ruff treat ``__all__`` membership as use).
+# The underscore names already carry the ``# pyright: ignore[reportPrivateUsage]``
+# on their import below (tech.md cross-module underscore convention).
+__all__ = [
+    "_build_watsonx",
+    "_map_messages",
+    "_map_tools",
+    "build_response",
+]
 
 
 class WatsonxSDKModel(Model):
@@ -490,13 +306,13 @@ class WatsonxSDKModel(Model):
     def _build_response(self, raw: dict[str, Any]) -> ModelResponse:
         """Build a :class:`ModelResponse` from an OpenAI-shaped ``achat`` dict.
 
-        Maps ``choices[0].message`` exhaustively — assistant ``content`` →
-        :class:`TextPart`, each ``tool_calls`` entry → :class:`ToolCallPart`
-        (name, raw JSON arguments, id) — plus ``usage``, ``finish_reason`` and
-        the response ``id`` (Req 9.11). An empty ``content`` with no tool calls
-        yields an empty ``parts`` list (a valid, if degenerate, response;
-        ``models/CLAUDE.md`` rule 433), but a response carrying no ``choices`` at
-        all is malformed and raises.
+        Thin adapter over the shared :func:`build_response` (Req 11 / ADR-1):
+        stamps this transport's identity (``model_name`` /
+        ``provider_name="watsonx"``) onto the response so ``gen_ai.request.model``
+        and ``gen_ai.system`` satisfy the instrumentation contract. The mapping
+        logic — including the no-``choices`` :class:`UnexpectedModelBehavior`
+        guard — now lives in ``_openai_mapping`` and is unchanged from the
+        original in-module method (byte-for-byte behaviour, Req 11.4).
 
         Args:
             raw: The dict returned by :meth:`ModelInference.achat`.
@@ -506,43 +322,13 @@ class WatsonxSDKModel(Model):
             (``model_name`` / ``provider_name``) stamped for instrumentation.
 
         Raises:
-            UnexpectedModelBehavior: If the response has no ``choices``.
+            UnexpectedModelBehavior: If the response has no ``choices`` (raised by
+                the shared :func:`build_response`).
         """
-        choices: list[Any] = raw.get("choices") or []
-        if not choices:
-            msg = "watsonx achat response contained no choices."
-            raise UnexpectedModelBehavior(msg)
-        choice: dict[str, Any] = choices[0]
-        message: dict[str, Any] = choice.get("message") or {}
-
-        parts: list[ModelResponsePart] = []
-        content: Any = message.get("content")
-        if content:
-            parts.append(TextPart(content))
-        tool_calls: list[Any] = message.get("tool_calls") or []
-        for call in tool_calls:
-            function: dict[str, Any] = call.get("function") or {}
-            parts.append(
-                ToolCallPart(
-                    tool_name=function.get("name", ""),
-                    args=function.get("arguments"),
-                    tool_call_id=call.get("id", ""),
-                ),
-            )
-
-        # ``dict.get`` widens to ``Any | None``; collapse to ``Any`` so the
-        # lookup key satisfies the map's ``str`` parameter, and short-circuit a
-        # missing/empty reason to ``None`` (pydantic_ai's unmapped-key default).
-        finish_reason_key: Any = choice.get("finish_reason")
-        return ModelResponse(
-            parts=parts,
-            usage=_map_usage(raw.get("usage")),
+        return build_response(
+            raw,
             model_name=self.model_name,
             provider_name="watsonx",
-            provider_response_id=raw.get("id"),
-            finish_reason=(
-                _FINISH_REASON_MAP.get(finish_reason_key) if finish_reason_key else None
-            ),
         )
 
     @asynccontextmanager
