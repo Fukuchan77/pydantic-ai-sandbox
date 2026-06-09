@@ -1106,3 +1106,60 @@ as the Ollama integration test, which is also skipped in the default gate.
   ChatResponse structure", so `sources` is pinned as `list[str]` shape only — not
   non-empty. The Ollama lane's stricter non-empty check tracks *its* Req 6.2;
   carrying it over would over-constrain on watsonx model nondeterminism.
+
+---
+
+## Task 9 — CI/CD integration workflow (2026-06-09)
+
+**Scope:** 9.1 (`integration-watsonx.yml`, `workflow_dispatch`-only + concurrency)
++ 9.2 (wire 4 `WATSONX_*` CI secrets + explicit fail-on-missing-secret guard).
+Both atomic in one file: `.github/workflows/integration-watsonx.yml`. Guarded by
+new hermetic contract test `tests/unit/test_watsonx_ci_workflow.py`.
+
+**TDD posture:** Genuine RED→GREEN (unlike the characterization Tasks 7.x). The
+deliverable is a YAML artifact that did not exist, so the 5-test structural guard
+failed RED (`FileNotFoundError` / missing-file assert on all 5) before the
+workflow was authored, then passed GREEN once it landed. The guard parses the
+workflow YAML and pins: (1) `on:` keys == `{workflow_dispatch}` exclusively
+(Req 11.2/SC-007); (2) `concurrency` block with `group` + `cancel-in-progress`;
+(3) all four `secrets.WATSONX_*` wired (Req 11.1); (4) a `run:` step that names
+all four secrets and `exit 1`s (Req 11.3 fail-not-skip); (5) `RUN_INTEGRATION_
+WATSONX` set so the gated e2e runs not skips.
+
+**Verification evidence:**
+
+| Gate | Command | Result |
+|------|---------|--------|
+| RED (file absent) | `uv run pytest tests/unit/test_watsonx_ci_workflow.py -q` | ✅ 5 failed (FileNotFoundError) |
+| GREEN (file landed) | `uv run pytest tests/unit/test_watsonx_ci_workflow.py -v` | ✅ 5 passed |
+| Secret-guard bash logic | local `bash -c` of the `${!var}`/`-z` loop | ✅ present→exit 0; missing→exit 1 naming the missing vars |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **206 passed / 2 skipped** (+5); ruff lint+format clean; pyright strict 0 errors |
+
+**Errors encountered & root cause:**
+
+- **`mise run check` aborted twice on the new test file** — (1) ruff *format*
+  flagged it (fixed with `ruff format`), then (2) pyright strict raised
+  `reportUnknown*` / `reportArgumentType`. Root cause: `yaml.safe_load -> Any` +
+  `isinstance(x, dict)` narrows to `dict[Unknown, Unknown]`, and the YAML-1.1
+  `on:`→`True` key needs non-`str` dict keys. Fix (not blind retry): typed the
+  parsed mapping `dict[Any, Any]` and applied `cast("dict[str, Any]"/"list[Any]",
+  ...)` at each narrowed/`.get()`-fallback site — the same SDK-dict cast
+  convention Task 5.3 established. 0 errors after.
+
+### Learnings for Act phase
+
+- **TDD applies to config artifacts via structural contract tests.** A CI
+  workflow has no pytest at runtime, but parsing it and asserting its invariants
+  is a real, RED-able test — and it locks the cost-control + fail-not-skip
+  guarantees against silent edits. Precedent: `test_no_hardcoded_model_ids.py`.
+- **Parse, don't grep, when comments share vocabulary with structure.** The
+  workflow's own comments name push/pull_request/schedule, so a text scan for
+  trigger *absence* would false-positive; `yaml.safe_load` sees only structure.
+  Cost: handle the YAML-1.1 `on:`→`True` keyword quirk.
+- **Declare transitively-present test deps honestly.** PyYAML rode in via
+  pre-commit; importing it directly warranted promoting `pyyaml`+`types-pyyaml`
+  to the dev group (pyright-strict stubs), mirroring Task 7.2's `respx` enabler.
+- **GitHub never auto-fails on an empty secret** — it injects `""`. Req 11.3's
+  fail-not-skip therefore *requires* an explicit `[ -z ]` + `exit 1` step;
+  without it the lane runs with blank creds and surfaces a confusing deep
+  `ValueError`, or (gate unset) skips green.
