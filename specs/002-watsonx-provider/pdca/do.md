@@ -809,3 +809,52 @@ attribute.
 - **Req 5.6's "no duration attribute" is a *negative* contract** — best pinned by
   asserting the absence of duration-bearing attributes on the surfaced error, so
   a future well-meaning "add timeout seconds to the error" regresses loudly.
+
+---
+
+## Task 7.4 — URL format validation tests (Req 9.6) — 2026-06-09
+
+**Boundary:** `tests/unit/test_watsonx_url_validation.py` (new). **Depends:** 2.
+
+### Do
+
+- New `test_watsonx_url_validation.py` — **18 cases / 6 functions**: valid-format
+  (×5, incl. scheme case-fold + verbatim round-trip), unset-skips-validation,
+  invalid-format fail-fast (×10), no-network-socket (detonated `socket.socket`),
+  unreachable-`.invalid`-host accepted (reachability deferred).
+- TDD posture: **characterization** (cf. 7.1/7.3). The `_validate_watsonx_url`
+  field validator landed at Task 2.4, so RED = absent file (collection error);
+  all 18 passed on first run, pinning the structural contract.
+
+### Key decisions
+
+- **Isolate the field validator from the credential gate via `LLM_PROVIDER=ollama`.**
+  Both emit messages containing `WATSONX_URL`, so `"WATSONX_URL" in msg` alone
+  can't prove which fired. A dormant gate lets invalid-URL failures surface only
+  from the format validator; tests assert its distinctive wording (`"must be a
+  valid URL"`, `"http(s)://"`, example host, echoed `repr(bad_url)`) — pinning
+  the *detailed-message* half of Req 4.2.
+- **`urlparse` lower-cases the scheme** (verified empirically): `HTTPS://Example.com`
+  passes the membership check, but the validator returns the value *unchanged* —
+  test pins both acceptance and verbatim round-trip (no normalization).
+- **Two complementary no-network proofs (Req 4.1/4.3):** the negative
+  booby-trapped `socket.socket`, plus the positive `.invalid`-TLD host that passes
+  structural validation (RFC 6761 — never resolves), proving shape-only checking.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_url_validation.py` | ✅ 18 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **178 passed / 1 skipped** (+18); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **A shared error-message token (`WATSONX_URL`) across two validators is a
+  test-precision trap.** Disambiguate by selecting a provider context that keeps
+  the other validator dormant, then assert on wording unique to the one under
+  test — otherwise a green test can't tell which guard actually fired.
+- **Reachability-free validation is best proven *positively*, not just
+  negatively.** A booby-trapped socket proves "no socket opened"; an unresolvable
+  but well-formed host that still passes proves "shape-only, by design" — the two
+  together close Req 4.1 and 4.3 without ambiguity.

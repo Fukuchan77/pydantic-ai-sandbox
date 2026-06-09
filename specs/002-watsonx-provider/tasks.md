@@ -450,7 +450,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_timeout_config.py`
   _Depends:_ 5
   _Requirements:_ 9.5
-- [ ] 7.4 (P) URL format validation tests: valid formats pass, invalid formats fail fast with detailed messages, and no network call occurs during validation
+- [x] 7.4 (P) URL format validation tests: valid formats pass, invalid formats fail fast with detailed messages, and no network call occurs during validation
   _Boundary:_ `tests/unit/test_watsonx_url_validation.py`
   _Depends:_ 2
   _Requirements:_ 9.6
@@ -472,6 +472,36 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.4 (2026-06-09): dedicated URL-format validation suite landed (Req 9.6).**
+  New `test_watsonx_url_validation.py` — 18 cases (6 functions; valid-format and
+  invalid-format parametrized ×5 / ×10). The source (the `_validate_watsonx_url`
+  field validator) landed at Task 2.4, so this is **characterization, not
+  RED-driven** (same posture as 7.1/7.3): all 18 passed on first run, pinning the
+  structural contract rather than driving new code. The RED was the absent file
+  (collection error). `mise run check` green: **178 passed / 1 skipped** (+18),
+  lint+format clean, pyright strict 0 errors.
+- **The validator is isolated from the credential gate via `LLM_PROVIDER=ollama`.**
+  Both the URL *format* validator and the watsonx *credential gate* emit messages
+  containing the `WATSONX_URL` token, so asserting only `"WATSONX_URL" in msg`
+  cannot prove *which* fired. Constructing with a valid ollama selection keeps the
+  gate dormant, so an invalid `WATSONX_URL` can only surface from the field
+  validator; tests then assert the validator's distinctive wording (`"must be a
+  valid URL"`, `"http(s)://"`, the example host, and the echoed `repr(bad_url)`)
+  to pin the *detailed-message* half of Req 4.2 unambiguously.
+- **Two positive edges encode the structural-only contract.** (1) `HTTPS://Example.com`
+  passes because `urlparse` lower-cases the *scheme* before the membership check —
+  verified empirically before coding — yet the validator returns the value
+  *unchanged* (no normalization), so the test pins both acceptance and verbatim
+  round-trip. (2) A `.invalid`-TLD host (RFC 6761, never resolves) passes
+  validation, which is positive proof no DNS/reachability call occurs (Req 4.3) —
+  complementing the booby-trapped `socket.socket` negative test (Req 4.1).
+- **Relationship to `test_config.py` (no intent duplication).** `test_config.py`
+  keeps its small good/bad smoke set as one facet of the Task 3.2 `Settings`
+  contract; per the coverage matrix Req 9.6 maps **solely** to 7.4, so this file
+  is its authoritative, self-contained home and owns the exhaustive edges
+  (scheme case-fold, unset-skips, unreachable-host, empty-string, `file://`/`ws://`
+  scheme rejection).
 
 - **7.3 (2026-06-09): dedicated timeout-configuration suite landed (Req 9.5).**
   New `test_watsonx_timeout_config.py` — 11 cases. The *transport-application*
