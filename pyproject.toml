@@ -11,8 +11,7 @@ dependencies = [
     # TypeError); >=1.5.13 (requires_python <3.15,>=3.11) fixes the import.
     "ibm-watsonx-ai>=1.5.13",
     "logfire[fastapi,httpx]",
-    # V2 Beta is the project target; the slim[openai] extra pulls the
-    # OpenAI-compatible chat client used by the Ollama provider (Plan AD-6 / research.md R-1).
+    # slim[openai] pulls the OpenAI-compatible chat client used by the Ollama provider.
     "pydantic-ai>=2.0.0b6",
     "pydantic-ai-slim[openai]>=2.0.0b6",
     "pydantic-settings",
@@ -28,14 +27,9 @@ litellm = ["litellm"]
 
 [dependency-groups]
 dev = [
-    # The litellm transport is a *production* opt-in extra (above), kept out of
-    # the default install to minimize supply-chain footprint. The *test* env,
-    # however, must exercise the litellm path (Req 9.4 RESPX tests + the
-    # ``_build_litellm`` branch counts toward the 98% ratchet, Req 9.10), so the
-    # package is also a dev-group dependency: ``uv sync`` (local) and
-    # ``uv sync --all-groups`` (CI) install it, while extras (``--extra litellm``)
-    # remain the production install path. Without this the litellm tests fail
-    # collection in any env that did not manually request the extra.
+    # litellm is declared here in addition to the optional extra above: the test
+    # suite must exercise the litellm path, and `uv sync` installs dev groups but
+    # not extras. Without this the litellm tests fail collection.
     "litellm",
     "pip-audit",
     "pre-commit",
@@ -43,29 +37,19 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    # PyYAML + its stubs back the hermetic CI-workflow contract guard
-    # (test_watsonx_ci_workflow.py, Task 9 / Req 11.1-11.3): parsing the
-    # workflow YAML pins triggers / concurrency / fail-on-missing-secret while
-    # ignoring comments (a text grep cannot). PyYAML is already present
-    # transitively via pre-commit, but the test imports it directly, so it is
-    # declared here for honest resolution; types-pyyaml satisfies pyright strict.
+    # PyYAML is present transitively (via pre-commit) but imported directly by the
+    # CI-workflow contract test, so it is declared here for honest resolution;
+    # types-pyyaml satisfies pyright strict.
     "pyyaml",
     "types-pyyaml",
-    # RESPX intercepts the httpx round-trip the LiteLLM transport's OpenAI
-    # adapter makes, so the watsonx litellm path is tested hermetically with no
-    # egress (Req 9.4 — "RESPX-based tests for the LiteLLM path"; spec.md
-    # Testing). The SDK transport stays on httpx send-patches; only the litellm
-    # request path needs HTTP-level mocking.
+    # HTTP-level mock for the litellm transport's request-path tests.
     "respx",
     "ruff",
 ]
 
-# Hatchling is uv's recommended PEP 517 backend. Declaring it (a) flips this
-# project from uv's "virtual" mode into a real package so `uv sync` performs
-# the editable install on its own (CI was hitting ModuleNotFoundError without
-# this — see PDCA Act 2026-05-24 / Mistake-2), and (b) lets hatchling locate
-# the src-layout package without an explicit packages= override on most layouts;
-# we set it anyway so wheel builds are deterministic regardless of CWD.
+# Declaring a build backend flips this project from uv's "virtual" mode into a real
+# package so `uv sync` performs the editable install (CI hit ModuleNotFoundError
+# without it). packages= below is set explicitly for deterministic wheel builds.
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -136,15 +120,8 @@ venv = "."
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# Project root on sys.path so `from tests.support.model_fakes import ...`
-# resolves regardless of CWD or pytest's rootdir heuristics. Without this,
-# CI's `mise run check` lane (which fans out lint/format/typecheck/test in
-# parallel under mise's depends model) raced into a state where pytest's
-# rootdir-based sys.path insertion picked `tests/unit/` rather than the
-# project root, producing `ModuleNotFoundError: No module named 'tests'`
-# on the two files that runtime-import from `tests.support`. The other
-# tests survived because their `from tests.conftest import ...` lives
-# inside `if TYPE_CHECKING:` and never executes at import time.
+# Project root on sys.path so `from tests.support... ` resolves regardless of CWD
+# or pytest's rootdir heuristics (some test files runtime-import from tests.support).
 pythonpath = ["."]
 
 [tool.coverage.run]
@@ -153,13 +130,8 @@ source = ["src/pydantic_ai_sandbox"]
 branch = true
 
 [tool.coverage.report]
-# Initial floor (PDCA Act 2026-05-24): measured 98% across 50 unit tests; floor
-# set to measured−5pt = 93 to absorb noise from upcoming watsonx/Anthropic/Bedrock
-# stubs being replaced (Spec 002-multi-provider). Plan R-6 ratchet adds +5pt per
-# Req-implementation task; raise this together with each provider-impl task.
-# Raised 93 → 98 for the watsonx provider implementation (spec 002-watsonx-provider
-# task 1.1, Req 9.10): the new SDK/LiteLLM branches must be well-covered or the
-# gate regresses (see plan.md §Performance Goals / tech.md coverage ratchet).
+# Coverage ratchet: raise this in lockstep with each provider-implementation task
+# so newly added branches stay covered (plan.md §Performance Goals).
 fail_under = 98
 show_missing = true
 skip_covered = false

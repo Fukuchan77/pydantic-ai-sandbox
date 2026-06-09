@@ -55,7 +55,9 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.openai import OpenAIChatModel
 
+from pydantic_ai_sandbox.config import Settings
 from pydantic_ai_sandbox.llm.providers.watsonx import (
+    _build_litellm,  # pyright: ignore[reportPrivateUsage]
     _build_watsonx,  # pyright: ignore[reportPrivateUsage]
 )
 from tests.conftest import (
@@ -420,3 +422,25 @@ async def test_litellm_request_http_error_surfaces_as_model_api_error(
         )
         with pytest.raises(ModelAPIError):
             await model.request(messages, None, ModelRequestParameters())
+
+
+def test_litellm_apikey_none_guard_raises_typeerror() -> None:
+    """The defensive ``apikey``/``model_id`` guard fires when a cred drifts to ``None``.
+
+    Mirrors the SDK builder's ``_build_client`` guard
+    (``test_build_client_missing_apikey_raises_typeerror``): the credential gate
+    (config Task 2.2) rejects a missing ``WATSONX_APIKEY`` / ``WATSONX_MODEL_ID``
+    at boot, so production never reaches this branch. We simulate that post-drift
+    state with :meth:`Settings.model_construct` (no validators run) and assert
+    ``_build_litellm`` fails loud — ``f"watsonx/{None}"`` would otherwise be a
+    silent mis-route rather than a clear error.
+    """
+    drifted = Settings.model_construct(
+        watsonx_apikey=None,
+        watsonx_model_id=WATSONX_TEST_MODEL_ID,
+        watsonx_url=WATSONX_TEST_URL,
+        watsonx_transport="litellm",
+    )
+
+    with pytest.raises(TypeError, match="is None at _build_litellm time"):
+        _build_litellm(drifted)  # pyright: ignore[reportPrivateUsage]

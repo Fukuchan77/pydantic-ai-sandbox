@@ -357,6 +357,68 @@ def test_watsonx_transport_rejects_unknown_value(
     assert "litellm" in msg
 
 
+def test_watsonx_transport_blank_value_defaults_to_sdk(
+    settings_factory: SettingsFactory,
+) -> None:
+    """An empty `WATSONX_TRANSPORT` (`""`) normalises to `"sdk"` (Req 2.2).
+
+    A blank string is a real env-channel value (`WATSONX_TRANSPORT=` in a
+    `.env`), distinct from an unset var: the `mode="before"` validator strips and
+    lower-cases it to `""`, then falls back to the `"sdk"` default rather than
+    failing the `Literal` check.
+    """
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        WATSONX_TRANSPORT="",
+    )
+    assert settings.watsonx_transport == "sdk"
+
+
+def test_watsonx_transport_none_value_defaults_to_sdk(
+    settings_factory: SettingsFactory,
+) -> None:
+    """An explicit `None` for `watsonx_transport` normalises to `"sdk"` (Req 2.2).
+
+    The env channel can only carry strings, so the validator's `value is None`
+    branch is reachable only via a direct init kwarg. Seat valid ollama env via
+    the factory's side effects (it clears `_MANAGED_ENV_KEYS` and sets the ollama
+    vars), then pass `watsonx_transport=None` directly: the `mode="before"`
+    validator must run (returning `"sdk"`) — were it skipped, `None` would fail
+    the non-optional `Literal["sdk", "litellm"]` check instead.
+    """
+    settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    settings = Settings(watsonx_transport=None)  # pyright: ignore[reportArgumentType]
+    assert settings.watsonx_transport == "sdk"
+
+
+def test_watsonx_transport_non_string_value_is_rejected(
+    settings_factory: SettingsFactory,
+) -> None:
+    """A non-string `watsonx_transport` fails fast listing the valid values (Req 2.5).
+
+    Like the `None` branch, a non-string value cannot arrive via the env channel;
+    a direct init kwarg (`123`) drives the validator's `not isinstance(value, str)`
+    guard, which raises the same valid-values `ValueError` as an out-of-set string
+    (wrapped by Pydantic into `ValidationError`).
+    """
+    settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(watsonx_transport=123)  # pyright: ignore[reportArgumentType]
+    msg = str(exc_info.value)
+    assert "sdk" in msg
+    assert "litellm" in msg
+
+
 # --- 2.4: URL format validation (I/O-free) ---------------------------------- #
 
 
