@@ -1068,3 +1068,41 @@ fixture (Task 3.1 earmarked it for 7.8).
   `.strip().lower()` on fallback members is load-bearing: without it a mixed-case
   entry silently disarms the gate. Pinning it turns a latent bypass into a
   test failure.
+
+---
+
+## Task 8 — Opt-in integration test (2026-06-09)
+
+**Scope:** 8.1 (gated e2e test file, stateless, no cleanup) + 8.2 (`/healthz` 200
++ `/chat` 200 + valid `ChatResponse`). Both atomic in one file:
+`tests/integration/test_watsonx_chat_e2e.py`.
+
+**TDD posture:** Pattern-following / characterization (mirrors
+`test_ollama_chat_e2e.py`). RED = absent file (collection target missing); GREEN =
+file collects + skips cleanly under the default lane. The live-backend GREEN is
+operator-driven (needs real `WATSONX_*` creds), inherent to opt-in lanes — same
+as the Ollama integration test, which is also skipped in the default gate.
+
+**Verification evidence:**
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Skip behaviour (default) | `uv run pytest tests/integration/test_watsonx_chat_e2e.py -v` | ✅ 1 skipped (gate unset) |
+| Fail-not-skip (gate on) | `RUN_INTEGRATION_WATSONX=1 uv run pytest <file>` | ✅ FAILED (credential gate raised, not skipped) — confirms a misconfigured lane can't appear green |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **201 passed / 2 skipped** (+1 skip); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **Mirror the reference pattern, but diverge where the backend differs — and say
+  why.** The Ollama lane's reachability probe exists because a local daemon may be
+  down; watsonx is hosted SaaS, so the probe is dropped and the `/chat` 200
+  assertion becomes the liveness check. Copying the probe blindly would have
+  mistargeted a non-existent watsonx endpoint.
+- **Reuse existing fail-fast machinery instead of re-implementing it in the test.**
+  The credential gate (Task 2.2) already converts "opted-in but unconfigured" into
+  a hard failure; no bespoke missing-secret assertion was needed at the test
+  level (that's Task 9.2's CI concern).
+- **Match assertions to the requirement's altitude.** Req 10.2 says "valid
+  ChatResponse structure", so `sources` is pinned as `list[str]` shape only — not
+  non-empty. The Ollama lane's stricter non-empty check tracks *its* Req 6.2;
+  carrying it over would over-constrain on watsonx model nondeterminism.

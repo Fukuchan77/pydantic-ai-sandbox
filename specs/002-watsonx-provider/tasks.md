@@ -721,19 +721,45 @@ _Boundary:_ `tests/integration/test_watsonx_chat_e2e.py`
 _Depends:_ 5
 _Requirements:_ 10.1, 10.2, 10.3
 
-- [ ] 8.1 Create the watsonx e2e integration test gated by `RUN_INTEGRATION_WATSONX` (skip when unset), following the stateless single-request pattern of `test_ollama_chat_e2e.py` with no resource cleanup
+- [x] 8.1 Create the watsonx e2e integration test gated by `RUN_INTEGRATION_WATSONX` (skip when unset), following the stateless single-request pattern of `test_ollama_chat_e2e.py` with no resource cleanup
   _Boundary:_ `tests/integration/test_watsonx_chat_e2e.py`
   _Depends:_ 5
   _Requirements:_ 10.1, 10.3
-- [ ] 8.2 Add `/healthz` (200) and `/chat` (200 + valid `ChatResponse` structure) assertions to the integration test
+- [x] 8.2 Add `/healthz` (200) and `/chat` (200 + valid `ChatResponse` structure) assertions to the integration test
   _Boundary:_ `tests/integration/test_watsonx_chat_e2e.py`
   _Depends:_ 8.1
   _Requirements:_ 10.2
 
+_Status:_ ✅ Done (2026-06-09). New `test_watsonx_chat_e2e.py` (1 test, both
+sub-tasks atomic in one file). `mise run check` green: **201 passed / 2 skipped**
+(+1 skip — the new gated lane), lint+format clean, pyright strict 0 errors.
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **No eager reachability probe (deliberate divergence from the Ollama lane).**
+  `test_ollama_chat_e2e.py` probes `/v1/models` to convert "local daemon not
+  running" into a fail-not-skip. watsonx.ai is hosted SaaS with no equivalent
+  unauthenticated liveness surface, and construction is I/O-free (Req 1.5) — the
+  first network hit is the `/chat` request itself. Since `LLM_PROVIDER=watsonx`
+  is a *direct* selection (no fallback to recover the wrapped `ModelAPIError`),
+  an unreachable/misconfigured endpoint surfaces as `/chat` → HTTP 500, failing
+  the `status_code == 200` assertion. The `/chat` round-trip is thus its own
+  liveness check.
+- **Fail-not-skip is enforced by the existing credential gate, not a bespoke
+  guard.** With `RUN_INTEGRATION_WATSONX=1` but incomplete env, `get_settings()`
+  runs the Task 2.2 credential gate and raises `ValueError`/`ValidationError`,
+  surfacing as a test ERROR — verified empirically (gate-on with no creds →
+  `FAILED`, not skipped). No separate "missing-secret" assertion is needed at the
+  test level (that's Task 9.2's CI-workflow concern).
+- **`sources` asserted as `list[str]` shape only, NOT non-empty.** The Ollama
+  lane requires non-empty `sources` (its Req 6.2); watsonx Req 10.2 pins only
+  "ChatResponse structure is valid", and whether watsonx elects to invoke
+  `search_kb` is model-dependent. Requiring tool invocation here would
+  over-constrain on model nondeterminism beyond the spec — that behaviour is the
+  hermetic suite's concern (Task 7.6). Both `lru_cache` singletons
+  (`get_settings`/`get_chat_agent`) are cleared first, mirroring the Ollama lane,
+  so synthetic `watsonx_settings_factory` creds left in cache by earlier unit
+  tests can't misroute the live run.
 
 ---
 
