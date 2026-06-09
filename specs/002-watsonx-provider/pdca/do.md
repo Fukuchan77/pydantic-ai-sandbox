@@ -758,3 +758,54 @@ deferred to Task 11.1).
   transport: SDK → send-patch/fake `achat`; litellm-via-OpenAI-adapter → RESPX at
   `/chat/completions`. Verifying the actual wire path first avoided mocking the
   wrong layer.
+
+---
+
+## Task 7.3 — Timeout configuration tests (Req 9.5)
+
+**Date:** 2026-06-09 | **Boundary:** `tests/unit/test_watsonx_timeout_config.py`
+**Depends:** 5 | **Requirements:** 9.5 (→ 5.1/5.2/5.3/5.5/5.6, SC-014/SC-015)
+
+### Plan
+
+Create the dedicated timeout-configuration suite Req 9.5 mandates: default
+(30/120), custom (env override), invalid (negative/zero/non-numeric) and a
+simulated-timeout scenario asserting `error.class` only with no duration
+attribute.
+
+### Do
+
+- **Scoped against existing coverage to avoid duplication.** Transport-wiring of
+  timeouts is already pinned in `test_watsonx_sdk_construction.py` (SDK
+  constructor spies) and `test_watsonx_litellm_construction.py` (built OpenAI
+  client). Config-validator default/override/invalid live in `test_config.py`
+  (Task 2.5). 7.3 is the **authoritative Req 9.5 home** (coverage matrix maps 9.5
+  → 7.3 *only*), so it carries default/custom/invalid at the `Settings`
+  source-of-truth grain + the **net-new** simulated-timeout behaviour.
+- **11 cases:** defaults (1), env overrides (1), invalid parametrized 2 fields ×
+  4 bad values = 8, simulated-timeout (1).
+- **Simulated-timeout encoding (Req 5.6 / SC-015):** substitute `_build_client`
+  with a fake whose `achat` raises a real `httpx.ReadTimeout`; assert the wrapped
+  `ModelAPIError` (failover-recoverable), the timeout class in message +
+  `__cause__` (the `error.class` channel), and **no** `duration`/`timeout`/
+  `elapsed`/`seconds` attribute on the surfaced error. Hermetic, zero egress.
+- **Characterization posture (cf. Task 7.1):** source already landed (Task 2.5
+  validators, Task 5.4 wrapping), so all 11 passed first run — guards, not
+  RED-driven new code. Documented honestly rather than feigning a RED.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_timeout_config.py` | ✅ 11 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **160 passed / 1 skipped** (+11); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **When a requirement maps solely to one test task, that file must be
+  self-contained for the requirement even if adjacent files already touch the
+  cases.** Intentional, documented overlap > a sparse file that defers its own
+  requirement elsewhere.
+- **Req 5.6's "no duration attribute" is a *negative* contract** — best pinned by
+  asserting the absence of duration-bearing attributes on the surfaced error, so
+  a future well-meaning "add timeout seconds to the error" regresses loudly.
