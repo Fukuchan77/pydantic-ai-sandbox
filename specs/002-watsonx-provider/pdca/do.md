@@ -1319,3 +1319,78 @@ lint), gitleaks, forbid-hardcoded-model-ids, pip-audit.
   Any "fix the installed version" action that must survive a `uv run` has to land
   in `uv.lock` via a declared dependency — a lesson that generalises beyond this
   pip CVE to any env-level remediation under uv.
+
+---
+
+## Live integration verification — phase closure on SDK transport (2026-06-09)
+
+**Scope:** First *real-backend* execution of the two opt-in integration lanes
+(Task 8 / Req 10.1–10.3). Every prior gate in this log is hermetic
+(`TestModel` / `FunctionModel` / RESPX, Req 9.10); this entry is the load-bearing
+SC-001 proof point for the **SDK transport** half. **Boundary:** verification only
+— no source/spec edits (the lanes already existed; this records running them).
+
+**Method:** the `mise run test:integration` task body uses POSIX inline-env
+syntax (`RUN_INTEGRATION_OLLAMA=1 uv run …`), which the Windows default shell
+rejects (`'RUN_INTEGRATION_OLLAMA' is not recognized`). Ran via bash with the
+operator `.env` sourced into the environment first (Settings has
+`env_file=None`, so it reads the *process* env, never `.env` directly):
+`set -a; source .env; set +a` → `RUN_INTEGRATION_{OLLAMA,WATSONX}=1 uv run pytest tests/integration/<lane>.py`.
+
+**Results:**
+
+| Lane | Config | Result |
+|------|--------|--------|
+| Ollama e2e | `granite4.1:8b`, local daemon (`/v1`) | ✅ PASS (26.75s) — 200 + `ChatResponse`, `search_kb` invoked, non-empty `sources` |
+| watsonx e2e (SDK) | `meta-llama/llama-4-maverick-17b-128e-instruct-fp8`, us-south, `WATSONX_TRANSPORT=sdk` | ✅ PASS (3.50s) — `/healthz`→200 (`provider: watsonx`), `/chat`→200 + valid `ChatResponse` |
+
+**SC-001 (SDK half) satisfied:** the V2 Beta `Agent` + structured `output_type`
+path round-trips through a live watsonx.ai `ModelInference.achat` and coerces into
+`ChatResponse` end-to-end. The default, supply-chain-minimal transport is proven
+against the real endpoint.
+
+### Findings
+
+- **Structured output is model-dependent on watsonx (not a code defect).**
+  `ibm/granite-4-h-small` returns tool-call args — both `search_kb` and the
+  `final_result` output tool — as a **double-encoded JSON string**
+  (`args='"{\"answer\": …}"'`) rather than an object. pydantic-ai's
+  `output_type` validator rejects the string, exhausts the 1-retry budget, and
+  raises `UnexpectedModelBehavior` → `/chat` 500. Switching `WATSONX_MODEL_ID` to
+  `llama-4` (which emits object-form args) turned the lane green with no code
+  change. **Operational consequence:** the watsonx model must support object-form
+  tool-call arguments; this is a model-selection constraint, recorded for the Act
+  phase / runbook.
+
+- **LiteLLM transport live routing → deferred to the next phase.** With
+  `WATSONX_TRANSPORT=litellm`, `/chat` returns **404** (model-independent:
+  reproduced on both `granite-4-h-small` and `llama-4`). Root cause:
+  pydantic-ai's `LiteLLMProvider`
+  ([`.venv/.../pydantic_ai/providers/litellm.py`](../../../.venv/Lib/site-packages/pydantic_ai/providers/litellm.py))
+  is a thin `AsyncOpenAI(base_url=api_base)` wrapper — it does **not** route
+  through `litellm.completion()`. `OpenAIChatModel` therefore POSTs
+  `{WATSONX_URL}/chat/completions`, but watsonx exposes no OpenAI-compatible
+  endpoint at the bare host (chat lives at `/ml/v1/text/chat?version=…`, a
+  watsonx-specific request/response shape), so nginx answers 404. The hermetic
+  litellm suite (`test_watsonx_litellm_construction.py`, RESPX) pins construction
+  + on-the-wire shape against a *mocked* endpoint and stays green — the gap is
+  **live routing only**. A real litellm path needs either a running LiteLLM proxy
+  at `api_base` or a litellm-SDK-backed custom `Model`. **Decision (per operator,
+  2026-06-09):** the LiteLLM-SDK introduction is a separate next phase; this phase
+  (002-watsonx-provider) completes on the SDK transport's verified operation. The
+  litellm construction code, optional dependency, and hermetic tests are retained
+  as-is — no removal — so the next phase starts from a build-validated baseline.
+
+### Learnings for Act phase
+
+- **A live lane can pass hermetically yet fail in the field for a model reason.**
+  The litellm 404 and the granite double-encoding were both *invisible* to the
+  hermetic suite (mocked endpoint / `FunctionModel`), because each is a property
+  of the real transport/model, not of our mapping code. The opt-in integration
+  lane is precisely the instrument that surfaces them — its fail-not-skip posture
+  earned its keep here.
+- **CI caveat (carry to Act):** `integration-watsonx.yml` must run with
+  `WATSONX_TRANSPORT=sdk` **and** a structured-output-capable `WATSONX_MODEL_ID`
+  (e.g. a llama-4 variant) in its secrets, or the gated e2e will 500 on the
+  granite double-encoding — a green-looking config that fails for a non-obvious
+  model reason.
