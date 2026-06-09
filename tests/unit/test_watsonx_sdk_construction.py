@@ -927,17 +927,8 @@ def test_build_watsonx_is_io_free(
     assert isinstance(model, Model)
 
 
-def test_build_watsonx_litellm_transport_not_yet_implemented(
-    watsonx_settings_factory: WatsonxSettingsFactory,
-) -> None:
-    """``transport="litellm"`` fails loud until Task 6 lands the branch (Req 2.1).
-
-    The litellm transport and its dependency import-guard belong to Task 6.
-    Until then ``_build_watsonx`` must raise rather than silently fall through to
-    the SDK model on a litellm selector — a silent fall-through would ship the
-    wrong transport. Task 6 replaces this raise with the real litellm branch.
-    """
-    settings = watsonx_settings_factory(WATSONX_TRANSPORT="litellm")
-
-    with pytest.raises(NotImplementedError, match="litellm"):
-        _build_watsonx(settings)
+# Task 6 lands the real ``transport="litellm"`` branch (import guard + LiteLLM
+# provider construction); its dedicated tests live in
+# ``test_watsonx_litellm_construction.py``. The Task 5.6 placeholder that
+# asserted a ``NotImplementedError`` fail-loud was removed atomically with that
+# branch — keeping it would assert behaviour the implementation no longer has.
