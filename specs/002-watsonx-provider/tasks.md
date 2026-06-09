@@ -446,7 +446,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_litellm_construction.py`
   _Depends:_ 6
   _Requirements:_ 9.4
-- [ ] 7.3 (P) Timeout configuration tests: defaults (30s/120s), env overrides, invalid values (negative/zero/non-numeric), and a simulated-timeout scenario asserting `error.class` only (no duration attribute)
+- [x] 7.3 (P) Timeout configuration tests: defaults (30s/120s), env overrides, invalid values (negative/zero/non-numeric), and a simulated-timeout scenario asserting `error.class` only (no duration attribute)
   _Boundary:_ `tests/unit/test_watsonx_timeout_config.py`
   _Depends:_ 5
   _Requirements:_ 9.5
@@ -472,6 +472,31 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.3 (2026-06-09): dedicated timeout-configuration suite landed (Req 9.5).**
+  New `test_watsonx_timeout_config.py` — 11 cases. The *transport-application*
+  of timeouts (configured connect/read reaching each transport's httpx client)
+  was already pinned per transport in `test_watsonx_sdk_construction.py` (SDK
+  spies) and `test_watsonx_litellm_construction.py` (built OpenAI client), so
+  this file deliberately does **not** re-run the SDK constructor-spy harness;
+  it owns the **configuration source-of-truth** (`Settings` defaults / overrides
+  / invalid-value fail-fast) and the **net-new simulated-timeout** scenario.
+- **The simulated-timeout test is the only genuinely uncovered slice.** Per the
+  2026-06-08 clarification revising Req 5.6, a timeout surfaces *solely* via
+  `error.class` with **no** duration attribute (lean cap of 8.3/8.4 wins;
+  Logfire records wall-clock intrinsically). At unit grain this is encoded as:
+  `httpx.ReadTimeout` from `achat` → wrapped `ModelAPIError` (failover-
+  recoverable), the timeout class name carried in message + `__cause__` (the
+  `error.class` channel), and a negative assertion that the surfaced error has
+  **no** `duration`/`timeout`/`elapsed`/`seconds` attribute (Req 5.6 / SC-015).
+  The span-level `error.class` assertion via `Agent.run` is Task 7.7's.
+- **Characterization, not RED-driven** (same posture as Task 7.1): the source
+  (config validators Task 2.5, `request` wrapping Task 5.4) already existed, so
+  all 11 cases passed on first run — they pin/guard the timeout-config contract
+  rather than drive new code. Defaults/overrides/invalid overlap test_config.py
+  by intent: Req 9.5 maps **solely** to 7.3, so this file is its authoritative,
+  self-contained home. `mise run check` green: 160 passed / 1 skipped (+11),
+  lint+format clean, pyright strict 0 errors.
 
 - **7.2 (2026-06-09): RESPX request-path tests for the litellm transport landed;
   the import-guard clause was already satisfied by Task 6.** Task 6 wrote the
