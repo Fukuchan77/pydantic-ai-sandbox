@@ -438,7 +438,7 @@ _Boundary:_ `tests/unit/test_watsonx_sdk_construction.py`, `tests/unit/test_wats
 _Depends:_ 2, 3, 5, 6
 _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9, 9.11
 
-- [ ] 7.1 (P) SDK I/O-free construction tests via `httpx.Client.send` / `httpx.AsyncClient.send` patches, message-mapping assertions, a test pinning `ModelInference` built with `max_retries=0` and `validate=False`, and a response-mapping test asserting a representative `achat` response maps to a `ModelResponse` with correct text parts, tool-call parts, `usage`, and `finish_reason`
+- [x] 7.1 (P) SDK I/O-free construction tests via `httpx.Client.send` / `httpx.AsyncClient.send` patches, message-mapping assertions, a test pinning `ModelInference` built with `max_retries=0` and `validate=False`, and a response-mapping test asserting a representative `achat` response maps to a `ModelResponse` with correct text parts, tool-call parts, `usage`, and `finish_reason`
   _Boundary:_ `tests/unit/test_watsonx_sdk_construction.py`
   _Depends:_ 5
   _Requirements:_ 9.3, 9.11
@@ -473,8 +473,36 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **7.1 (2026-06-09): literal Req 9.3 / 9.11 were already met by Task 5's
+  incremental TDD; 7.1's net-new work was the *exhaustive defensive-branch*
+  backfill.** The four bullet categories (I/O-free construction via both `httpx`
+  send patches, message-mapping assertions, `ModelInference(max_retries=0,
+  validate=False)` pinning, representative response-mapping) already existed in
+  `test_watsonx_sdk_construction.py` from Tasks 5.1–5.3. Per the Task 5.3/5.5
+  notes, 7.1 owned the branches Task 5 deferred: `_build_response` no-choices →
+  `UnexpectedModelBehavior`, `ThinkingPart` skip, and unsupported-assistant-part
+  raise — plus the remaining mapping edges (absent `usage` → zeroed,
+  absent/empty/unmapped `finish_reason` → `None`, empty assistant message →
+  empty `parts`, `SystemPromptPart`, assistant-`TextPart` replay, and both
+  `RetryPromptPart` branches). **+12 test cases** (10 functions, one parametrized
+  ×3). These are characterization tests written *after* the source landed (Task
+  5 did happy-path RED→GREEN); they passed on first run, confirming each
+  defensive contract rather than driving new code.
+- **`FilePart` is the unsupported-assistant-part probe.** It's a real
+  `ModelResponsePart` the mapper doesn't handle (text/tool-call/thinking only),
+  so it triggers the `else` raise without a synthetic stub. The
+  `NotImplementedError` and `UnexpectedModelBehavior` both fire *outside* the
+  SDK-error guard (mapping runs before, `_build_response` after the `try`), so
+  they propagate unwrapped — proven by asserting the raw type, not `ModelAPIError`.
+- **`RetryPromptPart` content asserted dynamically** (`retry.model_response()`)
+  rather than hardcoding pydantic_ai's generated feedback string, keeping the
+  test robust against upstream wording changes while still pinning the role /
+  `tool_call_id` routing.
+- **Coverage caveat (unchanged from Tasks 1/5):** `pytest --cov` still aborts on
+  the pytest-cov ↔ beartype import-hook circular import, so the ≥98% number is
+  confirmed at Task 11.1 (plan 9.10 split). Uncovered branches were targeted by
+  source analysis; canonical `mise run check` (bare pytest) is the green gate:
+  **144 passed / 1 skipped**, lint+format clean, pyright 0 errors.
 
 ---
 
