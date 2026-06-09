@@ -858,3 +858,49 @@ attribute.
   negatively.** A booby-trapped socket proves "no socket opened"; an unresolvable
   but well-formed host that still passes proves "shape-only, by design" — the two
   together close Req 4.1 and 4.3 without ambiguity.
+
+---
+
+## Task 7.5 — No-retry tests (Req 9.7)
+
+**Date:** 2026-06-09 · **Status:** ✅ Done · **Boundary:** `tests/unit/test_watsonx_no_retry.py`
+
+### TDD framing (characterization)
+
+Source landed at Task 5.2 (`ModelInference(max_retries=0)`) and Task 5.4
+(retry-free `request` body), so 7.5 pins/guards the no-retry contract rather
+than driving new code (same posture as 7.1/7.3/7.4).
+
+- **RED** — `tests/unit/test_watsonx_no_retry.py` absent → collection error.
+- **GREEN** — 8 cases, all pass on first run.
+
+### What landed (8 cases, 4 functions)
+
+- **Construction pin** (`test_model_inference_built_with_max_retries_zero`):
+  SDK constructor-spy harness asserts `ModelInference` is built with
+  `max_retries=0` — the *source* of no-retry (disables the SDK's own loop).
+- **Behavioural pin** (`test_request_does_not_retry_recoverable_error`, ×5):
+  for every failover-recoverable error (`WMLClientError` base + subclass; httpx
+  timeout / connect / `HTTPError` base) the failing `achat` fires **exactly
+  once**.
+- **Unwrapped path** (`test_request_does_not_retry_unwrapped_error`): a
+  `RuntimeError` propagates unwrapped, still one call — no-retry is
+  unconditional, not failover-only.
+- **Build path** (`test_first_call_client_build_failure_is_not_retried`): the
+  lazy first-call `_build_client` failure (Req 4.4) is single-attempt too.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_no_retry.py -v` | ✅ 8 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **186 passed / 1 skipped** (+8); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **"No retry for any error type" needs both phases pinned, not just one.**
+  Asserting `max_retries=0` at construction proves the SDK loop is off; a
+  call-count of 1 across the full error matrix (incl. an unwrapped bug and the
+  lazy build-path failure) proves *our* code adds none either. The construction
+  pin alone would miss an accidental retry wrapper in `request`; the call-count
+  alone would miss the SDK silently retrying under us.

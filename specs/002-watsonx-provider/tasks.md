@@ -454,7 +454,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_url_validation.py`
   _Depends:_ 2
   _Requirements:_ 9.6
-- [ ] 7.5 (P) No-retry tests confirming `max_retries=0` and that no retry attempts occur for any error type
+- [x] 7.5 (P) No-retry tests confirming `max_retries=0` and that no retry attempts occur for any error type
   _Boundary:_ `tests/unit/test_watsonx_no_retry.py`
   _Depends:_ 5
   _Requirements:_ 9.7
@@ -472,6 +472,32 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.5 (2026-06-09): dedicated no-retry suite landed (Req 9.7).** New
+  `test_watsonx_no_retry.py` — 8 cases (4 functions; the recoverable-error
+  no-retry test parametrized ×5). Two facets, one per construction phase: a
+  **construction pin** asserting `ModelInference(max_retries=0)` via the SDK
+  constructor-spy harness (the *source* of no-retry — disables the SDK's own
+  retry loop), and a **behavioural pin** asserting the failing call fires
+  exactly once for *every* error type. Req 9.7 maps **solely** to 7.5, so this
+  file is its authoritative home; characterization posture (same as 7.1/7.3/7.4)
+  — source landed at Task 5.2 (`max_retries=0`) / 5.4 (retry-free `request`), so
+  all 8 passed on first run, RED = absent file. `mise run check` green: **186
+  passed / 1 skipped** (+8), lint+format clean, pyright strict 0 errors.
+- **"For any error type" is exhaustive by design.** The parametrized recoverable
+  set covers the SDK base `WMLClientError`, a local `WMLClientError` *subclass*
+  (proves the guarantee is not base-only), and the three httpx transport errors
+  (timeout/connect/`HTTPError` base). A separate test pins the **unwrapped**
+  programming-bug path (`RuntimeError` → propagates as-is, still one call): the
+  no-retry guarantee is unconditional, not limited to failover-recoverable
+  errors. A fourth test pins the **lazy first-call `_build_client` failure**
+  (Req 4.4) as single-attempt too — the build path gets no retry either.
+- **Relationship to Task 5.4's `test_request_does_not_retry_on_failure` (no
+  intent duplication).** That test was 5.4's incidental single-error-type
+  (`WMLClientError`) no-retry probe living in the SDK-construction file; 7.5
+  generalises it to the full error matrix + the construction-level
+  `max_retries=0` pin + the build-path case, and is Req 9.7's self-contained
+  home per the coverage matrix.
 
 - **7.4 (2026-06-09): dedicated URL-format validation suite landed (Req 9.6).**
   New `test_watsonx_url_validation.py` — 18 cases (6 functions; valid-format and
