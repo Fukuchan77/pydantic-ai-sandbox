@@ -692,3 +692,69 @@ deferred to Task 11.1); uncovered branches were targeted by source analysis.
   to treat the later task as "prove exhaustively + backfill deferred branches"
   rather than re-deriving work — the per-task notes are the contract for what's
   net-new, and they held precisely here.
+
+---
+
+## Task 7.2 — LiteLLM RESPX request-path tests (2026-06-09)
+
+**Scope:** Req 9.4 — RESPX-based tests for the LiteLLM transport's live request
+path. Net-new = 5 request-path tests in `test_watsonx_litellm_construction.py`
+(the import-guard clause was already satisfied by Task 6 in the same file).
+
+### What landed
+
+- `test_litellm_request_maps_text_response_over_respx` — text completion →
+  `TextPart`, usage/finish_reason/provider_response_id/model_name mapping.
+- `test_litellm_request_routes_model_prefix_and_apikey_on_the_wire` — intercepted
+  request body `model == watsonx/<id>` (Req 2.3 prefix end-to-end) + mapped user
+  message + `Authorization: Bearer <apikey>` header.
+- `test_litellm_request_maps_tool_call_response_over_respx` — `tool_calls` →
+  `ToolCallPart`, finish_reason `tool_calls` → `tool_call`.
+- `test_litellm_project_id_reaches_litellm_via_env` — the `WATSONX_PROJECT_ID`
+  env fixture (R4: `LiteLLMProvider` has no `project_id` arg; carried via env).
+- `test_litellm_request_http_error_surfaces_as_model_api_error` — 503 →
+  `ModelHTTPError` (a `ModelAPIError` subclass) → failover-recoverable.
+
+### Errors / root cause (investigated, not blind-retried)
+
+- **`litellm` not importable in the canonical test env.** Root cause: it was
+  declared ONLY as a `[project.optional-dependencies]` extra; `uv sync` and CI's
+  `uv sync --all-groups` install dependency-*groups* but NOT *extras*. Verified
+  Task 6's six litellm construction tests fail-collect in that env (only the
+  import-guard test, which forces `ImportError`, passed). **Fix:** add `litellm`
+  to the dev group (prod stays lean via the extra; test env always has it).
+- **`respx` absent entirely** despite Req 9.4 / spec Testing naming it. **Fix:**
+  added to the dev group.
+
+### Trial / decisions
+
+- **Confirmed the request path empirically before writing tests** — the litellm
+  transport is a plain `AsyncOpenAI` POST to `{WATSONX_URL}/chat/completions`
+  (not a `litellm.completion` call), so RESPX intercepts that exact endpoint.
+- **Drive `model.request` directly (no Agent)** to pin the transport's own
+  request/response contract rather than agent behaviour — matching the SDK
+  construction-test grain.
+- **Match the endpoint URL exactly** (`_CHAT_COMPLETIONS_URL`) so the mock
+  doubles as a "hit the configured watsonx endpoint" assertion.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_litellm_construction.py` | ✅ 12 passed (7 → 12) |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **149 passed / 1 skipped**; ruff lint+format clean; pyright 0 errors |
+
+`pytest --cov` still aborts on the pytest-cov ↔ beartype circular import (known,
+deferred to Task 11.1).
+
+### Learnings for Act phase
+
+- **An optional *production* extra is the wrong place for a dependency the test
+  suite hard-requires.** Task 6 put `litellm` only in extras and its tests
+  silently relied on a manual install — green locally, red in CI. When a feature
+  is opt-in for prod but mandatory for tests, it belongs in **both** the extra
+  (prod) and the dev group (test/CI). Worth a steering note.
+- **"RESPX-based tests" implies an HTTP-level transport.** The grain follows the
+  transport: SDK → send-patch/fake `achat`; litellm-via-OpenAI-adapter → RESPX at
+  `/chat/completions`. Verifying the actual wire path first avoided mocking the
+  wrong layer.
