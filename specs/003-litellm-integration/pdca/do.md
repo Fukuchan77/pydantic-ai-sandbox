@@ -125,3 +125,132 @@ the watsonx SDK suites pass unmodified.
 
 **Status**: **Major 1 (C1 shared mapping) complete** — 1.1–1.6 all `[x]`.
 Next wave: major 2 (`LiteLLMModel`, C2), which depends on this module.
+
+---
+
+## 2026-06-09 — Tasks 2.1–2.2 (C2 `LiteLLMModel` construction + happy-path request)
+
+**Scope**: Create `llm/providers/litellm.py` — the I/O-free `LiteLLMModel`
+constructor + `model_name`/`system`/`profile` properties (2.1) and the
+non-streaming `request()` happy path routing through `litellm.acompletion()`
+and the shared `_openai_mapping.build_response` (2.2). Error-wrapping (2.3) and
+streaming-deferral (2.4) are out of scope for this slice.
+
+**Method (TDD)**: Wrote three hermetic test files first (RED — collection
+`ModuleNotFoundError`), then implemented to green. `acompletion` is mocked
+(monkeypatch on the module attr, reached via the function-local import); response
+cases build a real `litellm.ModelResponse` so the load-bearing `.model_dump()`
+arg-preservation (Req 2.4) is exercised faithfully, not stubbed.
+
+### Changes
+
+- **2.1** New `litellm.py` with the upstream `pydantic-ai-litellm` MIT
+  attribution header (library / version-reconciliation note / repo URL). I/O-free
+  keyword-only `__init__`; `model_name` returns the route; `system` is derived
+  once in `__init__` as `route.split("/",1)[0]` (→ `"watsonx"`), falling back to
+  `"litellm"` for a prefix-less route; `profile` is a `cached_property` returning
+  `merge_profile(DEFAULT_PROFILE, ModelProfile(supports_json_schema_output=False))`
+  (explicit-false over the package default, preserving all other default fields).
+- **2.2** `request()` (3-param V2 ABC): function-local `import litellm` (optional
+  dep, Req 6.2), map via shared `_map_messages`/`_map_tools`,
+  `acompletion(..., num_retries=0, timeout=httpx.Timeout(read, connect=connect))`,
+  then `.model_dump()` → `build_response(raw, model_name=…, provider_name=self.system)`.
+  No `try/except` yet (2.3); mapping/response errors surface unwrapped.
+
+### Decisions / learnings
+
+- **`system` is stamped onto the response.** `provider_name=self.system` (not a
+  literal `"litellm"`) gives `gen_ai.system == "watsonx"` parity with the SDK path
+  for the watsonx route (Req 1.4) — pinned by a mocked-`acompletion` parity test.
+- **litellm stubs forced 3 scoped `# pyright: ignore`s.** `acompletion`'s loose
+  param stubs (`reportUnknownMemberType`), the narrow `timeout: float|int|None`
+  (`reportArgumentType` — it forwards `httpx.Timeout` at runtime per research.md),
+  and the `ModelResponse | CustomStreamWrapper` return union (no `model_dump` on
+  the stream wrapper → `reportAttributeAccessIssue`). Each carries a rationale.
+- **TC002**: the construction test uses `pytest` only in annotations (no
+  `pytest.raises`), so `import pytest` moved under `TYPE_CHECKING`.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| RED | `uv run pytest tests/unit/test_litellm_*` (pre-impl) | 3 collection errors (`No module named …litellm`) |
+| New tests | `uv run pytest tests/unit/test_litellm_construction.py …message_mapping.py …response_mapping.py -q` | **14 passed** |
+| Full suite | `uv run pytest -q` | **254 passed, 2 skipped** (was 240+2; +14 new) |
+| Lint | `uv run ruff check .` | All checks passed |
+| Format | `uv run ruff format --check .` | 58 files already formatted |
+| Typecheck | `uv run pyright` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: 2.1, 2.2 `[x]`. Remaining in major 2: 2.3 (broad-except →
+`ModelAPIError`, scoped to `acompletion` only), 2.4 (`request_stream`
+deferral). Test files seeded for 3.1–3.3; 3.4–3.6 await 2.3/2.4.
+
+---
+
+## 2026-06-09 — Tasks 2.3–2.4 (C2 error classification + streaming deferral) — major 2 complete
+
+**Scope**: Close out `LiteLLMModel` — wrap `acompletion` failures as
+`ModelAPIError` scoped to the call only (2.3), and override `request_stream` to
+defer streaming with a greppable, model-named `NotImplementedError` (2.4).
+
+**Method (TDD)**: Wrote two hermetic test files first (RED), implemented to
+GREEN. `acompletion` is mocked via `monkeypatch` on the module attr (reached
+through the function-local import). RED run: 8 failed / 2 passed — the 2 passing
+are correct regression guards (base ABC already raises `NotImplementedError`; the
+empty-choices path already surfaces `UnexpectedModelBehavior` unwrapped, which 2.3
+must preserve).
+
+### Changes
+
+- **2.3** `request()` now brackets **only** the `acompletion` call in
+  `try/except Exception as exc:` → `raise ModelAPIError(model_name=…, message=…)
+  from exc` (Req 4.1). `.model_dump()` + `build_response` deliberately sit below
+  the block so a choiceless-completion `UnexpectedModelBehavior` (Req 3.3) is never
+  misclassified as `ModelAPIError` (Req 4.3). Runtime import of `ModelAPIError`
+  added.
+- **2.4** `request_stream` is an `@asynccontextmanager` raising
+  `NotImplementedError("LiteLLM streaming support deferred to future work (model:
+  {self.model_name})")` before an unreachable `yield` (kept so it types as a
+  generator). Added `asynccontextmanager` runtime import + `AsyncGenerator` /
+  `RunContext` / `StreamedResponse` `TYPE_CHECKING` imports.
+- **Tests** `test_litellm_error_classification.py` (5 cases: wrap+chain,
+  `model_name` attr, broad-except over 5 exc types, post-call mapping error
+  unwrapped) and `test_litellm_streaming_deferred.py` (2 cases: raises on entry,
+  greppable + model-named message).
+- **Lint config** `BLE` added to the ruff `select` list (see finding below); the
+  swallowing fail-soft catch in `logging_setup.py:154` now carries `# noqa:
+  BLE001`.
+
+### Decisions / learnings
+
+- **`ModelAPIError.model_name` is an attribute, not message text.** First RED→GREEN
+  attempt asserted `route in str(error)` — wrong; `model_name` rides the dedicated
+  attribute (span `error.class` channel) while the message is free text. Fixed the
+  test to assert `excinfo.value.model_name == route`, mirroring the SDK transport's
+  convention.
+- **BLE001 does not flag a *re-raising* blind except (root-cause of a RUF100).**
+  The spec mandated `# noqa: BLE001` on the broad except, but ruff's BLE001 lane
+  flags only excepts that *swallow* — a `raise … from exc` except is already
+  compliant, so the noqa was intrinsically unused (RUF100 fired with **and**
+  without `BLE` enabled). Investigated via `ruff check --select BLE <file>` →
+  "All checks passed" on litellm.py. Per the user's "enable BLE now
+  (spec-faithful)" decision: `BLE` is now in `select` (closing the lane task 7.2
+  references), the re-raising litellm except keeps a plain rationale comment (no
+  noqa), and the genuinely swallowing `logging_setup.py:154` catch carries the
+  noqa. **Act-phase item**: amend the literal "carries a scoped `# noqa: BLE001`"
+  wording in tasks 2.3/7.2.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| RED | `uv run pytest tests/unit/test_litellm_error_classification.py …streaming_deferred.py -q` | 8 failed, 2 passed (pre-impl) |
+| New tests | same command (post-impl) | **10 passed** |
+| Full unit suite | `uv run pytest tests/unit -q` | **264 passed** (was 254+; +10 new) |
+| Lint | `uv run ruff check .` | All checks passed |
+| Format | `uv run ruff format --check .` | 60 files already formatted |
+| Typecheck | `uv run pyright` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: **Major 2 (C2 `LiteLLMModel`) complete** — 2.1–2.4 all `[x]`. Next
+waves: major 3 (remaining hermetic tests 3.4 FallbackModel-recovery / 3.5
+timeout) and major 4 (watsonx `_build_litellm` rewrite, C3).

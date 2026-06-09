@@ -71,6 +71,7 @@ select = [
     "F",   # pyflakes
     "I",   # isort
     "B",   # flake8-bugbear
+    "BLE", # flake8-blind-except (broad excepts must carry a scoped noqa + rationale)
     "UP",  # pyupgrade
     "RUF", # ruff-specific
     "S",   # flake8-bandit (security: eval/exec, SQL injection, hardcoded secrets, pickle, subprocess)

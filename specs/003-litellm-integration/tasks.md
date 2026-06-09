@@ -72,27 +72,60 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
 _Depends:_ 1
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 1.5, 4.1, 4.2, 4.3, 5.1, 6.2, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 9.4
 
-- [ ] 2.1 Create `litellm.py` with the upstream `pydantic-ai-litellm` MIT attribution header (library, version, repo URL); implement the I/O-free `__init__` (`model_name`, `api_key`, `api_base`, `custom_llm_provider`, `timeout_connect`, `timeout_read`); the `model_name` property (returns the route) and the `system` property derived from the route provider segment (`model_name.split("/", 1)[0]`, falling back to `"litellm"` for a prefix-less route) for span attributes; and a `profile` property that keeps `supports_json_schema_output` falsy for the watsonx route so `build_chat_agent` does not force `NativeOutput`/`response_format` (tool-mode parity with the SDK transport); add `from __future__ import annotations` and `TYPE_CHECKING` imports for strict typing.
+- [x] 2.1 Create `litellm.py` with the upstream `pydantic-ai-litellm` MIT attribution header (library, version, repo URL); implement the I/O-free `__init__` (`model_name`, `api_key`, `api_base`, `custom_llm_provider`, `timeout_connect`, `timeout_read`); the `model_name` property (returns the route) and the `system` property derived from the route provider segment (`model_name.split("/", 1)[0]`, falling back to `"litellm"` for a prefix-less route) for span attributes; and a `profile` property that keeps `supports_json_schema_output` falsy for the watsonx route so `build_chat_agent` does not force `NativeOutput`/`response_format` (tool-mode parity with the SDK transport); add `from __future__ import annotations` and `TYPE_CHECKING` imports for strict typing.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 1
   _Requirements:_ 1.2, 1.3, 1.4, 1.5, 9.1, 9.2, 9.3, 9.4
-- [ ] 2.2 Implement `request()` matching the V2 ABC (3 params): function-local `litellm` import guard, message/tool mapping via `_openai_mapping`, the `litellm.acompletion(..., num_retries=0, timeout=httpx.Timeout(read, connect=connect))` call, `.model_dump()` normalization of the returned `litellm.ModelResponse` (load-bearing for Req 2.4: `.model_dump()` preserves `tool_calls[].function.arguments` as the raw JSON string the backend sent, so Granite double-encoded args are surfaced faithfully and never re-encoded), then `build_response(raw, model_name=..., provider_name=self.system)` — passing the route-derived `system` value (not a hard-coded `"litellm"`) so the response provider matches `gen_ai.system` and the SDK path for the watsonx route.
+- [x] 2.2 Implement `request()` matching the V2 ABC (3 params): function-local `litellm` import guard, message/tool mapping via `_openai_mapping`, the `litellm.acompletion(..., num_retries=0, timeout=httpx.Timeout(read, connect=connect))` call, `.model_dump()` normalization of the returned `litellm.ModelResponse` (load-bearing for Req 2.4: `.model_dump()` preserves `tool_calls[].function.arguments` as the raw JSON string the backend sent, so Granite double-encoded args are surfaced faithfully and never re-encoded), then `build_response(raw, model_name=..., provider_name=self.system)` — passing the route-derived `system` value (not a hard-coded `"litellm"`) so the response provider matches `gen_ai.system` and the SDK path for the watsonx route.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 2.1
   _Requirements:_ 1.1, 1.4, 2.4, 4.2, 5.1, 6.2
-- [ ] 2.3 Wrap every exception from `acompletion()` in a broad `except` as `ModelAPIError` (chained via `raise ... from`, scoped `# noqa: BLE001` with a Req 4.1 rationale), while letting mapping/response errors (`NotImplementedError`, `UnexpectedModelBehavior`) surface unwrapped and fail loud. **The broad `except` SHALL scope only the `acompletion()` call**: `.model_dump()` and `build_response(...)` (which raises `UnexpectedModelBehavior` for empty choices, Req 3.3) MUST sit outside the `try`, so post-call mapping errors are never misclassified as `ModelAPIError` (Req 4.3).
+- [x] 2.3 Wrap every exception from `acompletion()` in a broad `except` as `ModelAPIError` (chained via `raise ... from`, scoped `# noqa: BLE001` with a Req 4.1 rationale), while letting mapping/response errors (`NotImplementedError`, `UnexpectedModelBehavior`) surface unwrapped and fail loud. **The broad `except` SHALL scope only the `acompletion()` call**: `.model_dump()` and `build_response(...)` (which raises `UnexpectedModelBehavior` for empty choices, Req 3.3) MUST sit outside the `try`, so post-call mapping errors are never misclassified as `ModelAPIError` (Req 4.3).
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 2.2
   _Requirements:_ 4.1, 4.3
-- [ ] 2.4 Implement `request_stream` as an `@asynccontextmanager` that raises `NotImplementedError` with a greppable, model-named message (format: "LiteLLM streaming support deferred to future work (model: {self.model_name})") before any yield (never silently downgrading to non-streaming); keep the unreachable `yield` so it stays a generator.
+- [x] 2.4 Implement `request_stream` as an `@asynccontextmanager` that raises `NotImplementedError` with a greppable, model-named message (format: "LiteLLM streaming support deferred to future work (model: {self.model_name})") before any yield (never silently downgrading to non-streaming); keep the unreachable `yield` so it stays a generator.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 2.1
   _Requirements:_ 8.1, 8.2, 8.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **2.1–2.4 all done. Major 2 complete.** `request()` now wraps `acompletion`
+  failures as `ModelAPIError` (2.3) and `request_stream` is overridden to defer
+  streaming (2.4). The class remains concrete/instantiable (only
+  `request`/`system`/`model_name` are abstract on the V2 ABC).
+- **2.3 broad-except scoped to `acompletion` only.** The `try` brackets just the
+  `acompletion` call; `.model_dump()` + `build_response` sit below it, so a
+  choiceless-completion `UnexpectedModelBehavior` (Req 3.3) is never misclassified
+  as `ModelAPIError` (Req 4.3). `model_name` rides the dedicated
+  `ModelAPIError.model_name` attribute (span `error.class` channel), not the
+  message — matching the SDK transport.
+- **BLE001 finding (spec premise corrected, user-approved).** The spec mandated a
+  `# noqa: BLE001` on the broad except, but **ruff's BLE001 does not flag a blind
+  except that re-raises** (`raise … from exc`) — only ones that *swallow*. So the
+  noqa was intrinsically unused → `RUF100`, with or without `BLE` enabled. Per the
+  user's "enable BLE now (spec-faithful)" decision, `BLE` was added to the ruff
+  `select` list (closing the lane 7.2 references); the litellm except needs no
+  noqa (it re-raises) and keeps a plain rationale comment, while the genuinely
+  *swallowing* fail-soft catch in `logging_setup.py:154` now correctly carries a
+  `# noqa: BLE001`. **Action item for 7.2**: tasks 2.3/7.2 still literally say
+  "carries a scoped `# noqa: BLE001`"; that wording should be amended to "no noqa
+  needed (re-raising except is BLE-compliant)".
+- **2.4 streaming-deferral message** is greppable and model-named:
+  `"LiteLLM streaming support deferred to future work (model: {self.model_name})"`,
+  raised before the unreachable `yield` (kept so it types as a generator).
+- **litellm stubs are loose.** `acompletion`'s `messages`/`tools` are typed
+  `List[Unknown]`, `timeout` is `float|int|None` (but forwards `httpx.Timeout` at
+  runtime — research.md), and its return union includes `CustomStreamWrapper`
+  (no `model_dump`). Three scoped, rationale-bearing `# pyright: ignore`s on the
+  `acompletion` call + the `.model_dump()` line keep strict mode clean.
+- **TDD test files seeded.** 2.1/2.2 produced `test_litellm_construction.py` /
+  `_message_mapping.py` / `_response_mapping.py` (14 cases, fulfil 3.1/3.2/3.3);
+  2.3/2.4 added `test_litellm_error_classification.py` (5 cases) +
+  `test_litellm_streaming_deferred.py` (2 cases), substantially fulfilling 3.4 and
+  3.6. Remaining for major 3: `FallbackModel`-recovery assertion (rounds out 3.4)
+  and timeout-passthrough (3.5).
 
 ---
 
