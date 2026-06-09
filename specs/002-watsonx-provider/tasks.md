@@ -833,15 +833,54 @@ _Boundary:_ `specs/002-watsonx-provider/tasks.md`
 _Depends:_ 4
 _Requirements:_ 12.2
 
-- [ ] 10.1 Remove "stub" terminology from watsonx-related task descriptions and update any stale `002-multi-provider` stub references to reflect watsonx's real status
+- [x] 10.1 Remove "stub" terminology from watsonx-related task descriptions and update any stale `002-multi-provider` stub references to reflect watsonx's real status
   _Boundary:_ `specs/002-watsonx-provider/tasks.md`
   _Depends:_ 4
   _Requirements:_ 12.2
 
+_Status:_ ✅ Done (2026-06-09). Audit-and-document task (boundary is this file,
+no test artifact). Verified no watsonx task description mischaracterizes watsonx
+as a current stub; every remaining `stub` token is justified and retained.
+`mise run check` green (no source touched): **206 passed / 2 skipped**,
+lint+format clean, pyright strict 0 errors.
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **The "verifiable assertion" for this doc-cleanup task is a classification of
+  every `stub` token, not a keyword sweep.** A blind delete would corrupt
+  accurate history and load-bearing code identifiers. Audit (RED = candidate
+  grep; GREEN = each token justified):
+  - **Code identifiers — preserve:** `_MVP_STUB_PROVIDERS` (4.2/4.3 notes),
+    `test_mvp_stub_providers_lock` (4.3), `reportMissingTypeStubs` (9 notes) are
+    real symbols; renaming them would desync the tasks from the source/tests.
+  - **Anthropic/Bedrock — preserve:** these providers *remain* stubs (spec lines
+    17/44/73), so "remaining stubs" / "stub-skip branch still filters" (4.2/7.6
+    notes) are correct present-tense descriptions of the still-stub providers,
+    not of watsonx.
+  - **De-stubbing history — preserve:** "de-stubbing did not widen" (4),
+    "re-stubbing watsonx" regression guard (7.6) affirmatively document watsonx
+    as **no longer** a stub — they *are* the "reflect watsonx's real status"
+    half of Req 12.2, already in place from the incremental TDD.
+  - **001-era history — preserve:** "stub-era fallback tests" /
+    "uncredentialled stub member" (Task 2 notes) accurately record watsonx's
+    *prior* 001 state to explain why the credential gate broke three tests;
+    stripping "stub" there would make the rationale false.
+  - **Test-double / unrelated:** "synthetic stub" (7.1, a `FilePart` probe) and
+    `reportMissingTypeStubs` are not provider-status terms.
+  Net: the watsonx **task descriptions** (checkbox/title lines) were authored
+  free of any watsonx-as-stub framing, so Req 12.2's description-cleanup needed
+  no edit — same characterization posture as Tasks 7.x.
+- **Stale `002-multi-provider` references: none exist inside this boundary
+  file.** A repo-wide grep finds them only in (a) `001-agentic-platform/` PDCA
+  history (immutable record), and (b) the **anthropic/bedrock** stub messages in
+  `providers/{anthropic,bedrock}.py` + `llm/fallback.py`, pinned by
+  `test_factory_dispatch.py:146` (`"002-multi-provider" in msg`). Per the
+  Plan-phase R7 resolution, the rename scope was kept **watsonx-only**: those
+  source messages were *deliberately retained* because anthropic/bedrock are
+  still stubs tracked by a follow-up spec, and they are outside Task 10.1's
+  `tasks.md` boundary. Touching them would also break the green 4.3 dispatch
+  test. So the "002-multi-provider stub references" clause is satisfied
+  vacuously within scope and consciously deferred for the out-of-scope stubs.
 
 ---
 
@@ -851,23 +890,67 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`, `src/pydantic_ai
 _Depends:_ 7, 8, 9, 10
 _Requirements:_ 9.10
 
-- [ ] 11.1 Run the full test suite via `mise run test` and confirm zero external API calls and ≥98% coverage, fixing any source gaps
+- [x] 11.1 Run the full test suite via `mise run test` and confirm zero external API calls and ≥98% coverage, fixing any source gaps
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`, `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 7
   _Requirements:_ 9.10
-- [ ] 11.2 Run `mise run lint` and `mise run typecheck` (pyright strict) and fix any issues
+- [x] 11.2 Run `mise run lint` and `mise run typecheck` (pyright strict) and fix any issues
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`, `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 11.1
   _Requirements:_ 9.10
-- [ ] 11.3 Run `mise run test:security` and confirm no new vulnerabilities, secrets, or hardcoded model IDs
+- [x] 11.3 Run `mise run test:security` and confirm no new vulnerabilities, secrets, or hardcoded model IDs
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`, `src/pydantic_ai_sandbox/config.py`
   _Depends:_ 11.2
   _Requirements:_ 9.10
 
+_Status:_ ✅ Done (2026-06-09). Coverage ratchet confirmed: **98.71% ≥ 98%**
+(plan 9.10 split closed); both boundary files (`watsonx.py`, `config.py`) at
+**100%**. `mise run check` green: **211 passed / 2 skipped** (+5 coverage tests),
+lint+format clean, pyright strict 0 errors. Security gate green
+(gitleaks / forbid-hardcoded-model-ids / pip-audit).
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **The deferred coverage confirmation (plan 9.10 split) landed here, and the
+  beartype caveat had self-resolved.** Tasks 1/5/7's notes recorded that
+  `pytest --cov` aborted on a pytest-cov ↔ beartype import-hook circular import,
+  deferring the ≥98% number to 11.1. On this run `--cov` completed cleanly with
+  no code change — the toolchain had moved past the conflict — so 11.1 was a real
+  measure-and-close, not a workaround hunt. Initial measure: **96.13%**.
+- **Five coverage tests, all in-boundary, took the two boundary files to 100%.**
+  The `--cov` report localised the watsonx-feature gaps to `watsonx.py` and
+  `config.py` exactly (Task 11's boundary): (a) `config.py` transport-validator
+  defensive branches — `None`→`sdk` (138), non-`str`→raise (140-141), blank→`sdk`
+  (144); (b) `watsonx.py` list-of-text user content join (104→106/113) and the
+  `_build_litellm` `apikey`/`model_id` `None`-guard (645-650). The `None`/non-`str`
+  transport branches are unreachable via the env channel (always strings), so
+  they were driven by direct `Settings(watsonx_transport=...)` init kwargs —
+  empirically confirmed the `mode="before"` validator runs on kwargs (a `None`
+  that returned `"sdk"` instead of failing the `Literal` proves the branch fired).
+  The litellm guard mirrors the SDK `_build_client` guard test via
+  `Settings.model_construct`.
+- **Three residual gaps are out-of-boundary and pre-existing; left uncovered
+  by design.** `factory.py:113-117` (the `get_model("fallback")` lazy-import
+  dispatch — Task 4 boundary), `ollama.py:64-69` (the 001-era `_build_ollama`
+  `None`-guard), and `deps.py:76` (`get_chat_agent` body, never executed because
+  `app_with_overrides` always overrides the dep — structural to the 001 test
+  harness). None are watsonx-feature source; the global gate clears 98% (98.71%)
+  without them, so covering them would be scope creep into other features'
+  boundaries.
+- **The only security finding was uv's bundled `pip` (PYSEC-2026-196), not a
+  feature dependency.** `pip-audit` flagged `pip 26.1.1` (fix 26.1.2); every
+  feature-added dep (`ibm-watsonx-ai`, `litellm`, `respx`, `pyyaml`,
+  `types-pyyaml`) audits clean — so **no new** vulnerability is feature-introduced.
+  A bare `uv pip install pip>=26.1.2` did not stick because `uv run pip-audit`
+  re-syncs the env from `uv.lock` each run; the persistent fix was pinning
+  `pip>=26.1.2` in the dev group so the patched installer resolves into the
+  lockfile (justified security enabler under the Task 1 `pyproject.toml` boundary,
+  same posture as Task 7.2's respx/litellm additions).
+- **`reportArgumentType`, not `reportCallIssue`.** Passing `watsonx_transport=None`
+  / `123` to the `Settings` constructor (whose param is typed
+  `Literal["sdk","litellm"]`) is an argument-type violation under pyright strict;
+  the suppression must name `reportArgumentType` exactly (a wrong code would trip
+  `reportUnnecessaryTypeIgnoreComment`).
 
 ---
 

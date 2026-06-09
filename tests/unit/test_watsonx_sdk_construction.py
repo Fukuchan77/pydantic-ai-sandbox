@@ -674,6 +674,29 @@ async def test_request_rejects_multimodal_user_content(
         await model.request(messages, None, ModelRequestParameters())
 
 
+async def test_request_maps_list_of_text_user_content(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A list of text segments is concatenated into one ``user`` message (Req 2.7).
+
+    A ``UserPromptPart`` may carry its content as a *list* of items rather than a
+    bare string (pydantic_ai represents multi-part user input this way). When
+    every item is text, the SDK mapper joins them into a single ``content``
+    string — the text-only counterpart to the multimodal-rejection path above
+    (which fails loud on a non-text item).
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart(content=["天気は", "?"])]),
+    ]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [{"role": "user", "content": "天気は?"}]
+
+
 # ---------------------------------------------------------------------------
 # Task 5.4 — SDK-failure wrapping into ``ModelAPIError`` (no retries)
 #

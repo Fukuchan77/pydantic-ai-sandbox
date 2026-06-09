@@ -1163,3 +1163,159 @@ WATSONX` set so the gated e2e runs not skips.
   fail-not-skip therefore *requires* an explicit `[ -z ]` + `exit 1` step;
   without it the lane runs with blank creds and surfaces a confusing deep
   `ValueError`, or (gate unset) skips green.
+
+---
+
+## Task 10 — Migration & cleanup (Req 12.2) — 2026-06-09
+
+**Scope:** 10.1 — remove "stub" terminology from watsonx-related task
+descriptions and update stale `002-multi-provider` stub references.
+**Boundary:** `specs/002-watsonx-provider/tasks.md` (no test artifact; the
+deliverable is the spec doc itself).
+
+**TDD posture:** Doc-cleanup, no source. The verifiable assertion is a
+*classification* of every `stub` token, not a keyword sweep — RED = the
+candidate grep (14 hits), GREEN = each hit justified-and-retained. Outcome: the
+watsonx task **descriptions** were already free of any watsonx-as-stub framing
+(clean by incremental authoring), so Req 12.2's description-cleanup required no
+text edit. Net deliverable = the documented audit + the recorded R7 scope
+decision + the `[x]`/`_Status:_` flip. Same characterization posture as Tasks
+7.x (source/wording already landed → no RED-driven change).
+
+**Audit result (every `stub` token retained, with cause):**
+
+| Class | Tokens | Why retained |
+|-------|--------|--------------|
+| Code identifiers | `_MVP_STUB_PROVIDERS`, `test_mvp_stub_providers_lock`, `reportMissingTypeStubs` | real symbols — renaming desyncs tasks from source/tests |
+| Anthropic/Bedrock (still stubs) | "remaining stubs", "stub-skip branch still filters" | correct present-tense for the providers that *remain* stubs (spec 17/44/73) |
+| De-stubbing history | "de-stubbing did not widen", "re-stubbing watsonx" guard | affirmatively states watsonx is **no longer** a stub — the "real status" half of 12.2 |
+| 001-era history | "stub-era fallback tests", "uncredentialled stub member" | accurate record of watsonx's *prior* state; explains the credential-gate test breakage |
+| Test-double / unrelated | "synthetic stub" (FilePart probe), `reportMissingTypeStubs` | not provider-status terms |
+
+**Stale `002-multi-provider` references — scope decision (R7):** none exist
+inside the boundary file. Repo-wide they survive only in (a) `001-agentic-
+platform/` PDCA history (immutable) and (b) the **anthropic/bedrock** stub
+messages in `providers/{anthropic,bedrock}.py` + `llm/fallback.py`, pinned by
+`test_factory_dispatch.py:146`. Per the Plan R7 resolution the rename stayed
+**watsonx-only**: those messages are deliberately retained (anthropic/bedrock
+remain stubs tracked by a follow-up spec) and are outside this task's `tasks.md`
+boundary; editing them would also break the green 4.3 dispatch test.
+
+**Verification evidence:**
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Audit grep | `grep -ni "stub\|002-multi-provider" tasks.md` | 14 hits, all classified + justified above |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **206 passed / 2 skipped**; lint+format clean; pyright strict 0 errors — unchanged (doc-only edit, no source touched) |
+
+### Learnings for Act phase
+
+- **A "remove terminology" cleanup task is a classification task, not a sed
+  job.** Four of five `stub`-token classes here *must* survive (live code
+  symbols, still-stub sibling providers, de-stubbing history that itself
+  satisfies the requirement, and prior-era history that explains test churn). A
+  literal keyword strip would have corrupted accurate records and desynced the
+  spec from source. Faithful completion = audit + justify + document, then flip
+  status — which can legitimately mean zero text edits when prior tasks authored
+  the wording cleanly.
+- **Boundary discipline resolved an apparent scope gap.** The Plan's 12.2 row
+  mentions "stale `002-multi-provider` stub messages", but those live in
+  anthropic/bedrock source (out of this `tasks.md` boundary) and are pinned by a
+  green dispatch test under the R7 watsonx-only rename scope. Recording *why*
+  they're deferred (rather than silently leaving them) closes the gap honestly.
+
+---
+
+## Task 11 — Final validation & quality gates (2026-06-09)
+
+**Scope:** 11.1 coverage/hermeticity confirmation (≥98%, zero external calls),
+11.2 lint + typecheck, 11.3 security (secrets / CVEs / hardcoded model IDs).
+**Boundary:** `watsonx.py`, `config.py`. **Depends:** 7, 8, 9, 10.
+
+### 11.1 — Coverage ratchet confirmation (Req 9.10)
+
+The plan's 9.10 split (Task 1.1 *raises* `fail_under` 93→98, Task 11.1
+*confirms*) closed here. The pytest-cov ↔ beartype circular import that Tasks
+1/5/7 recorded as blocking `--cov` had **self-resolved** in the toolchain — the
+run completed with no code change — so 11.1 was a genuine measure-and-close.
+
+- **RED (measure):** `uv run pytest --cov` → **96.13% < 98%**, gaps localised to
+  five regions. The watsonx-feature gaps fell exactly inside the Task 11 boundary.
+- **GREEN (close):** +5 in-boundary characterization tests → **98.71%**;
+  `watsonx.py` and `config.py` both **100%**.
+
+| New test | File | Branch pinned |
+|----------|------|---------------|
+| `test_watsonx_transport_blank_value_defaults_to_sdk` | test_config.py | `config.py:144` blank→`sdk` (env `""`) |
+| `test_watsonx_transport_none_value_defaults_to_sdk` | test_config.py | `config.py:138` `None`→`sdk` (init kwarg) |
+| `test_watsonx_transport_non_string_value_is_rejected` | test_config.py | `config.py:140-141` non-`str`→raise (init kwarg) |
+| `test_request_maps_list_of_text_user_content` | test_watsonx_sdk_construction.py | `watsonx.py:104→106/113` list-text join |
+| `test_litellm_apikey_none_guard_raises_typeerror` | test_watsonx_litellm_construction.py | `watsonx.py:645-650` litellm `None`-guard |
+
+- **Env-unreachable validator branches need init kwargs, not env.** `None` /
+  non-`str` can't arrive via `WATSONX_TRANSPORT` (env is always a string), so the
+  `mode="before"` branches are reachable only via direct
+  `Settings(watsonx_transport=...)`. Probed first: a `None` returning `"sdk"`
+  (rather than failing the non-optional `Literal`) proves the validator ran, not
+  that pydantic short-circuited the default — confirming the branch fired.
+- **Three residual gaps left uncovered by design — out-of-boundary, pre-existing.**
+  `factory.py:113-117` (fallback dispatch via `get_model`), `ollama.py:64-69`
+  (001-era `None`-guard), `deps.py:76` (`get_chat_agent` body, shadowed by
+  `app_with_overrides`'s dep override). None are watsonx source; 98.71% clears the
+  gate without them. Covering them = scope creep into Task 4 / 001 boundaries.
+- **Zero external API calls:** the 211-test unit suite is hermetic by construction
+  (httpx send-patches, fake `achat`, RESPX with `assert_all_called`, socket-boom
+  guards); the 2 skips are the gated `RUN_INTEGRATION_{OLLAMA,WATSONX}` lanes.
+
+### 11.2 — Lint + typecheck
+
+- `mise run lint` / `mise run format` clean. One pyright-strict error: the
+  `Settings(watsonx_transport=None)` test arg violates the `Literal["sdk",
+  "litellm"]` param type → fixed with `# pyright: ignore[reportArgumentType]`
+  (the precise code; `reportCallIssue` would have tripped
+  `reportUnnecessaryTypeIgnoreComment`).
+
+### 11.3 — Security gate
+
+`mise run test:security` does not exist; the security lane is the pre-commit
+hooks (tech.md / `.pre-commit-config.yaml`): ruff `S` (bandit superset, green in
+lint), gitleaks, forbid-hardcoded-model-ids, pip-audit.
+
+- gitleaks ✅ · forbid-hardcoded-model-ids ✅.
+- **pip-audit flagged only `pip 26.1.1` (PYSEC-2026-196, fix 26.1.2)** — uv's
+  bundled installer, **not** a feature dependency. All feature-added deps
+  (`ibm-watsonx-ai`, `litellm`, `respx`, `pyyaml`, `types-pyyaml`) audit clean →
+  no **new** vulnerability is feature-introduced.
+- **Root cause why a venv bump didn't stick:** `uv run pip-audit` re-syncs the env
+  from `uv.lock` every run, so `uv pip install pip>=26.1.2` was reverted to
+  26.1.1. Fix: pin `pip>=26.1.2` in the dev group so the patched installer
+  resolves into the lockfile (justified security enabler under the Task 1
+  `pyproject.toml` boundary, cf. Task 7.2). Re-audit → **Passed** (after one
+  transient OSV-fetch connection reset, retried).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Coverage | `uv run pytest --cov` | ✅ **98.71% ≥ 98%**; `watsonx.py` + `config.py` 100% |
+| Aggregate | `mise run check` (lint+format+typecheck+test) | ✅ **211 passed / 2 skipped**; ruff lint+format clean; pyright strict 0 errors |
+| Secrets | `pre-commit run gitleaks --all-files` | ✅ Passed |
+| Model IDs | `pre-commit run forbid-hardcoded-model-ids --all-files` | ✅ Passed |
+| CVE scan | `pre-commit run pip-audit --hook-stage manual --all-files` | ✅ Passed (after pip 26.1.2 pin) |
+
+### Learnings for Act phase
+
+- **A deferred-confirmation task should re-test the blocker, not assume it.** The
+  beartype ↔ pytest-cov circular import was carried as a known blocker across five
+  tasks; on the final gate it had quietly resolved. Re-running first (rather than
+  reaching for the documented workaround) turned a feared workaround-hunt into a
+  one-command measurement.
+- **A global coverage floor + a per-task boundary is a productive tension.** The
+  98% gate is global, but the honest fix stayed inside `watsonx.py`/`config.py`;
+  the leftover sub-2% lived in other features' code. Closing the boundary files to
+  100% and *documenting* the out-of-boundary residuals (rather than chasing them)
+  respects both the ratchet and task scope.
+- **`uv run` re-syncs from the lockfile, so transient tool-env edits evaporate.**
+  Any "fix the installed version" action that must survive a `uv run` has to land
+  in `uv.lock` via a declared dependency — a lesson that generalises beyond this
+  pip CVE to any env-level remediation under uv.
