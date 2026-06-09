@@ -391,19 +391,44 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 1, 2, 5
 _Requirements:_ 2.3, 2.6, 5.4
 
-- [ ] 6.1 Add the litellm branch to `_build_watsonx` with an import guard (`try: import litellm except ImportError: raise ValueError` naming `litellm`)
+- [x] 6.1 Add the litellm branch to `_build_watsonx` with an import guard (`try: import litellm except ImportError: raise ValueError` naming `litellm`)
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 5
   _Requirements:_ 2.6
-- [ ] 6.2 Construct `LiteLLMProvider(api_key=..., api_base=..., http_client=<timeout-wired>)` (routing `apikey → api_key`, `url → api_base`; `project_id` via `WATSONX_PROJECT_ID` env), wrapped in `OpenAIChatModel(model_name=f"watsonx/{model_id}", provider=...)`, applying the configured timeouts
+- [x] 6.2 Construct `LiteLLMProvider(api_key=..., api_base=..., http_client=<timeout-wired>)` (routing `apikey → api_key`, `url → api_base`; `project_id` via `WATSONX_PROJECT_ID` env), wrapped in `OpenAIChatModel(model_name=f"watsonx/{model_id}", provider=...)`, applying the configured timeouts
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 6.1
   _Requirements:_ 2.3, 5.4
 
+_Status:_ ✅ Done (2026-06-09). 7 RED→GREEN tests in new
+`test_watsonx_litellm_construction.py`; full gate green (132 passed / 1 skipped,
+lint+format clean, pyright 0 errors).
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **Litellm branch extracted to `_build_litellm(settings)`, not inlined.** The
+  SDK branch is a one-liner (`return WatsonxSDKModel(settings)`), but the litellm
+  path carries the import guard + provider/adapter construction; a helper keeps
+  `_build_watsonx` a pure dispatch. All three heavy imports — `litellm`,
+  `OpenAIChatModel`, `LiteLLMProvider` — are **function-local**, same rationale as
+  5.2's SDK import: `factory.py` pulls this module in unconditionally, so a
+  module-scope import would force litellm onto SDK-only/ollama-only deployments.
+- **Real construction surfaces verified before coding** (`inspect` +
+  build-and-introspect): `LiteLLMProvider(*, api_key, api_base, openai_client,
+  http_client)` (no `project_id` — R4/ADR-3 confirmed). The built
+  `OpenAIChatModel` exposes `.model_name == "watsonx/<id>"`, `.client.api_key`,
+  `.client.base_url`, and `.client.timeout` (an `httpx.Timeout` with the wired
+  connect/read phases) — those are what the tests assert against, not internals.
+- **Import-guard tested without uninstalling litellm.** litellm *is* installed in
+  the test env, so the missing-package path is driven by
+  `monkeypatch.setitem(sys.modules, "litellm", None)` → `import litellm` raises
+  `ImportError` → guard re-raises `ValueError` naming `litellm` (cause chained,
+  asserted via `__cause__`). The richer RESPX request-path tests remain Task 7.2.
+- **Removed the Task 5.6 `NotImplementedError` placeholder test** from
+  `test_watsonx_sdk_construction.py` atomically with landing the branch — it
+  asserted fail-loud behaviour the implementation no longer has. Timeouts shaped
+  identically to the SDK client (`httpx.Timeout(read, connect=connect)` — partial
+  spec is rejected by httpx).
 
 ---
 

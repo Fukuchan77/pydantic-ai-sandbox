@@ -569,3 +569,62 @@ watsonx-specific *out-of-scope* message (streaming is out of scope — spec.md
   satisfies most of a new contract (here: SDK branch already returned the right
   type), pin the *behavioural delta* (litellm fail-loud) as the RED and keep the
   rest as regression guards — don't fabricate REDs that were never red.
+
+---
+
+## Task 6 — LiteLLM transport — 2026-06-09
+
+### Plan (intent)
+
+Wire the `WATSONX_TRANSPORT=litellm` branch of `_build_watsonx`: 6.1 an
+optional-dependency import guard (`ImportError → ValueError` naming `litellm`,
+Req 2.6), 6.2 a `LiteLLMProvider(api_key, api_base, http_client)` wrapped in
+`OpenAIChatModel(model_name="watsonx/<id>", provider=...)`, routing `apikey →
+api_key` / `url → api_base` with timeouts via `http_client` (Req 2.3/5.4).
+`project_id` reaches litellm via the `WATSONX_PROJECT_ID` env var, not a
+constructor arg (R4/ADR-3).
+
+### Do (TDD cycle)
+
+- **RED**: new `tests/unit/test_watsonx_litellm_construction.py` (7 tests) — all
+  failed on the Task 5.6 `NotImplementedError` placeholder. Coverage: builds
+  `OpenAIChatModel`; `model_name == "watsonx/<id>"`; credential routing
+  (`client.api_key`/`base_url`); timeout wiring (defaults 30/120 + env override);
+  import-guard `ValueError`; I/O-free construction.
+- **GREEN**: extracted `_build_litellm(settings)`; `_build_watsonx` now dispatches
+  to it for the non-SDK branch. Removed the obsolete 5.6 fail-loud test from
+  `test_watsonx_sdk_construction.py` atomically.
+
+### Design decisions (root-caused, not guessed)
+
+- **Verified surfaces empirically before coding.** Built a `LiteLLMProvider` +
+  `OpenAIChatModel` in a throwaway interpreter: confirmed `.client.api_key`,
+  `.client.base_url`, `.client.timeout` (an `httpx.Timeout` with the wired
+  connect/read phases) and `.model_name == "watsonx/<id>"`. Tests assert these
+  public surfaces, not internals — no guessing at attribute names.
+- **Three heavy imports kept function-local.** `litellm`, `OpenAIChatModel`,
+  `LiteLLMProvider` all import *inside* `_build_litellm` — `factory.py` imports
+  this module unconditionally, so module-scope imports would tax SDK-only and
+  ollama-only deployments. Same rule as 5.2's SDK import.
+- **Import guard tested without uninstalling.** litellm is installed in the env;
+  `monkeypatch.setitem(sys.modules, "litellm", None)` forces `import litellm` to
+  raise `ImportError`, which the guard re-raises as `ValueError` (cause chained,
+  asserted via `__cause__`). RESPX request-path tests stay Task 7.2.
+- **Defensive `None` guard for apikey AND model_id.** `f"watsonx/{None}"` would be
+  a silent bug; guarded with the same fail-loud `TypeError` invariant the SDK
+  builder uses (unreachable when the credential gate has run).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest test_watsonx_litellm_construction.py test_watsonx_sdk_construction.py` | ✅ 34 passed |
+| Aggregate (canonical) | `mise run check` | ✅ **132 passed / 1 skipped**; ruff lint + format clean; pyright 0 errors |
+
+### Learnings for Act phase
+
+- **Confirm provider/adapter surfaces by construction, not docs.** Wrapping a
+  third-party `Provider` in `OpenAIChatModel` exposes a specific attribute graph
+  (`.client.timeout` etc.); a 30-second build-and-introspect turned the test
+  assertions from speculative to grounded — cheaper than a RED that fails on a
+  wrong attribute name.
