@@ -466,12 +466,43 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_observability.py`
   _Depends:_ 5
   _Requirements:_ 8.5, 9.9
-- [ ] 7.8 (P) Credential gate tests in config: missing watsonx cred on direct AND fallback selection → boot-time `ValueError` naming the specific env var
+- [x] 7.8 (P) Credential gate tests in config: missing watsonx cred on direct AND fallback selection → boot-time `ValueError` naming the specific env var
   _Boundary:_ `tests/unit/test_config.py`
   _Depends:_ 5
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.8 (2026-06-09): credential-gate edge suite landed (Req 3.2/3.3 / SC-004).**
+  +7 cases appended to `test_config.py` (6 functions; the fail-fast timing test
+  parametrized ×2 over direct/fallback selection). Canonical `mise run check`
+  green: **201 passed / 1 skipped** (+7), lint+format clean, pyright strict 0
+  errors. Characterization posture (same as 7.1/7.3-7.5/7.7): the gate source
+  landed at Task 2.2, so RED = absent tests; all 7 passed on first run.
+- **Req 3.2 was already met by Task 2; 7.8's net-new is Req 3.3 / SC-004 — the
+  2-second fail-fast — plus the edges Task 2's one-at-a-time tests can't reach.**
+  Task 2's `test_watsonx_{direct,fallback}_*_requires_each_credential` pin
+  *which* variable is named (3.2) by dropping one cred at a time, so the gate's
+  `missing:` list there only ever holds a single entry. 7.8 owns: (a) the
+  **timing** half — `time.perf_counter()` brackets a missing-cred construction
+  on both selection paths, asserting `< 2.0s` (a deliberately generous ceiling:
+  the gate is pure-Python/I/O-free per the socket-boom test, real elapsed is
+  sub-ms, so it pins SC-004 without CI flake); (b) the **all-four-missing**
+  message shape (names a var *and* lists all four); (c) the symmetric
+  **fallback full-creds positive** (gate passes, not merely dormant).
+- **Two robustness edges guard a real fail-fast bypass.** (1) The gate detects
+  watsonx membership only after `.strip().lower()` on each `FALLBACK_ORDER`
+  entry — `FALLBACK_ORDER=ollama, WatsonX` (space + mixed case) must still arm
+  the gate; a raw-token compare would slip partial creds past boot and defer the
+  failure to the first failover. (2) The **dormant-under-fallback-without-
+  watsonx** False branch (`FALLBACK_ORDER=ollama,anthropic`, no watsonx creds →
+  constructs) complements Task 2's direct-ollama dormancy test, proving a
+  watsonx-free fallback chain isn't forced to supply unused creds.
+- **First consumer of the `watsonx_settings_factory` fixture (Task 3.1).** Its
+  docstring earmarked it for 7.8; the direct-selection tests drive the gate via
+  `watsonx_settings_factory(WATSONX_APIKEY=None)`, validating the fixture's
+  "`None` → unset" cred-drop semantics end-to-end. Fallback-path tests use the
+  raw `settings_factory` since they need a non-watsonx `LLM_PROVIDER`.
 
 - **7.7 (2026-06-09): observability suite landed (Req 8.5/9.9).** New
   `test_watsonx_observability.py` — 5 tests. Characterization posture (source
