@@ -957,3 +957,58 @@ double). So 7.6 pins/guards the failover contract rather than driving new code
   retained so the Task 2.2 gate passes for `watsonx ∈ FALLBACK_ORDER`.
   `get_settings.cache_clear()` must bracket `_build_fallback` (try/finally): the
   recursion reads the cached singleton, not the passed `settings`.
+
+## Task 7.7 — Observability tests (Req 8.5/9.9) — 2026-06-09
+
+### Plan
+
+Create `tests/unit/test_watsonx_observability.py`: drive a real `WatsonxSDKModel`
+through `Agent.run_sync` under `instrument_pydantic_ai` and assert the span
+surface — non-empty `gen_ai.system`/`gen_ai.request.model` (9.9), error class on
+failure (8.2), no extended attributes (8.3/8.4), unchanged `extra_patterns`
+scrubbing (8.5). Characterization posture: source already exists (Task 5.1/5.4 +
+001-era `logging_setup`), so RED = absent file.
+
+### Do — empirical span shape first (no guessing)
+
+Ran three throwaway probes against the real instrumentation before writing
+assertions:
+
+1. **Happy path.** `chat` span carries `gen_ai.system == "watsonx"`,
+   `gen_ai.provider.name == "watsonx"`, `gen_ai.request.model == "<model id>"`.
+   Confirms the Model's `system`/`model_name` properties drive 9.9 end-to-end.
+2. **Error path.** A wrapped `ModelAPIError` surfaces NOT as an `error.class`
+   *attribute* but as an OTel `exception` *event* (`exception.type =
+   pydantic_ai.exceptions.ModelAPIError`) on the `chat` span — the V2-Beta
+   reality. Test asserts that event.
+3. **Model-settings probe.** `gen_ai.request.{temperature,max_tokens,top_p}` are
+   emitted by generic instrumentation **iff the caller passes `model_settings`**,
+   independent of the Model's `del model_settings`. So the lean-set test asserts
+   only the Model's own contribution (no model-param keys on a no-settings run,
+   no `watsonx.*` namespace).
+
+5 tests written, all green on first run (characterization).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_observability.py -v` | ✅ 5 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **194 passed / 1 skipped** (+5); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **Probe the instrumentation, don't assume the requirement's vocabulary.**
+  Req 8.2 says "`error.class` attribute"; V2 actually records an `exception`
+  event with `exception.type`. Writing the test from the spec wording verbatim
+  would have produced a permanently-RED assertion against a key that never
+  exists. The empirical probe caught this in seconds.
+- **"No extended attributes" is only meaningful when scoped to the unit under
+  test.** Token/content attrs are upstream defaults shared by every provider;
+  asserting their absence would test pydantic_ai, not watsonx, and would fail.
+  The faithful slice is the Model's own contribution (model-params it forwards,
+  custom namespaces it adds) — both empty by design.
+- **Equality vs superset is the whole point of an 8.5 regression guard.**
+  `test_logging_setup` asserts the scrubbing superset (would survive a watsonx
+  pattern being appended); 7.7 asserts equality, so adding `watsonx_apikey` to
+  the alphabet now fails a test. Same data, complementary assertions.
