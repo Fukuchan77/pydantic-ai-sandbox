@@ -769,19 +769,61 @@ _Boundary:_ `.github/workflows/integration-watsonx.yml`
 _Depends:_ 8
 _Requirements:_ 11.1, 11.2, 11.3
 
-- [ ] 9.1 Create the `integration-watsonx.yml` workflow triggered exclusively by `workflow_dispatch` with concurrency controls
+- [x] 9.1 Create the `integration-watsonx.yml` workflow triggered exclusively by `workflow_dispatch` with concurrency controls
   _Boundary:_ `.github/workflows/integration-watsonx.yml`
   _Depends:_ 8
   _Requirements:_ 11.2
-- [ ] 9.2 Wire `WATSONX_APIKEY` / `WATSONX_PROJECT_ID` / `WATSONX_URL` / `WATSONX_MODEL_ID` CI secrets and add explicit fail-on-missing-secret validation (fail, not skip)
+- [x] 9.2 Wire `WATSONX_APIKEY` / `WATSONX_PROJECT_ID` / `WATSONX_URL` / `WATSONX_MODEL_ID` CI secrets and add explicit fail-on-missing-secret validation (fail, not skip)
   _Boundary:_ `.github/workflows/integration-watsonx.yml`
   _Depends:_ 9.1
   _Requirements:_ 11.1, 11.3
 
+_Status:_ ✅ Done (2026-06-09). New `integration-watsonx.yml` (9.1+9.2 atomic in
+one file) + hermetic contract guard `test_watsonx_ci_workflow.py` (5 tests,
+genuine RED→GREEN: file-absent → all pass). `mise run check` green: **206 passed
+/ 2 skipped** (+5), lint+format clean, pyright strict 0 errors.
+
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **A real RED→GREEN, not characterization — the artifact is a YAML file with no
+  prior existence.** Unlike Tasks 7.x (source landed earlier → tests passed on
+  first run), Task 9's deliverable did not exist, so the 5-test guard genuinely
+  failed RED (`FileNotFoundError` / missing-file assert) before the workflow was
+  written. TDD on a CI workflow ⇒ a *structural contract test* that parses the
+  YAML and pins the invariants Req 11 cares about, mirroring
+  `test_no_hardcoded_model_ids.py`'s static-guard idiom (the only precedent for
+  asserting on non-Python repo artifacts). This locks the file against silent
+  regressions: re-adding a push/PR/cron trigger (SC-007 budget) or dropping the
+  missing-secret guard (fail-not-skip) now fails a unit test.
+- **YAML parsing > text grep — comments would defeat a grep.** The `on:`
+  exclusivity assertion (`set(on) == {"workflow_dispatch"}`) must ignore the
+  file's prose comments, which mention push/pull_request/schedule by name (the
+  ollama lane's comments do the same). A text scan for "absence of push:" would
+  false-positive on a comment; `yaml.safe_load` sees only structure. **Gotcha:**
+  PyYAML (YAML 1.1) resolves the unquoted `on:` key to the bool `True`, so the
+  test reads `data.get("on", data[True])` and types the parsed mapping
+  `dict[Any, Any]` (keys aren't all `str`). pyright strict also forced
+  `cast("dict[str, Any]"/"list[Any]", ...)` at each `isinstance`-narrowed /
+  `.get()`-fallback site (Task 5.3's SDK-dict cast convention).
+- **`pyyaml` + `types-pyyaml` promoted to declared dev deps (justified enabler,
+  Task 1 boundary).** PyYAML was only present *transitively* (via pre-commit);
+  the new test imports it directly, so it is declared honestly — same posture as
+  Task 7.2's `respx`/`litellm` dev-group additions. `types-pyyaml` satisfies
+  pyright strict's `reportMissingTypeStubs`. Coverage source is scoped to `src/`
+  so neither the test nor the YAML touches the 98% ratchet.
+- **`workflow_dispatch`-only, no `paths`/cron (deliberate divergence from the
+  ollama lane).** watsonx.ai is metered hosted SaaS, so every run costs spend —
+  Req 11.2/SC-007 mandate a single manual trigger. The fail-on-missing-secret
+  step uses bash indirect expansion (`${!var}`) + `[ -z ]` because GitHub injects
+  an absent secret as `""` (never auto-fails); the explicit non-zero `exit 1`
+  naming the missing vars is what converts a misconfigured repo into a loud
+  failure instead of a confusing mid-test credential-gate `ValueError` or a
+  green-by-skip. Validated the bash locally (present→exit 0, missing→exit 1).
+  `RUN_INTEGRATION_WATSONX=1` is set at workflow scope so the gated e2e test
+  actually runs (Req 10.1) — fail-not-skip is meaningless if the test skips.
+  Test invocation is `uv run pytest tests/integration/test_watsonx_chat_e2e.py`
+  (no watsonx mise task exists; adding one is outside this file's boundary —
+  mirrors ci.yml's own `uv run pytest`, the 2nd Tool-Execution-Priority tier).
 
 ---
 

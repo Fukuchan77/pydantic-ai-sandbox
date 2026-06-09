@@ -43,6 +43,14 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    # PyYAML + its stubs back the hermetic CI-workflow contract guard
+    # (test_watsonx_ci_workflow.py, Task 9 / Req 11.1-11.3): parsing the
+    # workflow YAML pins triggers / concurrency / fail-on-missing-secret while
+    # ignoring comments (a text grep cannot). PyYAML is already present
+    # transitively via pre-commit, but the test imports it directly, so it is
+    # declared here for honest resolution; types-pyyaml satisfies pyright strict.
+    "pyyaml",
+    "types-pyyaml",
     # RESPX intercepts the httpx round-trip the LiteLLM transport's OpenAI
     # adapter makes, so the watsonx litellm path is tested hermetically with no
     # egress (Req 9.4 — "RESPX-based tests for the LiteLLM path"; spec.md
