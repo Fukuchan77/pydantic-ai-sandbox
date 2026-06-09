@@ -628,3 +628,67 @@ constructor arg (R4/ADR-3).
   (`.client.timeout` etc.); a 30-second build-and-introspect turned the test
   assertions from speculative to grounded — cheaper than a RED that fails on a
   wrong attribute name.
+
+---
+
+## Task 7.1 — Hermetic SDK construction/mapping tests (2026-06-09)
+
+**Scope:** Exhaustive unit tests for the SDK transport (Req 9.3, 9.11) in
+`tests/unit/test_watsonx_sdk_construction.py`.
+
+### What was done
+
+The literal 9.3 (I/O-free construction via both `httpx.Client.send` /
+`httpx.AsyncClient.send` patches) and 9.11 (representative `achat` response →
+`ModelResponse` with text/tool-call parts, `usage`, `finish_reason`) test
+categories already existed from Task 5's incremental TDD. Task 7.1's net-new
+work was the **defensive-branch backfill** the Task 5.3/5.5 notes explicitly
+assigned to it — pinning every remaining branch of the OpenAI↔pydantic_ai
+translation so the ≥98% ratchet (Task 11.1) has no source gaps:
+
+| New test | Branch pinned |
+|----------|---------------|
+| `test_request_raises_unexpected_behavior_on_no_choices` | `_build_response` no-`choices` → `UnexpectedModelBehavior` |
+| `test_request_maps_absent_usage_to_zeroed_usage` | `_map_usage` absent block → `RequestUsage()` zeroed |
+| `test_request_maps_unknown_finish_reason_to_none` ×3 | absent / empty / unmapped `finish_reason` → `None` |
+| `test_request_maps_empty_message_to_no_parts` | empty assistant message → empty `parts` (rule 433) |
+| `test_request_maps_system_prompt_part` | `_map_request_part` `SystemPromptPart` → `system` |
+| `test_request_maps_assistant_text_part` | `_map_assistant_message` `TextPart` replay |
+| `test_request_skips_thinking_part_in_assistant_message` | `ThinkingPart` documented omission |
+| `test_request_raises_on_unsupported_assistant_part` | unsupported part (`FilePart`) → `NotImplementedError` |
+| `test_request_maps_retry_prompt_without_tool_to_user` | `RetryPromptPart` (no tool) → `user` |
+| `test_request_maps_retry_prompt_with_tool_to_tool` | `RetryPromptPart` (tool) → `tool` |
+
++12 cases (10 functions, one parametrized ×3). Written after the source (Task 5
+did happy-path RED→GREEN); passed on first run → characterization tests
+confirming the deferred defensive contracts.
+
+### Trial / decisions
+
+- **`FilePart` chosen as the unsupported-part probe** — a real `ModelResponsePart`
+  the mapper doesn't handle, so no synthetic stub needed. Verified it constructs
+  (`BinaryContent(media_type="image/png")`) before writing the test.
+- **`NotImplementedError` / `UnexpectedModelBehavior` assert raw types, not
+  `ModelAPIError`** — both fire outside the SDK-error guard (mapping before /
+  `_build_response` after the `try`), so they propagate unwrapped (boundary
+  contract from Task 5.4).
+- **Retry feedback asserted via `retry.model_response()`** (dynamic), not a
+  hardcoded string — robust against upstream wording drift.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_sdk_construction.py` | ✅ 39 passed (27 → 39) |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **144 passed / 1 skipped**; ruff clean; pyright 0 errors |
+
+`pytest --cov` still aborts on the pytest-cov ↔ beartype circular import (known,
+deferred to Task 11.1); uncovered branches were targeted by source analysis.
+
+### Learnings for Act phase
+
+- **The "task already done by an earlier task" pattern recurs.** Tasks 4→5→7.1
+  all landed tests/skeletons ahead in a shared boundary file. The honest move is
+  to treat the later task as "prove exhaustively + backfill deferred branches"
+  rather than re-deriving work — the per-task notes are the contract for what's
+  net-new, and they held precisely here.

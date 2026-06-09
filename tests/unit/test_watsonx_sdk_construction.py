@@ -42,13 +42,18 @@ import httpx
 import ibm_watsonx_ai.foundation_models  # noqa: F401  # pyright: ignore[reportUnusedImport]
 import pytest
 from ibm_watsonx_ai.wml_client_error import WMLClientError
-from pydantic_ai.exceptions import ModelAPIError
+from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.messages import (
+    BinaryContent,
+    FilePart,
     ImageUrl,
     ModelMessage,
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
+    SystemPromptPart,
     TextPart,
+    ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -932,3 +937,291 @@ def test_build_watsonx_is_io_free(
 # ``test_watsonx_litellm_construction.py``. The Task 5.6 placeholder that
 # asserted a ``NotImplementedError`` fail-loud was removed atomically with that
 # branch — keeping it would assert behaviour the implementation no longer has.
+
+
+# ---------------------------------------------------------------------------
+# Task 7.1 — exhaustive request/response-mapping coverage (Req 9.3 / 9.11)
+#
+# Task 5's incremental TDD landed the *happy-path* mapping tests above (text /
+# tool-call / mixed response, full history mapping, tool forwarding, multimodal
+# reject) plus the no-retry / failure-wrapping suite — between them they already
+# satisfy the literal Req 9.3 (I/O-free construction via both ``httpx`` send
+# patches: ``test_construction_is_io_free`` / ``test_build_watsonx_is_io_free``)
+# and Req 9.11 (a representative ``achat`` response → ``ModelResponse`` with text
+# parts, tool-call parts, ``usage`` and ``finish_reason``:
+# ``test_request_maps_text_response`` / ``..._tool_call_response``).
+#
+# Task 7.1 is the dedicated *hermetic unit tests* task for the SDK transport, so
+# it backfills the **defensive mapping branches** Task 5 deliberately deferred
+# here (Task 5.3 / 5.5 notes: "_build_response no-choices raise, ThinkingPart
+# skip, unsupported-part raises ... owned by Task 7.1's exhaustive tests"), plus
+# the remaining request/response-mapping edges (empty/absent fields, the
+# system-prompt and retry request parts, assistant-text replay). This pins every
+# branch of the OpenAI<->pydantic_ai translation so the ≥98% coverage ratchet
+# (Req 9.10, confirmed at Task 11.1) has no source gaps. All stay hermetic by
+# substituting ``_build_client`` with a canned / recording fake — zero egress.
+# ---------------------------------------------------------------------------
+
+
+async def test_request_raises_unexpected_behavior_on_no_choices(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A response with no ``choices`` is malformed → ``UnexpectedModelBehavior`` (Req 9.11).
+
+    ``_build_response`` runs *after* the SDK-error guard (mapping errors are not
+    failover-recoverable), so a structurally-invalid ``achat`` payload must
+    surface loud as :class:`UnexpectedModelBehavior` rather than be masked as a
+    recoverable :class:`ModelAPIError` or silently yield an empty response.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, {"id": "x", "choices": [], "usage": {}})
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    with pytest.raises(UnexpectedModelBehavior, match="no choices"):
+        await model.request(messages, None, ModelRequestParameters())
+
+
+async def test_request_maps_absent_usage_to_zeroed_usage(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A response without a ``usage`` block yields a zeroed ``RequestUsage`` (Req 9.11).
+
+    Usage is observability metadata, not load-bearing output, so an absent block
+    must degrade to ``RequestUsage()`` (input/output tokens ``0``) rather than
+    raise — the text/tool-call parts of the response are still fully usable.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    response: dict[str, Any] = {
+        "id": "chatcmpl-no-usage",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "hi"},
+                "finish_reason": "stop",
+            },
+        ],
+    }
+    _stub_achat(monkeypatch, model, response)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert result.usage.input_tokens == 0
+    assert result.usage.output_tokens == 0
+
+
+@pytest.mark.parametrize(
+    "choice_overrides",
+    [
+        pytest.param({}, id="absent"),
+        pytest.param({"finish_reason": ""}, id="empty-string"),
+        pytest.param({"finish_reason": "made-up-reason"}, id="unmapped-key"),
+    ],
+)
+async def test_request_maps_unknown_finish_reason_to_none(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+    choice_overrides: dict[str, Any],
+) -> None:
+    """Absent / empty / unmapped ``finish_reason`` all normalise to ``None`` (Req 9.11).
+
+    Mirrors pydantic_ai's own OpenAI Chat adapter: a missing or empty reason
+    short-circuits to ``None`` and a present-but-unrecognised key falls through
+    ``_FINISH_REASON_MAP.get`` to ``None`` — the provider never invents a
+    watsonx-specific :class:`FinishReason` value.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    response: dict[str, Any] = {
+        "id": "chatcmpl-finish",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "hi"},
+                **choice_overrides,
+            },
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+    _stub_achat(monkeypatch, model, response)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert result.finish_reason is None
+
+
+async def test_request_maps_empty_message_to_no_parts(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """An assistant message with no content and no tool calls → empty ``parts`` (Req 9.11).
+
+    A response that carries ``choices`` but an empty assistant message is a
+    valid (if degenerate) response — ``parts`` is the empty list rather than a
+    raised error or a synthesised placeholder part (``models/CLAUDE.md`` rule
+    433); only a *missing* ``choices`` array is malformed.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    response: dict[str, Any] = {
+        "id": "chatcmpl-empty",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": None},
+                "finish_reason": "stop",
+            },
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 0, "total_tokens": 1},
+    }
+    _stub_achat(monkeypatch, model, response)
+
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    result = await model.request(messages, None, ModelRequestParameters())
+
+    assert result.parts == []
+
+
+async def test_request_maps_system_prompt_part(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A :class:`SystemPromptPart` maps to an OpenAI ``system`` message (Req 2.7).
+
+    The history mapper handles an explicit ``SystemPromptPart`` (distinct from
+    the rendered ``instructions`` string, covered separately) by emitting a
+    leading ``system`` message — proving the request-part dispatch covers the
+    system role, not only user / tool parts.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(parts=[SystemPromptPart("you are terse"), UserPromptPart("hi")]),
+    ]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [
+        {"role": "system", "content": "you are terse"},
+        {"role": "user", "content": "hi"},
+    ]
+
+
+async def test_request_maps_assistant_text_part(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A prior assistant :class:`TextPart` replays as an ``assistant`` message (Req 2.7).
+
+    Multi-turn history must round-trip the model's own earlier *text* reply (not
+    only tool calls) back into the request so the next turn keeps its context;
+    the assistant-text branch emits ``{"role": "assistant", "content": ...}``.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart("hi")]),
+        ModelResponse(parts=[TextPart("earlier reply")]),
+        ModelRequest(parts=[UserPromptPart("again")]),
+    ]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "earlier reply"},
+        {"role": "user", "content": "again"},
+    ]
+
+
+async def test_request_skips_thinking_part_in_assistant_message(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A :class:`ThinkingPart` is omitted from the replayed assistant message (Req 2.7).
+
+    Reasoning traces are not part of the OpenAI assistant-message contract, so
+    they are deliberately not resent (documented omission, not a silent drop):
+    an assistant turn carrying both a thinking and a text part replays only the
+    text ``content`` and never raises.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    messages: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart("hi")]),
+        ModelResponse(parts=[ThinkingPart(content="(internal reasoning)"), TextPart("visible")]),
+    ]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "visible"},
+    ]
+
+
+async def test_request_raises_on_unsupported_assistant_part(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """An unsupported assistant part fails loud rather than vanishing (Req 2.7).
+
+    The assistant-message mapper handles text / tool-call / thinking parts; any
+    other :class:`ModelResponsePart` (here a :class:`FilePart`) must raise
+    :class:`NotImplementedError` naming the offending type so a future part kind
+    surfaces as an explicit refusal, not a silent drop. The mapping runs before
+    the SDK-error guard, so the error propagates unwrapped.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    file_part = FilePart(content=BinaryContent(data=b"\x89PNG", media_type="image/png"))
+    messages: list[ModelMessage] = [
+        ModelRequest(parts=[UserPromptPart("hi")]),
+        ModelResponse(parts=[file_part]),
+    ]
+    with pytest.raises(NotImplementedError, match="Unsupported assistant message part"):
+        await model.request(messages, None, ModelRequestParameters())
+
+
+async def test_request_maps_retry_prompt_without_tool_to_user(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A tool-less :class:`RetryPromptPart` maps to a ``user`` message (Req 2.7).
+
+    A retry without a ``tool_name`` is feedback on free-text / native output, so
+    it re-enters the conversation as a ``user`` turn carrying the rendered
+    validation feedback (``model_response()``) — never silently dropped.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    retry = RetryPromptPart(content="please return valid JSON")
+    messages: list[ModelMessage] = [ModelRequest(parts=[retry])]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [{"role": "user", "content": retry.model_response()}]
+
+
+async def test_request_maps_retry_prompt_with_tool_to_tool(
+    monkeypatch: pytest.MonkeyPatch,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A tool-targeted :class:`RetryPromptPart` maps to a ``tool`` message (Req 2.7).
+
+    A retry carrying a ``tool_name`` is feedback on a specific tool call, so it
+    re-enters as a ``tool`` message keyed by ``tool_call_id`` with the rendered
+    feedback as content — keeping the failed call addressable in the next turn.
+    """
+    model = WatsonxSDKModel(watsonx_settings_factory())
+    recorder = _stub_achat(monkeypatch, model, _TEXT_RESPONSE)
+
+    retry = RetryPromptPart(content="bad args", tool_name="search_kb", tool_call_id="c1")
+    messages: list[ModelMessage] = [ModelRequest(parts=[retry])]
+    await model.request(messages, None, ModelRequestParameters())
+
+    assert recorder["messages"] == [
+        {"role": "tool", "tool_call_id": "c1", "content": retry.model_response()},
+    ]
