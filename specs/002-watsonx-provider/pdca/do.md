@@ -1012,3 +1012,59 @@ assertions:
   `test_logging_setup` asserts the scrubbing superset (would survive a watsonx
   pattern being appended); 7.7 asserts equality, so adding `watsonx_apikey` to
   the alphabet now fails a test. Same data, complementary assertions.
+
+---
+
+## Task 7.8 — credential-gate tests in config (Req 3.2/3.3 / SC-004) — 2026-06-09
+
+### Plan
+
+Append the credential-gate edge tests to `tests/unit/test_config.py` (the
+declared 7.8 boundary). The gate source landed at Task 2.2 and Task 2 already
+wrote the one-cred-missing *naming* tests (Req 3.2), so per the coverage matrix
+(3.2/3.3 → both 2.2 and 7.8) 7.8 is the authoritative home for the slices Task 2
+could not reach. Characterization posture (RED = absent tests).
+
+### Do — pinpoint the genuinely-uncovered slice
+
+Read the source gate (`config.py::_check_provider_constraints`) and the existing
+Task 2 tests before writing, to avoid intent duplication. Findings:
+
+1. **Req 3.2 (naming) is fully covered** by Task 2's parametrized one-at-a-time
+   tests — but those always leave three creds present, so the `missing:` list
+   only ever holds one entry.
+2. **Req 3.3 / SC-004 (the 2-second fail-fast) is NOT covered anywhere** — Task 2
+   asserts *which* variable is named, never the *timing*. This is 7.8's
+   distinctive contribution.
+3. The gate normalizes `FALLBACK_ORDER` membership via `.strip().lower()`; a raw
+   compare would let `ollama, WatsonX` slip partial creds past boot — a real
+   fail-fast bypass worth a guard.
+
++7 cases written (6 functions; timing test parametrized ×2 direct/fallback):
+fail-fast-within-2s, all-four-missing message shape, fallback all-missing,
+membership case/whitespace normalization, dormant-under-fallback-without-watsonx,
+fallback full-creds positive. First consumer of the `watsonx_settings_factory`
+fixture (Task 3.1 earmarked it for 7.8).
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_config.py -k <7.8 selectors> -v` | ✅ 7 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **201 passed / 1 skipped** (+7); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **Read the sibling tests before adding to a shared file.** test_config.py was
+  the boundary for *both* Task 2.2 and 7.8; blindly re-asserting "missing cred →
+  ValueError naming it" would have produced pure duplication. The honest net-new
+  was the timing half (3.3) — invisible until the requirements were split 3.2 vs
+  3.3.
+- **A generous timing ceiling pins a spec contract without flaking.** SC-004's
+  literal "2 seconds" is asserted as `< 2.0s`; the gate is I/O-free (proven by
+  the existing socket-boom test) so real elapsed is sub-ms. The assertion encodes
+  the contract, not a perf benchmark — no CI-load sensitivity.
+- **Normalization in a security/fail-fast gate deserves an explicit guard.** The
+  `.strip().lower()` on fallback members is load-bearing: without it a mixed-case
+  entry silently disarms the gate. Pinning it turns a latent bypass into a
+  test failure.
