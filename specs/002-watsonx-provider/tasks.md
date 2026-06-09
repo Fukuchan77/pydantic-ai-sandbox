@@ -462,7 +462,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_fallback_integration.py`
   _Depends:_ 5
   _Requirements:_ 7.1, 7.2, 7.4, 9.8
-- [ ] 7.7 (P) Observability tests asserting an Agent.run produces non-empty `gen_ai.system` / `gen_ai.request.model`, `error.class` on failure, no extended attributes, and unchanged `extra_patterns` scrubbing
+- [x] 7.7 (P) Observability tests asserting an Agent.run produces non-empty `gen_ai.system` / `gen_ai.request.model`, `error.class` on failure, no extended attributes, and unchanged `extra_patterns` scrubbing
   _Boundary:_ `tests/unit/test_watsonx_observability.py`
   _Depends:_ 5
   _Requirements:_ 8.5, 9.9
@@ -472,6 +472,42 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.7 (2026-06-09): observability suite landed (Req 8.5/9.9).** New
+  `test_watsonx_observability.py` — 5 tests. Characterization posture (source
+  landed at Task 5.1 `system`/`model_name`, 5.4 `ModelAPIError` wrapping, and the
+  001-era `logging_setup`), so RED = absent file; all 5 passed on first run.
+  `mise run check` green: **194 passed / 1 skipped** (+5), lint+format clean,
+  pyright strict 0 errors.
+- **`error.class` is an OTel *exception event*, not a span attribute, in V2
+  Beta — verified empirically.** A watsonx failure surfaces on the `chat` span as
+  an `exception` event whose `exception.type == "pydantic_ai.exceptions.ModelAPIError"`;
+  pydantic_ai V2 emits **no** literal `error.class` attribute (same V2 reality
+  `test_fallback_failover.py` documents for failed-attempt spans). The test
+  asserts that event's `exception.type`, the authoritative error-class carrier.
+- **"No extended attributes" scoped to what the *watsonx Model* controls.**
+  Empirically, the default `instrument_pydantic_ai()` already stamps
+  `gen_ai.usage.*` (tokens) and `gen_ai.input/output.messages` (content) — and
+  `gen_ai.request.{temperature,max_tokens,top_p}` appear **iff the caller passes
+  `model_settings`** (generic instrumentation reads them regardless of whether
+  the Model uses them). So the lean-set assertion targets only the Model's own
+  contribution: on a no-settings run the `chat` span carries no model-parameter
+  keys (pins the `del model_settings` decision) and no `watsonx.`-namespaced
+  attribute. Token/content attrs are generic, governed by scrubbing (8.5) — not
+  asserted here (would test upstream, not watsonx).
+- **8.5 pinned by *equality*, complementing `test_logging_setup`'s superset.**
+  Two facets: the module constant `_SCRUBBING_EXTRA_PATTERNS` equals exactly
+  `("prompt","tool_input","tool_output")`, and `configure_observability` under
+  `LLM_PROVIDER=watsonx` passes exactly that triple to `logfire.configure`. The
+  superset check in `test_logging_setup` would stay green if a `watsonx_apikey`
+  stem were appended; equality is the regression guard that activating watsonx
+  did not widen the scrubbing alphabet. Req 9.9/8.5 map **solely** to 7.7 per the
+  coverage matrix, so this file is their authoritative home.
+- **Plain `Agent(model=...)`, not `build_chat_agent`.** A bare agent returns text
+  (no structured-output tool-call to fabricate), and the span identity attributes
+  (`gen_ai.system`/`gen_ai.request.model`) are the watsonx Model's contribution
+  regardless of agent wrapping — mirrors `test_fallback_failover.py`'s
+  `Agent(model=fallback)` rather than `test_logging_span_attributes`' chat-agent.
 
 - **7.6 (2026-06-09): fallback integration suite landed (Req 7.1/7.2/7.4/9.8).**
   New `test_watsonx_fallback_integration.py` — 3 tests, one per T7.6 bullet, all
