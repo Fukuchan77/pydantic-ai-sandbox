@@ -458,7 +458,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_no_retry.py`
   _Depends:_ 5
   _Requirements:_ 9.7
-- [ ] 7.6 (P) Fallback integration tests with `FunctionModel` substitutes: immediate failover when watsonx fails, watsonx no longer silently dropped, and `FALLBACK_ORDER=ollama,watsonx` failover logged
+- [x] 7.6 (P) Fallback integration tests with `FunctionModel` substitutes: immediate failover when watsonx fails, watsonx no longer silently dropped, and `FALLBACK_ORDER=ollama,watsonx` failover logged
   _Boundary:_ `tests/unit/test_watsonx_fallback_integration.py`
   _Depends:_ 5
   _Requirements:_ 7.1, 7.2, 7.4, 9.8
@@ -473,6 +473,32 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
 
 ### Implementation Notes
 
+- **7.6 (2026-06-09): fallback integration suite landed (Req 7.1/7.2/7.4/9.8).**
+  New `test_watsonx_fallback_integration.py` — 3 tests, one per T7.6 bullet, all
+  hermetic via `FunctionModel` substitutes (no SDK import / network).
+  `mise run check` green: **189 passed / 1 skipped** (+3), lint+format clean,
+  pyright strict 0 errors. Characterization posture (source landed at Task 4.2
+  de-stubbing / 5.4 wrapping / 3.2 doubles), so RED = absent file; all 3 passed
+  on first run.
+- **Three distinct surfaces, not three flavours of one assertion.** (1)
+  *Behavioural* — a `watsonx_function_model_failing` member (Task 3.2 double)
+  recovers via the next member; the recovered output proves immediate failover,
+  since `FallbackModel` tries each member exactly once with no retry loop (so
+  no counter is needed — and the construction-level `max_retries=0` pin stays
+  Task 7.5's). (2) *Structural* — `_build_fallback(FALLBACK_ORDER=ollama,watsonx)`
+  must keep a real `WatsonxSDKModel` in `FallbackModel.models` (len==2 +
+  `isinstance`), the load-bearing regression guard against re-stubbing watsonx;
+  contrast `anthropic`/`bedrock`, which the stub-skip branch still filters.
+  (3) *Observability* — an ollama→watsonx failover emits one `invoke_agent` span
+  whose `model_name` spells `fallback:ollama,watsonx`; filtered by the
+  `gen_ai.operation.name` attribute (not the brittle span `name`), mirroring
+  `test_fallback_failover.py`.
+- **`watsonx_settings_factory` reshaped into a fallback selection.** Its seated
+  `LLM_PROVIDER=watsonx` is overridden to `fallback` (caller overrides win) while
+  the valid watsonx creds stay seated — required so the credential gate (Task 2.2)
+  passes for `watsonx ∈ FALLBACK_ORDER`. `get_settings.cache_clear()` brackets the
+  `_build_fallback` call (try/finally) because the recursion reads the cached
+  singleton, not the passed `settings` — same idiom as `test_factory_fallback.py`.
 - **7.5 (2026-06-09): dedicated no-retry suite landed (Req 9.7).** New
   `test_watsonx_no_retry.py` — 8 cases (4 functions; the recoverable-error
   no-retry test parametrized ×5). Two facets, one per construction phase: a

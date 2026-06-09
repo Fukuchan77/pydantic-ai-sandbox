@@ -904,3 +904,56 @@ than driving new code (same posture as 7.1/7.3/7.4).
   lazy build-path failure) proves *our* code adds none either. The construction
   pin alone would miss an accidental retry wrapper in `request`; the call-count
   alone would miss the SDK silently retrying under us.
+
+---
+
+## Task 7.6 — Fallback integration tests (Req 7.1/7.2/7.4/9.8)
+
+**Date:** 2026-06-09 · **Status:** ✅ Done · **Boundary:** `tests/unit/test_watsonx_fallback_integration.py`
+
+### TDD framing (characterization)
+
+Source landed earlier — Task 4.2 (watsonx promoted out of `_MVP_STUB_PROVIDERS`),
+Task 5.4 (`ModelAPIError` wrapping), Task 3.2 (`watsonx_function_model_failing`
+double). So 7.6 pins/guards the failover contract rather than driving new code
+(same posture as 7.1/7.3/7.4/7.5).
+
+- **RED** — `tests/unit/test_watsonx_fallback_integration.py` absent → collection error.
+- **GREEN** — 3 tests, all pass on first run.
+
+### What landed (3 tests, one per T7.6 bullet)
+
+- **Immediate failover** (`test_watsonx_failure_triggers_immediate_failover_to_next_member`):
+  a `watsonx_function_model_failing` member raises `ModelAPIError`; the next
+  member's output is returned. `FallbackModel` tries each member exactly once
+  (no retry loop), so the recovered output *is* the proof of immediate failover
+  — the construction-level `max_retries=0` pin stays Task 7.5's (no duplication).
+- **Not silently dropped** (`test_build_fallback_keeps_watsonx_as_real_member`):
+  `_build_fallback(FALLBACK_ORDER=ollama,watsonx)` keeps a real `WatsonxSDKModel`
+  in `FallbackModel.models` (`len == 2` + `isinstance`). The load-bearing
+  regression guard against re-stubbing watsonx; I/O-free (lazy SDK client).
+- **Failover logged** (`test_ollama_watsonx_failover_is_logged_in_invoke_agent_span`):
+  an ollama→watsonx failover emits one `invoke_agent` span whose `model_name`
+  spells `fallback:ollama,watsonx`. Filtered by the `gen_ai.operation.name`
+  attribute (not the brittle span `name`), mirroring `test_fallback_failover.py`.
+
+### Verification gate
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task file | `uv run pytest tests/unit/test_watsonx_fallback_integration.py -v` | ✅ 3 passed |
+| Aggregate (canonical) | `mise run check` (lint+format+pyright+pytest) | ✅ **189 passed / 1 skipped** (+3); ruff lint+format clean; pyright strict 0 errors |
+
+### Learnings for Act phase
+
+- **Three bullets → three surfaces, not three flavours of "failover works".**
+  Behavioural (Agent.run recovers), structural (`_build_fallback` member list),
+  and observability (span attribute) are independent failure modes: a green
+  behavioural test would still pass if watsonx were re-stubbed *and* the chain
+  happened to recover on another member — only the structural test catches the
+  silent drop. Splitting by surface keeps each assertion load-bearing.
+- **`watsonx_settings_factory` overrides win, so it reshapes cleanly into a
+  fallback selection** — seated `LLM_PROVIDER=watsonx` → `fallback`, valid creds
+  retained so the Task 2.2 gate passes for `watsonx ∈ FALLBACK_ORDER`.
+  `get_settings.cache_clear()` must bracket `_build_fallback` (try/finally): the
+  recursion reads the cached singleton, not the passed `settings`.
