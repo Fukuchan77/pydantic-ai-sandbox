@@ -28,12 +28,27 @@ litellm = ["litellm"]
 
 [dependency-groups]
 dev = [
+    # The litellm transport is a *production* opt-in extra (above), kept out of
+    # the default install to minimize supply-chain footprint. The *test* env,
+    # however, must exercise the litellm path (Req 9.4 RESPX tests + the
+    # ``_build_litellm`` branch counts toward the 98% ratchet, Req 9.10), so the
+    # package is also a dev-group dependency: ``uv sync`` (local) and
+    # ``uv sync --all-groups`` (CI) install it, while extras (``--extra litellm``)
+    # remain the production install path. Without this the litellm tests fail
+    # collection in any env that did not manually request the extra.
+    "litellm",
     "pip-audit",
     "pre-commit",
     "pyright",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
+    # RESPX intercepts the httpx round-trip the LiteLLM transport's OpenAI
+    # adapter makes, so the watsonx litellm path is tested hermetically with no
+    # egress (Req 9.4 — "RESPX-based tests for the LiteLLM path"; spec.md
+    # Testing). The SDK transport stays on httpx send-patches; only the litellm
+    # request path needs HTTP-level mocking.
+    "respx",
     "ruff",
 ]
 

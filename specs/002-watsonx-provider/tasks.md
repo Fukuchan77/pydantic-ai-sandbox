@@ -442,7 +442,7 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Boundary:_ `tests/unit/test_watsonx_sdk_construction.py`
   _Depends:_ 5
   _Requirements:_ 9.3, 9.11
-- [ ] 7.2 (P) LiteLLM transport tests using RESPX, including the import-guard failure (missing dependency → `ValueError`) and a `WATSONX_PROJECT_ID` env fixture
+- [x] 7.2 (P) LiteLLM transport tests using RESPX, including the import-guard failure (missing dependency → `ValueError`) and a `WATSONX_PROJECT_ID` env fixture
   _Boundary:_ `tests/unit/test_watsonx_litellm_construction.py`
   _Depends:_ 6
   _Requirements:_ 9.4
@@ -472,6 +472,41 @@ _Requirements:_ 3.2, 3.3, 7.1, 7.2, 7.4, 8.5, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,
   _Requirements:_ 3.2, 3.3
 
 ### Implementation Notes
+
+- **7.2 (2026-06-09): RESPX request-path tests for the litellm transport landed;
+  the import-guard clause was already satisfied by Task 6.** Task 6 wrote the
+  construction + import-guard tests in the same boundary file
+  (`test_watsonx_litellm_construction.py`), so 7.2's net-new work was the **5
+  RESPX request-path tests**: text-response mapping, the `watsonx/<id>` prefix +
+  bearer apikey *on the wire* (body/header assertions on the intercepted
+  request), tool-call response → `ToolCallPart`, the `WATSONX_PROJECT_ID`
+  env-channel pin (R4: `LiteLLMProvider` has no `project_id` arg), and a 5xx →
+  `ModelAPIError` failover-recoverability check. The import-guard failure test
+  (`test_litellm_import_guard_raises_valueerror_naming_package`) already lives in
+  the file from Task 6 — the 7.2 clause is met, not duplicated.
+- **Two dependency gaps surfaced and were fixed in `pyproject.toml` (Task 1
+  boundary, justified enabler).** (1) `respx` — mandated by Req 9.4 / spec
+  Testing but never actually added — was missing entirely; added to the dev
+  group. (2) **`litellm` was only a *production optional extra***, so the
+  canonical test env (`uv sync` locally, `uv sync --all-groups` in CI — neither
+  installs extras) had no `litellm`, and **Task 6's six litellm construction
+  tests fail-collected** there (verified: only the import-guard test passed,
+  since it forces the `ImportError`). Task 6's "green" relied on a manually-
+  installed extra. Fix: add `litellm` to the **dev group too** (keeps the prod
+  install lean via the opt-in extra, while local + CI test envs always exercise
+  the litellm path — required for Req 9.4 and the `_build_litellm` branch's share
+  of the 98% ratchet). This retroactively repairs Task 6's latent CI gap.
+- **The litellm transport's request path is a real OpenAI HTTP round-trip, not a
+  `litellm.completion` call.** `_build_litellm` returns an `OpenAIChatModel`
+  whose `LiteLLMProvider` configures a plain `AsyncOpenAI` client pointed at
+  `api_base` (the watsonx URL); `OpenAIChatModel.request` POSTs to
+  `{WATSONX_URL}/chat/completions` (confirmed empirically). So RESPX intercepts
+  that endpoint — HTTP-level mocking is the correct grain for this transport
+  (the SDK transport, by contrast, uses httpx send-patches + a fake `achat`).
+  Tests drive `model.request` directly (no Agent) to pin the transport contract.
+- **`mise run check` green: 149 passed / 1 skipped** (was 144; +5 RESPX tests),
+  ruff lint+format clean, pyright strict 0 errors. `pytest --cov` still deferred
+  to Task 11.1 (unchanged beartype circular-import caveat; 9.10 split).
 
 - **7.1 (2026-06-09): literal Req 9.3 / 9.11 were already met by Task 5's
   incremental TDD; 7.1's net-new work was the *exhaustive defensive-branch*

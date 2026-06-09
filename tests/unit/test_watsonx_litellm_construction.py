@@ -19,18 +19,40 @@ these tests issue zero network egress — the timeout-wiring assertion reads the
 configured ``httpx`` client off the built OpenAI client rather than making a
 call.
 
-Boundary note: this is the file Task 7.2 extends with the RESPX request-path
-tests (live-shaped HTTP round-trips through the OpenAI adapter); Task 6 owns
-construction and the import guard only.
+Task 7.2 (Req 9.4) extends this file with the **RESPX request-path tests** below:
+live-shaped HTTP round-trips that drive :meth:`OpenAIChatModel.request` through
+the LiteLLM-built model while RESPX intercepts the ``httpx`` call the OpenAI
+adapter makes to the watsonx endpoint. They prove the litellm transport (a) hits
+``{WATSONX_URL}/chat/completions``, (b) sends the ``watsonx/<model_id>`` route
+prefix and the routed apikey *on the wire*, (c) maps text and tool-call responses
+back to a :class:`ModelResponse`, (d) carries ``WATSONX_PROJECT_ID`` to litellm
+via the environment (research.md R4 — ``LiteLLMProvider`` has no ``project_id``
+arg), and (e) surfaces an HTTP error as a failover-recoverable
+:class:`ModelAPIError`. Task 6 owns construction and the import guard; the import
+guard lives in :func:`test_litellm_import_guard_raises_valueerror_naming_package`
+above and already satisfies the import-guard clause of Task 7.2.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+import respx
+from pydantic_ai.exceptions import ModelAPIError
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    ToolCallPart,
+    UserPromptPart,
+)
+from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.openai import OpenAIChatModel
 
 from pydantic_ai_sandbox.llm.providers.watsonx import (
@@ -39,11 +61,18 @@ from pydantic_ai_sandbox.llm.providers.watsonx import (
 from tests.conftest import (
     WATSONX_TEST_APIKEY,
     WATSONX_TEST_MODEL_ID,
+    WATSONX_TEST_PROJECT_ID,
     WATSONX_TEST_URL,
 )
 
 if TYPE_CHECKING:
     from tests.conftest import WatsonxSettingsFactory
+
+# The exact endpoint the OpenAI adapter posts to: ``base_url`` (the watsonx URL,
+# routed via ``LiteLLMProvider(api_base=...)``) + the OpenAI chat-completions
+# path. Matching it exactly doubles as an assertion that the litellm transport
+# targets the configured watsonx endpoint.
+_CHAT_COMPLETIONS_URL = f"{WATSONX_TEST_URL}/chat/completions"
 
 
 class _NetworkAccessError(RuntimeError):
@@ -183,3 +212,211 @@ def test_litellm_construction_is_io_free(
     model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="litellm"))
 
     assert isinstance(model, OpenAIChatModel)
+
+
+# ---------------------------------------------------------------------------
+# Task 7.2 — RESPX request-path tests for the LiteLLM transport (Req 9.4)
+#
+# Construction (above) proves the litellm Model is wired correctly without
+# egress. These tests drive the *live request path*: ``OpenAIChatModel.request``
+# (the adapter ``_build_litellm`` returns) issues an ``httpx`` POST to the
+# OpenAI chat-completions endpoint of the configured ``api_base`` (the watsonx
+# URL). RESPX intercepts that round-trip, so the litellm transport is exercised
+# end-to-end — request serialisation *and* response mapping — with zero network
+# egress. Unlike the SDK transport (httpx ``send`` patches + a fake ``achat``),
+# the litellm path delegates the HTTP round-trip to pydantic_ai's OpenAI
+# adapter, so HTTP-level mocking (RESPX) is the right grain (spec.md Testing /
+# Req 9.4: "RESPX-based tests for the LiteLLM path").
+#
+# A canned OpenAI-shaped ``chat.completion`` response stands in for watsonx; the
+# request is driven directly via ``model.request`` (no Agent) so the assertions
+# pin the transport's own request/response contract rather than agent behaviour.
+# ---------------------------------------------------------------------------
+
+
+def _text_completion(content: str) -> dict[str, Any]:
+    """Build a minimal OpenAI-shaped ``chat.completion`` carrying a text reply."""
+    return {
+        "id": "chatcmpl-watsonx-litellm-text",
+        "object": "chat.completion",
+        "created": 0,
+        "model": f"watsonx/{WATSONX_TEST_MODEL_ID}",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            },
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+    }
+
+
+_TOOL_CALL_COMPLETION: dict[str, Any] = {
+    "id": "chatcmpl-watsonx-litellm-tool",
+    "object": "chat.completion",
+    "created": 0,
+    "model": f"watsonx/{WATSONX_TEST_MODEL_ID}",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_kb_1",
+                        "type": "function",
+                        "function": {
+                            "name": "search_kb",
+                            "arguments": '{"query": "weather"}',
+                        },
+                    },
+                ],
+            },
+            "finish_reason": "tool_calls",
+        },
+    ],
+    "usage": {"prompt_tokens": 20, "completion_tokens": 4, "total_tokens": 24},
+}
+
+
+async def test_litellm_request_maps_text_response_over_respx(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A text completion round-trips to a ``ModelResponse`` text part (Req 9.4).
+
+    Drives the litellm transport's real request path against a RESPX-mocked
+    watsonx endpoint and pins the response mapping the OpenAI adapter performs:
+    the assistant ``content`` becomes a single :class:`TextPart`, ``usage`` maps
+    prompt/completion → input/output tokens, ``finish_reason`` ``"stop"``
+    survives, ``id`` → ``provider_response_id`` and the response carries the
+    ``watsonx/<model_id>`` route-prefixed ``model_name``.
+    """
+    model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="litellm"))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hello")])]
+
+    with respx.mock(assert_all_called=True) as respx_mock:
+        route = respx_mock.post(_CHAT_COMPLETIONS_URL).mock(
+            return_value=httpx.Response(200, json=_text_completion("hi from watsonx")),
+        )
+        result = await model.request(messages, None, ModelRequestParameters())
+
+    assert route.called  # the litellm transport hit the configured watsonx endpoint
+    assert len(result.parts) == 1
+    part = result.parts[0]
+    assert isinstance(part, TextPart)
+    assert part.content == "hi from watsonx"
+    assert result.finish_reason == "stop"
+    assert result.usage.input_tokens == 5
+    assert result.usage.output_tokens == 3
+    assert result.provider_response_id == "chatcmpl-watsonx-litellm-text"
+    assert result.model_name == f"watsonx/{WATSONX_TEST_MODEL_ID}"
+
+
+async def test_litellm_request_routes_model_prefix_and_apikey_on_the_wire(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """The ``watsonx/`` route prefix and apikey reach the endpoint on the wire (Req 2.3/9.4).
+
+    Construction asserts the routing structurally; this asserts it *end-to-end*
+    by reading the intercepted request: the JSON body's ``model`` field carries
+    the ``watsonx/<model_id>`` prefix LiteLLM uses to select the backend, the
+    mapped ``user`` message is present, and the ``Authorization`` header carries
+    the routed (unwrapped) apikey as a bearer token.
+    """
+    model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="litellm"))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hello")])]
+
+    with respx.mock(assert_all_called=True) as respx_mock:
+        route = respx_mock.post(_CHAT_COMPLETIONS_URL).mock(
+            return_value=httpx.Response(200, json=_text_completion("ok")),
+        )
+        await model.request(messages, None, ModelRequestParameters())
+
+    request = route.calls.last.request
+    sent = json.loads(request.content)
+    assert sent["model"] == f"watsonx/{WATSONX_TEST_MODEL_ID}"
+    assert sent["messages"] == [{"role": "user", "content": "hello"}]
+    assert request.headers["authorization"] == f"Bearer {WATSONX_TEST_APIKEY}"
+
+
+async def test_litellm_request_maps_tool_call_response_over_respx(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """A tool-call completion maps to a :class:`ToolCallPart` (Req 9.4).
+
+    The litellm transport must surface an OpenAI ``tool_calls`` entry as a
+    :class:`ToolCallPart` carrying the function name, parsed arguments and the
+    provider tool-call id, with ``finish_reason`` normalising ``"tool_calls"`` →
+    ``"tool_call"`` — otherwise the agent's tool / structured-output loop would
+    break silently on the litellm path.
+    """
+    model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="litellm"))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("天気は?")])]
+
+    with respx.mock(assert_all_called=True) as respx_mock:
+        respx_mock.post(_CHAT_COMPLETIONS_URL).mock(
+            return_value=httpx.Response(200, json=_TOOL_CALL_COMPLETION),
+        )
+        result = await model.request(messages, None, ModelRequestParameters())
+
+    assert len(result.parts) == 1
+    part = result.parts[0]
+    assert isinstance(part, ToolCallPart)
+    assert part.tool_name == "search_kb"
+    assert part.tool_call_id == "call_kb_1"
+    assert part.args_as_dict() == {"query": "weather"}
+    assert result.finish_reason == "tool_call"
+
+
+async def test_litellm_project_id_reaches_litellm_via_env(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """``WATSONX_PROJECT_ID`` is carried to litellm via the environment (R4 / Req 9.4).
+
+    ``LiteLLMProvider`` exposes ``api_key`` / ``api_base`` but **no**
+    ``project_id`` argument (research.md R4 / ADR-3): the project id reaches
+    litellm through the ``WATSONX_PROJECT_ID`` environment variable the
+    deployment already sets, never a constructor arg. The ``watsonx_settings_factory``
+    seats that env var (the "``WATSONX_PROJECT_ID`` env fixture" of Task 7.2), so
+    this pins that it is present in the process environment while a litellm
+    request is served — the channel litellm reads project id from.
+    """
+    settings = watsonx_settings_factory(WATSONX_TRANSPORT="litellm")
+    model = _build_watsonx(settings)
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hello")])]
+
+    with respx.mock(assert_all_called=True) as respx_mock:
+        respx_mock.post(_CHAT_COMPLETIONS_URL).mock(
+            return_value=httpx.Response(200, json=_text_completion("ok")),
+        )
+        result = await model.request(messages, None, ModelRequestParameters())
+
+    # The project id is routed via env (not a LiteLLMProvider constructor arg);
+    # the fixture seats it, so it is available to litellm during the request.
+    assert os.environ["WATSONX_PROJECT_ID"] == WATSONX_TEST_PROJECT_ID
+    assert isinstance(result, ModelResponse)
+
+
+async def test_litellm_request_http_error_surfaces_as_model_api_error(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """An HTTP 5xx from the endpoint surfaces as a recoverable ``ModelAPIError`` (Req 9.4).
+
+    Failover correctness for the litellm transport depends on its errors being
+    ``ModelAPIError`` (``FallbackModel.fallback_on`` defaults to
+    ``(ModelAPIError,)``). pydantic_ai's OpenAI adapter raises ``ModelHTTPError``
+    — a :class:`ModelAPIError` subclass — for a non-2xx response, so a watsonx
+    503 is recoverable in the chain. Pinning this proves the litellm path
+    participates in failover exactly like the SDK transport.
+    """
+    model = _build_watsonx(watsonx_settings_factory(WATSONX_TRANSPORT="litellm"))
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hello")])]
+
+    with respx.mock(assert_all_called=True) as respx_mock:
+        respx_mock.post(_CHAT_COMPLETIONS_URL).mock(
+            return_value=httpx.Response(503, json={"error": {"message": "overloaded"}}),
+        )
+        with pytest.raises(ModelAPIError):
+            await model.request(messages, None, ModelRequestParameters())
