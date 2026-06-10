@@ -80,7 +80,7 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.4, 1.5, 4.1, 4.2, 4.3, 5.1, 6.2, 8.1, 8.2, 8.3,
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 2.1
   _Requirements:_ 1.1, 1.4, 2.4, 4.2, 5.1, 6.2
-- [x] 2.3 Wrap every exception from `acompletion()` in a broad `except` as `ModelAPIError` (chained via `raise ... from`, scoped `# noqa: BLE001` with a Req 4.1 rationale), while letting mapping/response errors (`NotImplementedError`, `UnexpectedModelBehavior`) surface unwrapped and fail loud. **The broad `except` SHALL scope only the `acompletion()` call**: `.model_dump()` and `build_response(...)` (which raises `UnexpectedModelBehavior` for empty choices, Req 3.3) MUST sit outside the `try`, so post-call mapping errors are never misclassified as `ModelAPIError` (Req 4.3).
+- [x] 2.3 Wrap every exception from `acompletion()` in a broad `except` as `ModelAPIError` (chained via `raise ... from`, with a plain Req 4.1 rationale comment — no `# noqa: BLE001`, since a re-raising except is already BLE-compliant; see major-2 finding), while letting mapping/response errors (`NotImplementedError`, `UnexpectedModelBehavior`) surface unwrapped and fail loud. **The broad `except` SHALL scope only the `acompletion()` call**: `.model_dump()` and `build_response(...)` (which raises `UnexpectedModelBehavior` for empty choices, Req 3.3) MUST sit outside the `try`, so post-call mapping errors are never misclassified as `ModelAPIError` (Req 4.3).
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`
   _Depends:_ 2.2
   _Requirements:_ 4.1, 4.3
@@ -382,27 +382,50 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_s
 _Depends:_ 3, 5
 _Requirements:_ 10.4
 
-- [ ] 7.1 Run the full hermetic suite (default `pytest`, no network) and confirm the LiteLLM path meets or exceeds the 98% coverage ratchet.
+- [x] 7.1 Run the full hermetic suite (default `pytest`, no network) and confirm the LiteLLM path meets or exceeds the 98% coverage ratchet.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`, `src/pydantic_ai_sandbox/llm/_openai_mapping.py`
   _Depends:_ 3, 5
   _Requirements:_ 10.4
-- [ ] 7.2 Run pyright `strict` and ruff (incl. `S`/`BLE` lanes), fixing issues and confirming the broad-except carries a scoped `# noqa: BLE001` with rationale.
+- [x] 7.2 Run pyright `strict` and ruff (incl. `S`/`BLE` lanes), fixing issues and confirming the broad-except is BLE-compliant — no `# noqa: BLE001` needed because it re-raises (`raise ... from exc`); ruff's BLE001 flags only *swallowing* excepts, so a noqa there would be unused (`RUF100`). The breadth rationale rides a plain block comment instead (Req 4.1).
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`, `src/pydantic_ai_sandbox/llm/_openai_mapping.py`, `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 3, 5
   _Requirements:_ 10.4
-- [ ] 7.3 Run the security lane (gitleaks, pip-audit) and `test_no_hardcoded_model_ids.py`, confirming no credentials in logs and no model IDs in `src/`.
+- [x] 7.3 Run the security lane (gitleaks, pip-audit) and `test_no_hardcoded_model_ids.py`, confirming no credentials in logs and no model IDs in `src/`.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/litellm.py`, `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 3, 5
   _Requirements:_ 10.4
-- [ ]* 7.4 Run the opt-in integration lane (`RUN_INTEGRATION_WATSONX=1`) and confirm both `sdk` and `litellm` transports work end-to-end.
+- [x]* 7.4 Run the opt-in integration lane (`RUN_INTEGRATION_WATSONX=1`) and confirm both `sdk` and `litellm` transports work end-to-end.
   _Boundary:_ `tests/integration/test_watsonx_chat_e2e.py`
   _Depends:_ 6
   _Requirements:_ 10.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **7.1 done — coverage ratchet met.** Full hermetic suite (`--cov`, no network):
+  **277 passed / 4 skipped**, total **98.83% ≥ 98% `fail_under`**. The LiteLLM
+  path is fully covered: `litellm.py` **100%** (46 stmts) and `_openai_mapping.py`
+  **100%** (85 stmts, 44 branches). Residual misses are in unrelated provider
+  stubs (`ollama.py` 64-69, `factory.py` 113-117, `deps.py` 76) — out of 7.1's
+  boundary and already above ratchet.
+- **The beartype-claw `--cov` interaction (flagged in major 1's notes) no longer
+  reproduces.** `uv run pytest --cov` runs clean through conftest's FastAPI
+  `TestClient` import — the circular import was resolved by an env/dependency
+  update since 2026-06-09, so the "avoid/repair" action item is closed by
+  observation, no conftest surgery needed.
+- **Canonical invocation established (the deliverable 7.1 "owns").** Added a
+  `mise run cov` task (`uv run pytest --cov --cov-report=term-missing`); bare
+  `--cov` measures the `[tool.coverage.run] source` from pyproject so the ratchet
+  stays single-sourced. Routes the coverage gate through `mise.toml` per the
+  steering "all quality gates flow through mise.toml" convention.
+- **7.3 done — security lane all green, no source change.** gitleaks
+  (`pre-commit run gitleaks --all-files`) **Passed**; `pip-audit` reports **No
+  known vulnerabilities found** (the lone skip is the local `pydantic-ai-sandbox`
+  package itself — not published to PyPI, benign); `test_no_hardcoded_model_ids.py`
+  **2 passed** (no banned model-ID literal in `src/`, `.env` in `.gitignore`).
+  gitleaks satisfies the Req 7.5 "no credentials in logs" suite-level scan that
+  task 5.1's per-construction secret-leak assertion (key absent from `repr`/`str`)
+  complements. The `forbid-hardcoded-model-ids` pygrep hook stays a re-serialised
+  mirror of the test's `FORBIDDEN_MODEL_ID_LITERALS` source-of-truth.
 
 ---
 

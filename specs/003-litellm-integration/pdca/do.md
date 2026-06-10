@@ -733,3 +733,310 @@ transport (majors 2–4) is already implemented; major 6 is pure test authoring.
 pyright/ruff S+BLE lanes, 7.3 security lane, 7.4 optional live integration run).
 Carried act item: amend the literal "carries a scoped `# noqa: BLE001`" wording
 in tasks 2.3/7.2 (re-raising except is BLE-compliant).
+
+---
+
+## 2026-06-10 — Task 7.1 (C4 coverage ratchet gate)
+
+**Scope**: Run the full hermetic suite under coverage and confirm the LiteLLM
+path meets/exceeds the 98% `fail_under` ratchet (Req 10.4). This is a
+verification gate — no RED→GREEN; the coverage run *is* the test.
+
+### Result
+
+Full hermetic suite with `--cov` (no network): **277 passed / 4 skipped**, total
+**98.83% ≥ 98%** → "Required test coverage of 98.0% reached." The LiteLLM path is
+**fully covered**: `litellm.py` 100% (46 stmts), `_openai_mapping.py` 100% (85
+stmts / 44 branches). Residual misses sit only in out-of-boundary provider stubs
+(`ollama.py` 64-69, `factory.py` 113-117, `deps.py` 76) — already above ratchet.
+
+### Decisions / learnings
+
+- **The beartype-claw `--cov` circular import (flagged in the major-1 notes) no
+  longer reproduces.** Both `.venv/Scripts/python -m pytest --cov` and the
+  canonical `uv run pytest --cov` run clean through conftest's FastAPI
+  `TestClient` import. The interaction was resolved by an env/dependency update
+  since 2026-06-09; the "avoid/repair" action item is closed by observation — no
+  conftest surgery required.
+- **Canonical invocation established (the deliverable 7.1 owns).** Added
+  `[tasks.cov]` to `mise.toml` (`uv run pytest --cov --cov-report=term-missing`).
+  Bare `--cov` measures the `[tool.coverage.run] source` declared in
+  pyproject.toml, so the ratchet stays single-sourced and the gate flows through
+  `mise.toml` per the steering "all quality gates flow through mise.toml" rule.
+- **Why no separate `--cov` in `addopts`.** Keeping `--cov` off the default
+  `pytest` addopts preserves the fast hermetic `mise run test` lane; the
+  coverage gate is the explicit `mise run cov` lane. This also sidesteps any
+  future re-emergence of the import-hook interaction, which the major-1 notes
+  attributed specifically to forcing coverage instrumentation at startup.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Coverage gate | `mise run cov` (`uv run pytest --cov --cov-report=term-missing`) | **277 passed, 4 skipped**; total **98.83%**; `litellm.py` 100%, `_openai_mapping.py` 100%; "Required test coverage of 98.0% reached" |
+| Cross-check | `.venv\Scripts\python.exe -m pytest --cov --cov-report=term-missing` | identical — 98.83%, no beartype-claw error |
+
+**Status**: Task 7.1 `[x]`. Remaining in major 7: 7.2 (pyright strict + ruff
+`S`/`BLE`), 7.3 (security lane: gitleaks/pip-audit + `test_no_hardcoded_model_ids`),
+7.4 (`[ ]*` optional live integration). Carried act item still open: amend the
+literal "carries a scoped `# noqa: BLE001`" wording in tasks 2.3/7.2.
+
+---
+
+## 2026-06-10 — Task 7.2 (C4 pyright strict + ruff S/BLE quality gate)
+
+**Scope**: Run pyright `strict` and ruff (incl. the `S`/`BLE` lanes) across the
+three boundary files (`_openai_mapping.py`, `litellm.py`, `watsonx.py`) and the
+whole project, fix any issue, and resolve the carried major-2 action item on the
+broad-except `# noqa: BLE001` wording (Req 10.4). Verification gate — no
+RED→GREEN; the gate run *is* the test.
+
+### Result
+
+All gates clean, no production code change needed:
+
+- **ruff (full, incl. `S`/`BLE`)** — `All checks passed!`
+- **pyright strict** — `0 errors, 0 warnings, 0 informations`
+- **ruff format --check** — `61 files already formatted`
+- **`S`/`BLE` lanes on the 3 boundary files** (`ruff check --select S,BLE`) —
+  `All checks passed!`
+
+### Changes (spec-doc only)
+
+- **Closed the carried act item.** Amended the literal "carries a scoped
+  `# noqa: BLE001`" wording in **task 2.3** and **task 7.2** to state the
+  user-approved finding: the litellm broad-except **re-raises** (`raise ... from
+  exc`), so it is already BLE-compliant and needs **no** noqa — ruff's BLE001
+  flags only *swallowing* excepts, and a noqa there would be unused (`RUF100`).
+  The breadth rationale rides a plain block comment ([litellm.py:236-246](../../../src/pydantic_ai_sandbox/llm/providers/litellm.py#L236)).
+- No source edit: the `BLE` lane was already in the ruff `select` (added in major
+  2), the swallowing fail-soft catch in `logging_setup.py:154` already carries its
+  `# noqa: BLE001`, and the litellm except already carries the plain rationale
+  comment with no noqa.
+
+### Decisions / learnings
+
+- **The spec premise was the only thing left to fix, not the code.** Major 2 had
+  already corrected the implementation (enable `BLE`, no noqa on the re-raising
+  except, noqa on the genuinely-swallowing `logging_setup` catch). 7.2's residual
+  work was therefore purely reconciling the task wording with the shipped reality
+  so the spec no longer mandates a noqa that ruff would reject.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Lint (S/BLE incl.) | `mise run lint` (`uv run ruff check .`) | **All checks passed!** |
+| Typecheck | `mise run typecheck` (`uv run pyright`) | **0 errors, 0 warnings, 0 informations** |
+| Format | `mise run format` (`uv run ruff format --check .`) | **61 files already formatted** |
+| S/BLE targeted | `uv run ruff check --select S,BLE` (3 boundary files) | **All checks passed!** |
+| Full suite | `mise run test` (`uv run pytest`) | **277 passed, 4 skipped** (env-gated integration lanes) |
+
+> `uv`/`mise` resolve only in a profile-loaded PowerShell on this host; commands
+> ran via `powershell.exe -Command ". $PROFILE; mise run …"`.
+
+**Status**: Task 7.2 `[x]`. **Carried act item closed** (2.3/7.2 noqa wording
+amended). Remaining in major 7: 7.3 (security lane: gitleaks/pip-audit +
+`test_no_hardcoded_model_ids`), 7.4 (`[ ]*` optional live integration run).
+
+---
+
+## 2026-06-10 — Task 7.3 (C4 security lane gate)
+
+**Scope**: Run the security lane — gitleaks (secret scan, Req 9.3), pip-audit
+(dependency CVE scan), and `test_no_hardcoded_model_ids.py` — confirming no
+credentials in logs (Req 7.5) and no model-ID literals in `src/` (Req 1.5,
+Req 10.4). Verification gate — no RED→GREEN; the gate run *is* the test, and no
+production code was touched.
+
+### Result
+
+All three gates clean:
+
+- **`test_no_hardcoded_model_ids.py`** — **2 passed**
+  (`test_no_hardcoded_model_ids_in_src`: no banned literal across `src/**/*.py`;
+  `test_gitignore_excludes_dotenv`: `.env` present in `.gitignore`, Req 9.6).
+- **gitleaks** (`pre-commit run gitleaks --all-files`) — **Passed**
+  ("Detect hardcoded secrets … Passed"). This is the suite-level "no credentials
+  in logs" scan (Req 7.5) that complements task 5.1's per-construction
+  secret-leak assertion (unwrapped key absent from `LiteLLMModel` `repr`/`str`).
+- **pip-audit** (`uv run pip-audit`) — **No known vulnerabilities found**. The
+  only entry is a *skip* for the local `pydantic-ai-sandbox` (0.1.0) package —
+  "Dependency not found on PyPI" — which is expected (the project under test is
+  unpublished) and benign, not a vulnerability.
+
+### Decisions / learnings
+
+- **gitleaks IS the "no credentials in logs" gate.** Task 5.1's note explicitly
+  scopes the per-model secret-leak check (key not in `repr`/`str`) to the unit
+  level and defers suite-level log scanning to "the gitleaks lane in task 7.3" —
+  so 7.3's gitleaks pass closes the Req 7.5 log-credential clause. The litellm
+  transport's `_api_key`/`api_base` never surface in the constructed model's
+  string forms (5.1) and no secret-shaped string was committed (gitleaks).
+- **pip-audit's lone "skip" is not a failure.** The unpublished local package
+  cannot be resolved on PyPI; pip-audit reports it as a skip, not a finding, and
+  every resolvable dependency audited clean. Treating the skip as a pass is
+  correct — there is no advisory to action.
+- **Two model-ID guards, one source of truth.** The runtime test's
+  `FORBIDDEN_MODEL_ID_LITERALS` is canonical; the `forbid-hardcoded-model-ids`
+  pygrep pre-commit hook is a re-serialised mirror (kept in lockstep by the
+  inline comment). The litellm work added no model-ID literal to `src/` — routes
+  are env-derived (`watsonx/{settings.watsonx_model_id}`), so the guard stays
+  green for the new transport.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Model-ID guard | `uv run pytest tests/unit/test_no_hardcoded_model_ids.py -v` | **2 passed** |
+| Secret scan | `uv run pre-commit run gitleaks --all-files` | **Passed** ("Detect hardcoded secrets … Passed") |
+| CVE scan | `uv run pip-audit` | **No known vulnerabilities found** (lone skip: unpublished local pkg, benign) |
+
+> `uv`/`mise` resolve only in a profile-loaded PowerShell on this host; commands
+> ran via `powershell.exe -Command ". $PROFILE; uv run …"`.
+
+**Status**: Task 7.3 `[x]`. Remaining in major 7: **7.4 only** (`[ ]*` optional
+live integration run — `RUN_INTEGRATION_WATSONX=1`, operator-gated with creds).
+All hermetic quality gates (7.1 coverage, 7.2 pyright/ruff S+BLE, 7.3 security)
+are now complete; the feature's non-optional task set is closed.
+
+---
+
+## 2026-06-10 — Task 7.4 (`[ ]*` opt-in live integration run) — BLOCKED on watsonx provisioning
+
+**Scope**: Run the opt-in integration lane (`RUN_INTEGRATION_WATSONX=1`) and
+confirm both `sdk` and `litellm` transports work end-to-end against a live
+watsonx.ai backend (Req 10.3). Verification-only task — no RED→GREEN; the live
+run *is* the test. The lane itself was authored and collection-clean in major 6.
+
+### Result — environment not provisioned for the watsonx live lane
+
+The hermetic baseline is clean, but the live lane cannot be exercised in this
+environment: it lacks watsonx credentials. `.env` here targets the local **ollama**
+dev provider (`LLM_PROVIDER=ollama`), not watsonx, and carries no `WATSONX_*` /
+`LLM_PROVIDER=watsonx`. With the gate on, `get_settings()` raised a
+`ValidationError` *before* any network call:
+
+```
+Value error, OLLAMA_MODEL_NAME is required when LLM_PROVIDER=ollama;
+set the env var or switch LLM_PROVIDER.
+```
+
+This is **not a defect in the LiteLLM transport** (majors 1–6, all hermetic gates
+green) — it is a credential-provisioning gap. Crucially, the lane behaved exactly
+as its fail-not-skip contract specifies: a gated run with unusable creds **FAILS
+(errors), it does not skip** — so a broken or unprovisioned live lane can never
+masquerade as green. This is the designed safety posture, observed working.
+
+### Decisions / learnings
+
+- **7.4 stays `[ ]*` unchecked.** Marking it `[x]` would require live-green
+  evidence (a real watsonx round-trip on both transports); none can be produced
+  here, and a green claim without the captured passing result is forbidden. The
+  task is optional and operator-gated by design — the do.md / tasks.md notes from
+  majors 6/7 already frame it as "the operator's remaining step".
+- **The fail-not-skip posture is verified, not just asserted.** The lane's
+  docstring promises "missing creds surface as a test ERROR, not a skip"; this run
+  is the live demonstration of that — the `ValidationError` propagated as 3 FAILED,
+  not 3 SKIPPED.
+- **Operator runbook to close 7.4.** On a host with real watsonx access, set
+  `LLM_PROVIDER=watsonx` + `WATSONX_URL` / `WATSONX_APIKEY` / `WATSONX_PROJECT_ID`
+  / `WATSONX_MODEL_ID` (and optionally `WATSONX_TRANSPORT` — the lane forces both
+  values per-param regardless), then run `RUN_INTEGRATION_WATSONX=1 uv run pytest
+  tests/integration/test_watsonx_chat_e2e.py -v`. Expect 3 passed. Watch the
+  litellm lane specifically against the **known prior 404** (the `api_base`/route
+  bug feature 003 exists to fix — see project memory) and the `num_retries=0`
+  single-upstream-POST assertion.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Hermetic baseline | `.venv\Scripts\python.exe -m pytest tests/integration/test_watsonx_chat_e2e.py -v` | **3 skipped** (gate off — network-free) |
+| Live lane (gated) | `RUN_INTEGRATION_WATSONX=1 .venv\Scripts\python.exe -m pytest tests/integration/test_watsonx_chat_e2e.py -v` | **3 failed** — `ValidationError`: env is `LLM_PROVIDER=ollama`, no watsonx creds (fail-not-skip working as designed; **not** a transport defect) |
+
+**Status**: Task 7.4 **remains `[ ]*` (unchecked) — BLOCKED on watsonx
+credentials in this environment.** No production code changed. The lane is
+authored, collection-clean, and its fail-not-skip safety posture is verified
+live. Closing 7.4 requires an operator run on a watsonx-provisioned host (runbook
+above). All non-optional tasks (1–7.3) remain complete.
+
+> **SUPERSEDED below (same day).** The operator confirmed a watsonx-provisioned
+> `.env` was in place; the block above was a *loading* gap, not a provisioning
+> one — see the next entry, which executes the live run and closes 7.4.
+
+---
+
+## 2026-06-10 — Task 7.4 (live run executed) — `[x]*` CLOSED
+
+**Resolution of the block above**: `Settings` sets `env_file=None`
+([config.py:83](../../../src/pydantic_ai_sandbox/config.py#L83)) — it reads only
+the *process* environment, never auto-loading `.env` (the app loads `.env` via
+uvicorn `--env-file`; pytest does not). The earlier gated run saw
+`LLM_PROVIDER=ollama` (the field default) because the watsonx `.env` was never
+exported into the env. Sourcing it first — `set -a; source <(tr -d '\r' < .env);
+set +a` (the `tr` strips Windows CRLF) — then running the gate is the operator
+recipe the project memory already records.
+
+### Live result — both transports work E2E; 404 is fixed
+
+With real `us-south` creds + `WATSONX_MODEL_ID=meta-llama/llama-4-maverick-17b-128e-instruct-fp8`
+(the structured-output-capable model; granite-4 double-encodes — project memory):
+
+- **`...returns_structured_chat_response[sdk]` → PASS.** SDK `/chat` E2E, 200 +
+  valid `ChatResponse`, `search_kb` tool round-trip.
+- **`...returns_structured_chat_response[litellm]` → PASS.** ***The headline:***
+  the LiteLLM transport routes through the full FastAPI `/chat` chain to live
+  watsonx and returns a valid `ChatResponse`. **Feature 002's `litellm` 404
+  (`OpenAIChatModel`/`LiteLLMProvider` POSTing to `/chat/completions`) is fixed**
+  by the `LiteLLMModel`/`acompletion` rewrite — confirmed against the real
+  backend, not just hermetically.
+- **`test_litellm_lane_parity_env_routing_and_observability` → PASS** (renamed,
+  see below). `WATSONX_PROJECT_ID` env routing (ADR-3), `gen_ai.system ==
+  "watsonx"` + `gen_ai.request.model == "watsonx/<id>"` parity, and a coercible
+  non-empty `ChatResponse` all hold live.
+
+### The `num_retries=0` assertion — a real Task 7.4 finding (down-scoped, user-approved)
+
+The original litellm-only test ended with
+`assert inference_posts == len(chat_spans)` (one upstream POST per chat span).
+The live run exposed it as **doubly flawed**:
+
+1. **The inference POST is invisible to `instrument_httpx`.** A span diagnostic
+   showed LiteLLM issues the watsonx chat completion over its own *aiohttp*
+   transport; only the auxiliary **IAM-token** POST (`iam.cloud.ibm.com`) rides
+   the `httpx` client `instrument_httpx` patches. The inference attempt to
+   `us-south.ml.cloud.ibm.com` never surfaces as an httpx span → count `0`.
+2. **A successful request cannot reveal a retry budget anyway.** Retries fire
+   only on a *retryable failure*; on the happy path there is exactly one attempt
+   whether `num_retries` is `0` or `N`. So even with perfect instrumentation, the
+   happy-path count proves nothing about suppression.
+
+**Decision (user-approved: "正直にダウンスコープ").** Removed the unprovable
+happy-path POST-count assertion (and its `_inference_post_count` helper +
+`urlsplit` import); kept the env-routing / observability-parity / response
+assertions (all PASS live). Renamed the test
+`..._single_upstream_attempt` → `..._env_routing_and_observability` to match the
+honest scope. `num_retries=0` stays pinned **hermetically** by the
+kwarg-passthrough unit test (`test_litellm_timeout_config` / error-classification
+suite assert `acompletion` receives `num_retries=0`). **Future work**: a genuine
+suppression proof needs a forced-failure lane — inject a retryable error and
+assert exactly one LiteLLM attempt via a LiteLLM callback (transport-agnostic,
+immune to the aiohttp/httpx split). Documented in the module + test docstrings.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Live lane (gated) | `set -a; source <(tr -d '\r' < .env); set +a; RUN_INTEGRATION_WATSONX=1 .venv\Scripts\python.exe -m pytest tests/integration/test_watsonx_chat_e2e.py -v` | **3 passed** (sdk E2E, litellm E2E, litellm parity) |
+| Full hermetic suite | `.venv\Scripts\python.exe -m pytest -q` | **277 passed, 4 skipped** (integration lanes skip without the gate) |
+| Lint | `ruff check .` | All checks passed |
+| Format | `ruff format --check .` | 61 files already formatted |
+| Typecheck | `pyright` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: Task 7.4 **`[x]*` CLOSED.** Both transports verified live; the
+litellm 404 is fixed against the real backend. The only production-relevant
+finding (the unprovable `num_retries=0` happy-path assertion) was down-scoped
+honestly with the suppression proof deferred to a forced-failure lane. **All
+of feature 003's tasks (majors 1–7) are now complete.** No production code
+changed in 7.4 — test-file boundary only (`test_watsonx_chat_e2e.py`).
