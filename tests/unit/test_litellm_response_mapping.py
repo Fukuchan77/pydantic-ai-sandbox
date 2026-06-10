@@ -7,9 +7,11 @@ consumes. ``.model_dump()`` (not attribute access) is required because it
 preserves ``tool_calls[].function.arguments`` as the **raw JSON string** the
 backend sent — so Granite's double-encoded args survive faithfully (Req 2.4).
 
-Also pins finish-reason mapping, absent-usage → zeroed ``RequestUsage``, and a
-choiceless response raising :class:`UnexpectedModelBehavior` unwrapped (Req 3.3).
-``acompletion`` is mocked, so no request leaves the process.
+Also pins finish-reason mapping (the full ``_FINISH_REASON_MAP`` plus the
+absent / unmapped key → ``None`` branches, Req 3.2), absent-usage → zeroed
+``RequestUsage``, and a choiceless response raising
+:class:`UnexpectedModelBehavior` unwrapped (Req 3.3). ``acompletion`` is mocked,
+so no request leaves the process.
 """
 
 from __future__ import annotations
@@ -171,3 +173,48 @@ async def test_empty_choices_raises_unexpected_model_behavior(
 
     with pytest.raises(UnexpectedModelBehavior):
         await _request_with(monkeypatch, stub)
+
+
+# Sentinel distinguishing an *absent* ``finish_reason`` key from an explicit
+# ``None`` value — both must normalise to ``None`` but exercise different
+# branches of ``build_response`` (``choice.get(...)`` missing vs. falsy).
+_ABSENT = object()
+
+
+@pytest.mark.parametrize(
+    ("raw_finish_reason", "expected"),
+    [
+        ("stop", "stop"),
+        ("length", "length"),
+        ("tool_calls", "tool_call"),
+        ("content_filter", "content_filter"),
+        ("function_call", "tool_call"),
+        ("made_up_reason", None),  # unmapped key → None (pydantic_ai default, Req 3.2)
+        (None, None),  # explicit null reason → None (Req 3.2)
+        (_ABSENT, None),  # absent key entirely → None (Req 3.2)
+    ],
+)
+async def test_finish_reason_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_finish_reason: object,
+    expected: str | None,
+) -> None:
+    """Finish-reason keys map per ``_FINISH_REASON_MAP``; absent/unmapped → ``None`` (Req 3.2).
+
+    Drives the mapping through the full ``request()`` → ``.model_dump()`` →
+    ``build_response`` path (not the shared helper in isolation), pinning that the
+    LiteLLM transport surfaces every mapped key and collapses an absent, explicitly
+    ``None``, or unrecognised key to ``None`` — the same normalisation the SDK
+    transport applies, for observability parity.
+    """
+    choice: dict[str, Any] = {
+        "index": 0,
+        "message": {"role": "assistant", "content": "ok"},
+    }
+    if raw_finish_reason is not _ABSENT:
+        choice["finish_reason"] = raw_finish_reason
+    stub = _StubResponse({"id": "chatcmpl-fr", "choices": [choice]})
+
+    result = await _request_with(monkeypatch, stub)
+
+    assert result.finish_reason == expected

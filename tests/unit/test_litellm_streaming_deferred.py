@@ -49,3 +49,40 @@ async def test_request_stream_message_is_greppable_and_names_model() -> None:
             pass  # pragma: no cover — context entry raises before the body runs
 
     assert _ROUTE in str(excinfo.value)
+
+
+async def test_request_stream_raises_before_any_yield_without_downgrading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal precedes any yield and never downgrades to a request (Req 8.1/8.2).
+
+    Two failure modes are pinned that the bare ``pytest.raises`` cases above cover
+    only implicitly:
+
+    * **Body never runs.** ``@asynccontextmanager`` raises on ``__aenter__`` (the
+      generator raises before reaching its ``yield``), so the ``async with`` body
+      must never execute. A sentinel proves the raise *precedes* the yield rather
+      than surfacing from inside the managed block — the literal "before any yield"
+      clause of the task.
+    * **No silent downgrade.** ``request_stream`` must not quietly fall back to a
+      non-streaming ``acompletion`` call (Req 8.2). ``litellm.acompletion`` is
+      detonated; reaching it fails the test, proving streaming is refused outright
+      rather than serviced by the non-streaming path.
+    """
+    import litellm
+
+    def _detonate(**_: object) -> object:
+        msg = "request_stream must not downgrade to acompletion (Req 8.2)"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(litellm, "acompletion", _detonate)
+
+    model = _model()
+    messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart("hi")])]
+    body_ran = False
+
+    with pytest.raises(NotImplementedError, match="streaming support deferred"):
+        async with model.request_stream(messages, None, ModelRequestParameters()):
+            body_ran = True  # pragma: no cover — context entry raises before the body runs
+
+    assert body_ran is False
