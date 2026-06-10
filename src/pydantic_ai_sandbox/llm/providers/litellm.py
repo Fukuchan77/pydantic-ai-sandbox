@@ -117,6 +117,8 @@ class LiteLLMModel(Model):
                 (``_build_litellm``), so this model receives a plain value.
             api_base: Backend base URL (e.g. the watsonx URL).
             custom_llm_provider: Optional explicit LiteLLM provider override.
+                Not set by ``_build_litellm`` (always ``None`` on the watsonx
+                route); reserved for future generic-model wiring (Req 1.2).
             timeout_connect: Connect-phase timeout (seconds) → ``acompletion``.
             timeout_read: Read-phase timeout (seconds) → ``acompletion``.
         """
