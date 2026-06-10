@@ -241,23 +241,43 @@ _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
 _Depends:_ 2
 _Requirements:_ 5.2, 6.1, 6.2, 7.1, 7.2, 7.3, 7.5
 
-- [ ] 4.1 Rewrite `_build_litellm(settings)` to construct a `LiteLLMModel`: build the `watsonx/<model_id>` route from `Settings.watsonx_model_id`, pass `Settings.watsonx_url` as `api_base`, unwrap the `SecretStr` API key via `.get_secret_value()` only at this boundary, source timeouts from `watsonx_timeout_connect`/`watsonx_timeout_read`, and remove the obsolete `OpenAIChatModel`/`LiteLLMProvider` construction.
+- [x] 4.1 Rewrite `_build_litellm(settings)` to construct a `LiteLLMModel`: build the `watsonx/<model_id>` route from `Settings.watsonx_model_id`, pass `Settings.watsonx_url` as `api_base`, unwrap the `SecretStr` API key via `.get_secret_value()` only at this boundary, source timeouts from `watsonx_timeout_connect`/`watsonx_timeout_read`, and remove the obsolete `OpenAIChatModel`/`LiteLLMProvider` construction.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 2
   _Requirements:_ 5.2, 7.1, 7.3, 7.5
-- [ ] 4.2 Add the function-local optional-`litellm` import guard that fails fast with a `ValueError` naming the package and install command — never a bare `ImportError`.
+- [x] 4.2 Add the function-local optional-`litellm` import guard that fails fast with a `ValueError` naming the package and install command — never a bare `ImportError`.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 4.1
   _Requirements:_ 6.1, 6.2
-- [ ] 4.3 Reconcile the watsonx project ID for LiteLLM: read the validated `settings.watsonx_project_id` and ensure it is present in `os.environ["WATSONX_PROJECT_ID"]` (see research.md ADR-3: LiteLLM's watsonx path reads `os.environ` directly, requiring this process-global mutation). A `None` value is a **defensive invariant**: raise `TypeError` mirroring the existing apikey/model-id guard and mark it `# pragma: no cover` — the boot credential gate ([config.py:236-244](../../src/pydantic_ai_sandbox/config.py#L236)) already rejects a missing project ID when watsonx is selected, so do NOT duplicate it with a divergent user-facing message. If the live lane (task 6) proves `acompletion(project_id=...)` routes correctly, prefer that and drop the `os.environ` write.
+- [x] 4.3 Reconcile the watsonx project ID for LiteLLM: read the validated `settings.watsonx_project_id` and ensure it is present in `os.environ["WATSONX_PROJECT_ID"]` (see research.md ADR-3: LiteLLM's watsonx path reads `os.environ` directly, requiring this process-global mutation). A `None` value is a **defensive invariant**: raise `TypeError` mirroring the existing apikey/model-id guard and mark it `# pragma: no cover` — the boot credential gate ([config.py:236-244](../../src/pydantic_ai_sandbox/config.py#L236)) already rejects a missing project ID when watsonx is selected, so do NOT duplicate it with a divergent user-facing message. If the live lane (task 6) proves `acompletion(project_id=...)` routes correctly, prefer that and drop the `os.environ` write.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 4.1
   _Requirements:_ 7.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **Major 4 landed as one cohesive `_build_litellm` rewrite (4.1+4.2+4.3).** The
+  user-approved scope was "4.1 + 5.1 together (keep the suite green)", but 5.1's
+  test set asserts the project-ID env reconciliation (4.3) and the import guard
+  (4.2 — already present in code) alongside the `LiteLLMModel` construction (4.1).
+  Landing 5.1 green is therefore inseparable from the whole builder rewrite, so all
+  three sub-tasks were completed and marked.
+- **4.1**: body fully replaced — removed the `OpenAIChatModel`/`LiteLLMProvider` +
+  custom `http_client` construction; now returns `LiteLLMModel(model_name="watsonx/{id}",
+  api_key=apikey.get_secret_value(), api_base=watsonx_url, timeout_connect=…,
+  timeout_read=…)`. Timeout *shaping* (`httpx.Timeout(read, connect=connect)`) moved
+  into `LiteLLMModel.request` (Task 2.2), so the builder just passes the two `int`
+  phases through. `custom_llm_provider` is left default `None` — the `watsonx/` route
+  prefix selects the backend.
+- **4.2**: the import guard was already in place from feature 002; preserved verbatim
+  (`try: import litellm / except ImportError: raise ValueError`). `LiteLLMModel` is
+  imported function-locally *after* the guard (same cheap-import rationale).
+- **4.3**: added `os.environ["WATSONX_PROJECT_ID"] = settings.watsonx_project_id`
+  (ADR-3 — LiteLLM's watsonx path reads `os.environ` directly; a `.env`-loaded
+  deployment would otherwise leave it unset). `None` → `TypeError` + `# pragma: no
+  cover` (defensive; boot credential gate already rejects it). Kept the `os.environ`
+  write per 4.3's default — the live lane (Task 6) has not yet confirmed an
+  `acompletion(project_id=...)` kwarg, so the env write stands.
 
 ---
 
@@ -267,19 +287,34 @@ _Boundary:_ `tests/unit/test_watsonx_litellm_construction.py`, `src/pydantic_ai_
 _Depends:_ 4
 _Requirements:_ 5.2, 6.1, 7.1, 7.2, 7.3, 7.4, 7.5, 10.4
 
-- [ ] 5.1 (P) Rewrite `test_watsonx_litellm_construction.py` (currently asserts the removed `OpenAIChatModel` path) to assert the new `LiteLLMModel` construction: `watsonx/<model_id>` route, unwrapped API key, `watsonx_url` as `api_base`, timeout passthrough, `WATSONX_PROJECT_ID` set in `os.environ` (via `monkeypatch.setenv`/`delenv` so the write is restored), and `ValueError` (not `ImportError`, with install command) when `litellm` is absent. **Assert the secret API key never leaks (Req 7.5)**: the unwrapped key value SHALL NOT appear in the constructed model's `repr()`/`str()` (the gitleaks lane in task 7.3 covers log scanning at the suite level). (The `None` project-ID branch is a defensive `# pragma: no cover` invariant — unreachable past the boot credential gate — so it is not asserted here.)
+- [x] 5.1 (P) Rewrite `test_watsonx_litellm_construction.py` (currently asserts the removed `OpenAIChatModel` path) to assert the new `LiteLLMModel` construction: `watsonx/<model_id>` route, unwrapped API key, `watsonx_url` as `api_base`, timeout passthrough, `WATSONX_PROJECT_ID` set in `os.environ` (via `monkeypatch.setenv`/`delenv` so the write is restored), and `ValueError` (not `ImportError`, with install command) when `litellm` is absent. **Assert the secret API key never leaks (Req 7.5)**: the unwrapped key value SHALL NOT appear in the constructed model's `repr()`/`str()` (the gitleaks lane in task 7.3 covers log scanning at the suite level). (The `None` project-ID branch is a defensive `# pragma: no cover` invariant — unreachable past the boot credential gate — so it is not asserted here.)
   _Boundary:_ `tests/unit/test_watsonx_litellm_construction.py`
   _Depends:_ 4
   _Requirements:_ 5.2, 6.1, 7.1, 7.2, 7.3, 7.5
-- [ ] 5.2 (P) Verify the unchanged-behavior suites pass: the existing watsonx SDK tests, the factory dispatch tests, and the fallback tests.
+- [x] 5.2 (P) Verify the unchanged-behavior suites pass: the existing watsonx SDK tests, the factory dispatch tests, and the fallback tests.
   _Boundary:_ `src/pydantic_ai_sandbox/llm/providers/watsonx.py`
   _Depends:_ 4
   _Requirements:_ 7.4, 10.4
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **5.1**: `test_watsonx_litellm_construction.py` fully retargeted from the removed
+  `OpenAIChatModel` path to `LiteLLMModel` construction. The old RESPX request-path
+  tests (5 cases) were **removed**, not ported: they exercised the OpenAI adapter's
+  `httpx` POST to `/chat/completions`, which no longer exists — the litellm request
+  path (mapping/error/timeout) is now covered hermetically by the mocked-
+  `acompletion` `test_litellm_*` suite. New file = 11 construction cases: route,
+  unwrapped-key (`model._api_key`), `api_base`, timeout passthrough (defaults +
+  overrides), `WATSONX_PROJECT_ID` env reconciliation (delenv-then-build proves the
+  *builder* writes it, monkeypatch restores), import-guard `ValueError`, secret
+  never in `repr`/`str` (Req 7.5), I/O-free, and the `None`-cred `TypeError` guard.
+- **Construction-level assertions read private attrs** (`_api_key` / `_api_base` /
+  `_timeout_*`) — `LiteLLMModel` exposes no public accessors for them, so the
+  cross-module `# pyright: ignore[reportPrivateUsage]` convention is applied per line.
+- **5.2**: SDK / factory-dispatch / fallback suites pass unmodified (53 passed in the
+  named run; full suite 277 passed / 2 skipped). `test_factory_dispatch.py`
+  deliberately asserts only the `Model` ABC for the litellm branch (not a concrete
+  class), so the `OpenAIChatModel → LiteLLMModel` swap needed no dispatch-test edit.
 
 ---
 

@@ -591,3 +591,92 @@ re-ran. No production change.
 **Status**: Task 3.6 `[x]`. **Major 3 complete** (3.1–3.6 all `[x]`). Next wave:
 major 4 (rewrite watsonx `_build_litellm` wrapper) — already unblocked (depends
 only on major 2).
+
+---
+
+## 2026-06-10 — Tasks 4.1–4.3 + 5.1–5.2 (C3 `_build_litellm` rewrite + wrapper tests) — majors 4 & 5 complete
+
+**Scope**: Rewrite the watsonx `_build_litellm` builder to construct the new
+`LiteLLMModel` (4.1), preserving the optional-`litellm` import guard (4.2) and
+reconciling `WATSONX_PROJECT_ID` into `os.environ` for LiteLLM's watsonx path
+(4.3); rewrite `test_watsonx_litellm_construction.py` to assert the new
+construction (5.1) and verify the unchanged-behavior suites stay green (5.2).
+
+**Scope decision (user-approved)**: invocation was `/sdd-impl … Task4.1`. The
+production rewrite breaks the existing construction test (it asserts the removed
+`OpenAIChatModel` path), and that test's faithful replacement (5.1) asserts the
+4.3 env reconciliation and the 4.2 guard alongside 4.1 — so the green
+verification gate is **inseparable** from the whole `_build_litellm` rewrite +
+test rewrite. Asked the user; chosen scope = "4.1 + 5.1 together (keep suite
+green)". Implemented the full coupled unit (4.1+4.2+4.3+5.1+5.2) and marked all
+five, since each is genuinely complete and verified.
+
+**Method (TDD)**: Rewrote the test file first → RED (7 failed / 4 passed against
+the `OpenAIChatModel`-returning production: the 4 passes were the unchanged
+import-guard, route-prefix, secret-leak and `None`-cred-guard cases). Rewrote
+`_build_litellm` → GREEN (11 passed).
+
+### Changes
+
+- **4.1** `_build_litellm` body fully replaced: removed
+  `OpenAIChatModel`/`LiteLLMProvider` + the custom `http_client`; now returns
+  `LiteLLMModel(model_name=f"watsonx/{model_id}", api_key=apikey.get_secret_value(),
+  api_base=watsonx_url, timeout_connect=…, timeout_read=…)`. Timeout *shaping*
+  lives in `LiteLLMModel.request` (Task 2.2), so the builder passes the two `int`
+  phases through unaltered. `LiteLLMModel` imported function-locally (after the
+  guard). Added module-level `import os`.
+- **4.2** Import guard preserved verbatim (`try: import litellm / except
+  ImportError: raise ValueError` naming the package + install command).
+- **4.3** Added `os.environ["WATSONX_PROJECT_ID"] = settings.watsonx_project_id`
+  (ADR-3). `None` → `TypeError` + `# pragma: no cover` (defensive; boot
+  credential gate already rejects a missing project id). Kept the env write —
+  the live lane (Task 6) has not yet validated an `acompletion(project_id=...)`
+  kwarg alternative.
+- **5.1** Retargeted `test_watsonx_litellm_construction.py` to `LiteLLMModel`
+  construction (11 cases). The 5 old RESPX request-path tests were **removed**,
+  not ported — they drove the OpenAI adapter's `httpx` POST to
+  `/chat/completions`, a path that no longer exists; the litellm request path is
+  covered hermetically by the `test_litellm_*` (mocked-`acompletion`) suite.
+- **5.2** SDK / factory-dispatch / fallback suites pass unmodified.
+
+### Decisions / learnings
+
+- **The project-ID env test must prove the *builder* writes it, not the
+  fixture.** `watsonx_settings_factory` seats `WATSONX_PROJECT_ID` via
+  `monkeypatch.setenv` (that is how `Settings` reads it). A naive
+  `assert os.environ["WATSONX_PROJECT_ID"] == …` would pass even without 4.3,
+  masked by the fixture. The test captures `settings` first, then
+  `monkeypatch.delenv`s the var, then builds — so only the builder's reconciliation
+  can satisfy the assertion. `monkeypatch` still owns the key (from the factory's
+  `setenv`), so its teardown restores it and the process-global write does not leak.
+- **Factory dispatch needed no edit.** `test_factory_dispatch.py` asserts only the
+  `Model` ABC for the litellm branch (by design, so the concrete Pydantic AI class
+  can evolve), so the `OpenAIChatModel → LiteLLMModel` swap was transparent to it —
+  only `test_watsonx_litellm_construction.py` (5.1's boundary) referenced the
+  concrete removed class.
+- **Construction asserts read private attrs.** `LiteLLMModel` exposes no public
+  accessors for `api_key`/`api_base`/timeouts, so the construction-level assertions
+  use `model._api_key` etc. with the per-line `# pyright:
+  ignore[reportPrivateUsage]` cross-module convention.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| RED | `mise run test -- tests/unit/test_watsonx_litellm_construction.py -q` (pre-impl) | 7 failed, 4 passed |
+| Task tests | same command (post-impl) | **11 passed** |
+| 5.2 named suites | `mise run test -- …sdk_construction …factory_dispatch …fallback_integration …fallback_failover -q` | **53 passed** |
+| Full suite | `mise run test` (`uv run pytest`) | **277 passed, 2 skipped** (env-gated integration lanes) |
+| Lint | `mise run lint` (`uv run ruff check .`) | All checks passed |
+| Format | `mise run format` (`uv run ruff format --check .`) | 61 files already formatted |
+| Typecheck | `mise run typecheck` (`uv run pyright`) | 0 errors, 0 warnings, 0 informations |
+
+> `uv`/`mise` resolve only in a profile-loaded PowerShell on this host; commands
+> ran via `powershell.exe … '. $PROFILE; mise run …'`. The PS5.1 chpwd warning and
+> mise's stderr task-echo are harmless. The `--cov` ratchet remains owned by Task
+> 7.1 (default `pytest` is the clean lane — beartype-claw `--cov` interaction).
+
+**Status**: **Majors 4 & 5 complete** — 4.1–4.3, 5.1–5.2 all `[x]`. Remaining:
+major 6 (opt-in live `litellm` lane) and major 7 (quality gates: coverage ratchet,
+security lane, integration). Act item carried from major 2 still open: amend the
+literal "carries a scoped `# noqa: BLE001`" wording in tasks 2.3/7.2.

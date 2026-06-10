@@ -35,6 +35,7 @@ be caught by ``tests/unit/test_no_hardcoded_model_ids.py`` and the pre-commit
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, cast
 
@@ -365,48 +366,64 @@ class WatsonxSDKModel(Model):
 
 
 def _build_litellm(settings: Settings) -> Model:
-    """Build the LiteLLM-routed watsonx ``Model`` (Task 6). I/O-free.
+    """Build the LiteLLM-routed watsonx ``Model`` (Task 4 / C3). I/O-free.
 
-    The litellm transport reuses pydantic_ai's OpenAI adapter: a
-    :class:`~pydantic_ai.providers.litellm.LiteLLMProvider` carries the
-    credentials and the timeout-wired HTTP client, wrapped in an
-    :class:`~pydantic_ai.models.openai.OpenAIChatModel` whose ``model_name``
-    carries the ``watsonx/`` route prefix LiteLLM uses to select the backend
-    (Req 2.3). ``OpenAIChatModel`` accepts a ``Provider``; its adapter
-    auto-stamps ``gen_ai.system`` / ``gen_ai.request.model`` for instrumentation.
+    Constructs the provider-agnostic
+    :class:`~pydantic_ai_sandbox.llm.providers.litellm.LiteLLMModel`, which routes
+    chat through ``litellm.acompletion()`` with the ``watsonx/<model_id>`` route
+    prefix LiteLLM uses to select the watsonx backend (Req 7.1). This replaces the
+    former ``OpenAIChatModel`` / ``LiteLLMProvider`` construction, which POSTed to
+    ``/chat/completions`` — an endpoint watsonx.ai does not expose (the 002
+    live-verified 404).
 
-    Credential routing (research.md R4 / ADR-3): ``LiteLLMProvider`` exposes
-    ``api_key`` / ``api_base`` but **no** ``project_id`` — so ``apikey`` and
-    ``url`` are routed explicitly while ``project_id`` reaches litellm via the
-    ``WATSONX_PROJECT_ID`` env var the deployment already sets, never a
-    constructor arg. Timeouts (Req 5.4) inject via the custom ``http_client``
-    (``LiteLLMProvider`` takes no timeout argument); ``httpx.Timeout`` rejects a
-    partial ``(connect, read)`` spec, so the read value seeds the overall default
-    and ``connect`` overrides the connect phase — the same shaping as the SDK
-    client (:meth:`WatsonxSDKModel._build_client`).
+    Credential / config routing:
 
-    The optional ``litellm`` package, the OpenAI adapter and the provider are all
-    imported function-locally (not at module scope): :mod:`llm.factory` imports
-    this module unconditionally, so a top-level import would force these heavy
-    dependencies on every deployment — including SDK-only and ollama-only ones
-    that never select the litellm transport.
+    * The ``SecretStr`` apikey is unwrapped via ``.get_secret_value()`` **only
+      here**, at this boundary (tech.md secrets convention), and handed to the
+      model as a plain value it never logs (Req 7.3/7.5).
+    * ``watsonx_url`` is routed as ``api_base`` (Req 7.1); ``watsonx_timeout_connect``
+      / ``watsonx_timeout_read`` flow to the model, which shapes them into
+      ``httpx.Timeout(read, connect=connect)`` on each request — the same shaping
+      as the SDK client (:meth:`WatsonxSDKModel._build_client`), so both phases
+      reach the backend (Req 5.2).
+    * ``WATSONX_PROJECT_ID`` is reconciled into ``os.environ`` (research.md ADR-3):
+      LiteLLM's watsonx path reads the project id from the process environment
+      directly, not from an ``acompletion`` kwarg, and a deployment loading
+      ``Settings`` from a ``.env`` file would otherwise leave it unset in
+      ``os.environ`` even though ``settings.watsonx_project_id`` is populated. The
+      value is sourced from the already-validated setting (Req 7.2).
+
+    Setting ``os.environ`` is a process-global mutation inside an otherwise
+    I/O-free, side-effect-free builder (against the construction convention,
+    tech.md); it is accepted only because LiteLLM reads ``os.environ`` **directly**
+    (ADR-3). The hermetic test for this branch uses ``monkeypatch`` so the write
+    does not leak across tests; if the live lane (Req 10.3) confirms an
+    ``acompletion(project_id=...)`` kwarg works, prefer that and drop the env write.
+
+    The optional ``litellm`` package and the ``LiteLLMModel`` adapter are imported
+    function-locally (not at module scope): :mod:`llm.factory` imports this module
+    unconditionally, so a top-level ``import litellm`` would force the heavy
+    optional dependency on every deployment — including SDK-only and ollama-only
+    ones that never select the litellm transport.
 
     Args:
         settings: Frozen runtime settings; the credential gate has already
             validated the watsonx fields when watsonx is selected.
 
     Returns:
-        An :class:`OpenAIChatModel` routed through LiteLLM to watsonx.
+        A :class:`LiteLLMModel` routed through LiteLLM to watsonx.
 
     Raises:
         ValueError: If the optional ``litellm`` package is not installed (Req
-            2.6) — naming the package so the operator knows what to install.
-        TypeError: If ``watsonx_apikey`` / ``watsonx_model_id`` are ``None`` —
-            unreachable when watsonx is selected (the credential gate rejects
-            that at boot); defensive against a future validator change, matching
-            the SDK builder's fail-loud invariants.
+            6.1) — naming the package + install command so the operator knows what
+            to do.
+        TypeError: If ``watsonx_apikey`` / ``watsonx_model_id`` /
+            ``watsonx_project_id`` are ``None`` — unreachable when watsonx is
+            selected (the credential gate rejects that at boot); defensive against
+            a future validator change, matching the SDK builder's fail-loud
+            invariants.
     """
-    # Import guard (Req 2.6): the litellm transport is an optional extra. A
+    # Import guard (Req 6.1): the litellm transport is an optional extra. A
     # missing package must fail loud as a ``ValueError`` naming ``litellm`` — not
     # a bare ``ImportError`` leaking from deep in the builder — so the operator
     # knows exactly what to install.
@@ -420,10 +437,10 @@ def _build_litellm(settings: Settings) -> Model:
         )
         raise ValueError(msg) from exc
 
-    # OpenAI adapter + LiteLLM provider imported here (not at module scope) for
-    # the same reason as the SDK import in ``_build_client``.
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.litellm import LiteLLMProvider
+    # The ``LiteLLMModel`` adapter imported here (not at module scope) for the same
+    # reason as the SDK import in ``_build_client``: keep importing this module
+    # cheap for deployments that never select the litellm transport.
+    from pydantic_ai_sandbox.llm.providers.litellm import LiteLLMModel
 
     apikey = settings.watsonx_apikey
     model_id = settings.watsonx_model_id
@@ -435,22 +452,30 @@ def _build_litellm(settings: Settings) -> Model:
         )
         raise TypeError(msg)
 
-    http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(
-            settings.watsonx_timeout_read,
-            connect=settings.watsonx_timeout_connect,
-        ),
-    )
-    provider = LiteLLMProvider(
-        # Unwrap the SecretStr only here, at the SDK boundary (tech.md secrets
+    # Reconcile WATSONX_PROJECT_ID into the process environment for LiteLLM's
+    # watsonx path (ADR-3). The boot credential gate guarantees
+    # ``watsonx_project_id`` is present when watsonx is selected, so a ``None``
+    # here is a defensive invariant (mirroring the apikey/model-id guard above),
+    # not a user-facing path — the gate already emits the actionable message, so
+    # this is not duplicated with a divergent one.
+    project_id = settings.watsonx_project_id
+    if project_id is None:  # pragma: no cover - unreachable past the boot credential gate
+        msg = (
+            "watsonx_project_id is None at _build_litellm time — "
+            "the credential gate (config) should have rejected this "
+            "configuration; did the cross-field validator change?"
+        )
+        raise TypeError(msg)
+    os.environ["WATSONX_PROJECT_ID"] = project_id
+
+    return LiteLLMModel(
+        model_name=f"watsonx/{model_id}",
+        # Unwrap the SecretStr only here, at the boundary (tech.md secrets
         # convention); the value is never logged.
         api_key=apikey.get_secret_value(),
         api_base=settings.watsonx_url,
-        http_client=http_client,
-    )
-    return OpenAIChatModel(
-        model_name=f"watsonx/{model_id}",
-        provider=provider,
+        timeout_connect=settings.watsonx_timeout_connect,
+        timeout_read=settings.watsonx_timeout_read,
     )
 
 
@@ -467,9 +492,10 @@ def _build_watsonx(settings: Settings) -> Model:
       (Task 5). Construction is I/O-free — the SDK client is built lazily on the
       first request (Req 1.5).
     * ``"litellm"`` → :func:`_build_litellm`, the LiteLLM-routed transport
-      (Task 6) with its optional-dependency import-guard. Also I/O-free — the
-      OpenAI-compatible client is built but not invoked until a request is
-      served.
+      (Task 4 / C3) with its optional-dependency import-guard. Also I/O-free —
+      the :class:`~pydantic_ai_sandbox.llm.providers.litellm.LiteLLMModel` is
+      constructed but its first ``litellm.acompletion()`` call is deferred until
+      a request is served.
 
     Args:
         settings: Frozen runtime settings; the credential gate has already
@@ -481,7 +507,7 @@ def _build_watsonx(settings: Settings) -> Model:
 
     Raises:
         ValueError: For ``watsonx_transport == "litellm"`` when the optional
-            ``litellm`` package is not installed (Req 2.6).
+            ``litellm`` package is not installed (Req 6.1).
     """
     if settings.watsonx_transport == "sdk":
         return WatsonxSDKModel(settings)
