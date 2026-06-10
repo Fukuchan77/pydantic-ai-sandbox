@@ -80,8 +80,14 @@ def test_map_user_prompt_concatenates_list_of_text() -> None:
 
 def test_map_user_prompt_multimodal_raises_naming_type() -> None:
     part = UserPromptPart(content=[ImageUrl(url="https://example.com/a.png")])
-    with pytest.raises(NotImplementedError, match="ImageUrl"):
+    with pytest.raises(NotImplementedError, match="ImageUrl") as excinfo:
         _map_user_prompt(part)
+    # Shared across both transports (Req 11): the fail-loud message must not name
+    # a single transport (e.g. "watsonx SDK"), or it misdirects LiteLLM-route
+    # operators about the error's origin.
+    message = str(excinfo.value)
+    assert "watsonx" not in message.lower()
+    assert "sdk" not in message.lower()
 
 
 def test_map_request_part_system_prompt() -> None:
@@ -334,12 +340,15 @@ def test_build_response_preserves_double_encoded_tool_args() -> None:
 
 
 def test_build_response_empty_choices_raises() -> None:
-    with pytest.raises(UnexpectedModelBehavior, match="no choices"):
+    with pytest.raises(UnexpectedModelBehavior, match="no choices") as excinfo:
         build_response(
             {"id": "x", "choices": []},
             model_name=_MODEL_NAME,
             provider_name=_PROVIDER_NAME,
         )
+    # Shared across both transports (Req 11): "achat" is the SDK transport's call
+    # name; the LiteLLM route calls ``acompletion``, so the message stays neutral.
+    assert "achat" not in str(excinfo.value)
 
 
 def test_build_response_missing_choices_key_raises() -> None:

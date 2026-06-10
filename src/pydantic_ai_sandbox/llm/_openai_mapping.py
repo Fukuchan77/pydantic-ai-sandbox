@@ -5,7 +5,9 @@ the watsonx ``sdk`` transport (:class:`~pydantic_ai_sandbox.llm.providers.watson
 and the LiteLLM transport (:class:`~pydantic_ai_sandbox.llm.providers.litellm.LiteLLMModel`)
 consume. The helpers were extracted verbatim from ``watsonx.py`` (feature
 ``002-watsonx-provider``) so the two transports cannot drift (ADR-1); the watsonx
-SDK transport's behaviour is unchanged byte-for-byte (Req 11.4).
+SDK transport's *observable* behaviour is unchanged (Req 11.4) — the only edits
+are transport-neutral fail-loud wording (the messages are shared across both
+routes, so they name no single transport; tests assert on substrings).
 
 Boundary contract — what this module does **NOT** own:
 
@@ -82,7 +84,7 @@ _FINISH_REASON_MAP: dict[str, FinishReason] = {
 def _map_user_prompt(part: UserPromptPart) -> dict[str, Any]:
     """Map a :class:`UserPromptPart` to an OpenAI ``user`` message.
 
-    Only text content is in scope for the SDK transport. Multimodal items
+    Only text content is in scope for either transport. Multimodal items
     (images, audio, documents) raise :class:`NotImplementedError` naming the
     offending type rather than being dropped from the payload — vision is
     explicitly out of scope (spec.md "Out of Scope") and a silent drop would
@@ -98,8 +100,9 @@ def _map_user_prompt(part: UserPromptPart) -> dict[str, Any]:
             segments.append(item)
         else:
             msg = (
-                "watsonx SDK transport supports text user content only; "
-                f"multimodal item {type(item).__name__!r} is out of scope."
+                "text user content only; "
+                f"multimodal item {type(item).__name__!r} is out of scope "
+                "(vision unsupported)."
             )
             raise NotImplementedError(msg)
     return {"role": "user", "content": "".join(segments)}
@@ -295,7 +298,7 @@ def build_response(
     """
     choices: list[Any] = raw.get("choices") or []
     if not choices:
-        msg = "achat response contained no choices."
+        msg = "completion response contained no choices."
         raise UnexpectedModelBehavior(msg)
     choice: dict[str, Any] = choices[0]
     message: dict[str, Any] = choice.get("message") or {}
