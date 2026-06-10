@@ -254,3 +254,340 @@ must preserve).
 **Status**: **Major 2 (C2 `LiteLLMModel`) complete** — 2.1–2.4 all `[x]`. Next
 waves: major 3 (remaining hermetic tests 3.4 FallbackModel-recovery / 3.5
 timeout) and major 4 (watsonx `_build_litellm` rewrite, C3).
+
+---
+
+## 2026-06-10 — Task 3.1 (C4 construction + observability/output-mode parity tests)
+
+**Scope**: Formalise `test_litellm_construction.py` as the major-3 deliverable
+for clause set 3.1 (Req 1.4 / 1.5 / 10.1 / 10.6).
+
+**Method (TDD)**: The 6 cases were already authored as major 2's RED driver
+(2.1/2.2) and are GREEN against shipped code. Verified-then-strengthened rather
+than re-authored: reviewed each of the task's 5 enumerated clauses for coverage.
+
+### Changes
+
+- **Parity-test strengthening.** `test_response_provider_name_matches_system`
+  asserted only `result.provider_name == system`. Added
+  `result.model_name == model.model_name == _WATSONX_ROUTE` so the mocked-
+  `acompletion` response proves **both** observability span identities
+  (`gen_ai.system` *and* `gen_ai.request.model`) match the SDK path — full Req
+  1.4 / 10.6 parity, not the provider segment alone. Renamed docstring accordingly.
+- No production change; the other 5 clauses (I/O-free `__init__` via detonated
+  httpx send hooks, `model_name` route, `system` watsonx/litellm derivation,
+  `profile` `supports_json_schema_output` falsy) were already complete.
+
+### Decisions / learnings
+
+- **`build_response` stamps two identities; a parity test must assert both.** The
+  call passes `model_name=` and `provider_name=`; asserting only the latter would
+  let a regression that drops the route-stamp through. Cheap to close on the same
+  mocked response.
+- **Toolchain access**: `uv`/`mise` are not on the non-interactive PATH; commands
+  must run through `powershell.exe -Command` so the user profile activates the
+  mise shims (PowerShell 5.1 emits a harmless chpwd warning; silence with
+  `$env:MISE_PWSH_CHPWD_WARNING=0`).
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_litellm_construction.py -q` | **6 passed** |
+| Full suite | `uv run pytest -q` | **264 passed, 2 skipped** (env-gated integration lanes) |
+| Lint | `uv run ruff check tests/unit/test_litellm_construction.py` | All checks passed |
+| Format | `uv run ruff format --check …` | 1 file already formatted |
+| Typecheck | `uv run pyright tests/unit/test_litellm_construction.py` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: Task 3.1 `[x]`. Remaining in major 3: 3.2, 3.3, 3.4, 3.5, 3.6
+(message-mapping, response-mapping, error-classification, timeout, streaming —
+test files for several already seeded during major 2).
+
+---
+
+## 2026-06-10 — Task 3.2 (C4 message/tool mapping tests for `request()`)
+
+**Scope**: Formalise `test_litellm_message_mapping.py` as the major-3 deliverable
+for clause set 3.2 (Req 10.1): history mapped via `_map_messages`, tools via
+`_map_tools`, unsupported part → `NotImplementedError`.
+
+**Method (TDD)**: The 4 cases were already authored as major 2's RED driver and
+are GREEN against shipped `request()`. Verified-then-strengthened (same pattern as
+3.1), not re-authored.
+
+### Changes
+
+- **Delegation-proof strengthening.** The two mapping cases asserted only literal
+  expected dicts — proving *shape*, not that `request()` routes through the shared
+  helpers. Added `captured["messages"] == _map_messages(messages)` and
+  `captured["tools"] == _map_tools(params)` alongside the literals, so the test
+  now pins the **single-implementation reuse** (Req 11): a future inline mapping
+  that drifted from the SDK path would fail here, not pass silently. Imported the
+  two underscore helpers with the scoped `# pyright: ignore[reportPrivateUsage]`
+  cross-module convention.
+- No production change. The `None`-tools case and the multimodal →
+  `NotImplementedError` case (with `acompletion` detonating via `AssertionError`
+  if reached, proving the raise precedes the wrapped call — Req 4.3 fail-loud)
+  were already complete.
+
+### Decisions / learnings
+
+- **A "mapped via X" test should assert equivalence to X, not just a literal.** A
+  literal-only assertion passes even if the production path re-implements mapping
+  inline; the helper-equivalence assertion is what actually proves the delegation
+  the task wording ("via `_map_messages`/`_map_tools`") and Req 11 demand.
+- **Toolchain access (refines 3.1's note).** `uv`/`mise` shims load only with the
+  PowerShell *profile* — the earlier `-NoProfile` attempts failed to find `uv`.
+  Ran the gate directly through `.venv\Scripts\python.exe -m {pytest,pyright,ruff}`,
+  which is the identical interpreter + deps `uv run` resolves to.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `.venv\Scripts\python.exe -m pytest tests/unit/test_litellm_message_mapping.py -v` | **4 passed** |
+| Full suite | `.venv\Scripts\python.exe -m pytest -q` | **264 passed, 2 skipped** (env-gated integration lanes) |
+| Lint | `… -m ruff check tests/unit/test_litellm_message_mapping.py` | All checks passed |
+| Format | `… -m ruff format --check …` | 1 file already formatted |
+| Typecheck | `… -m pyright tests/unit/test_litellm_message_mapping.py` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: Task 3.2 `[x]`. Remaining in major 3: 3.3, 3.4, 3.5, 3.6
+(response-mapping, error-classification, timeout, streaming — files seeded during
+major 2, pending formalisation/strengthening).
+
+---
+
+## 2026-06-10 — Task 3.3 (C4 response-mapping tests for `request()`)
+
+**Scope**: Formalise `test_litellm_response_mapping.py` as the major-3 deliverable
+for clause set 3.3 (Req 10.1): the `litellm.ModelResponse` → `.model_dump()` →
+`build_response` path, finish-reason mapping, empty-choices →
+`UnexpectedModelBehavior`, absent-usage → zeroed `RequestUsage`, tool-call args
+stay a raw JSON string.
+
+**Method (TDD, verify-then-strengthen)**: The 4 cases were authored as major 2's
+RED driver (2.2) and are GREEN against shipped `request()`. Reviewed all 5
+enumerated clauses for coverage (same pattern as 3.1/3.2); 4 were complete, the
+finish-reason clause was the gap.
+
+### Changes
+
+- **Finish-reason strengthening.** The seeded file only exercised `"stop"`
+  (text case) and `"tool_calls"` (tool case) incidentally — the distinctive Req
+  3.2 behaviour (absent / unmapped key → `None`) and 3 of 5 map keys were untested
+  *through the LiteLLM path*. Added a parametrized `test_finish_reason_mapping`
+  covering the full `_FINISH_REASON_MAP` plus three `→ None` branches (absent key,
+  explicit `None`, unrecognised key), driven end-to-end through `request()` →
+  `.model_dump()` → `build_response` so transport parity with the SDK
+  normalisation is pinned, not just the shared helper in isolation.
+- No production change. The other 4 clauses (text round-trip via a real
+  `litellm.ModelResponse`, Granite double-encoded args surfaced raw, absent-usage
+  zeroed, choiceless `UnexpectedModelBehavior` unwrapped) were already complete.
+
+### Decisions / learnings
+
+- **An `_ABSENT` sentinel separates two `None`-yielding branches.** `build_response`
+  reaches `None` via *both* a missing `finish_reason` key (`choice.get` → `None`)
+  and a falsy/unmapped value (`... if finish_reason_key else None` /
+  `_FINISH_REASON_MAP.get(...)`). A sentinel that omits the key entirely vs. an
+  explicit `None` param exercises both, so neither branch can regress unnoticed.
+- **Coverage already existed on the helper; the value is the *transport* path.**
+  `test_openai_mapping_shared.py` (1.5) tests finish-reason on `build_response`
+  directly; 3.3's parametrized case re-pins it through `request()` so a
+  normalisation drift in the LiteLLM call site (not just the shared helper) would
+  be caught — matching the delegation-proof rationale from 3.2.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `.venv\Scripts\python.exe -m pytest tests/unit/test_litellm_response_mapping.py -v` | **12 passed** (4 seeded + 8 finish-reason params) |
+| Full suite | `.venv\Scripts\python.exe -m pytest -q` | **272 passed, 2 skipped** (was 264+2; +8 params; env-gated integration lanes skipped) |
+| Lint | `… -m ruff check tests/unit/test_litellm_response_mapping.py` | All checks passed |
+| Format | `… -m ruff format --check …` | 1 file already formatted |
+| Typecheck | `… -m pyright tests/unit/test_litellm_response_mapping.py` | 0 errors, 0 warnings, 0 informations |
+
+**Status**: Task 3.3 `[x]`. Remaining in major 3: 3.4 (error-classification —
+`FallbackModel` recovery), 3.5 (timeout-passthrough), 3.6 (streaming-deferral) —
+files seeded during major 2, pending formalisation/strengthening.
+
+---
+
+## 2026-06-10 — Task 3.4 (C4 error-classification tests for `request()`)
+
+**Scope**: Formalise `test_litellm_error_classification.py` as the major-3
+deliverable for clause set 3.4 (Req 10.1, 10.2): broad-except wraps all
+`acompletion` exceptions as `ModelAPIError`, chaining preserved, **`FallbackModel`
+recovers**, and mapping errors are NOT wrapped.
+
+**Method (TDD, verify-then-strengthen)**: The file was seeded as major 2's
+RED driver (2.3) with 5 cases. Reviewing against the task's 4 clauses, 3 were
+GREEN; the `FallbackModel`-recovery clause (Req 10.2) was the gap flagged in
+major 2's Implementation Notes. RED for the new test = the assertion didn't exist.
+
+### Changes
+
+- **Added `test_litellm_failure_recovered_by_fallback_model`** (Req 10.2). The
+  unit-level tests prove `acompletion` failures *become* `ModelAPIError`; this
+  proves that classification is *actionable* end-to-end. A genuine `LiteLLMModel`
+  (not a `FunctionModel` double) with `acompletion` monkeypatched to raise is
+  seated first in `FallbackModel(litellm_fail, recovering)` and driven via
+  `Agent.run_sync`; the recovering member's output being returned *is* the proof —
+  the failure became a `ModelAPIError`, hit the default
+  `fallback_on=(ModelAPIError,)`, and never escaped the chain.
+- Added a local `_recovering_function_model` helper (parametric `text`), kept out
+  of `tests.support.model_fakes` for the same single-caller reasoning recorded in
+  `test_watsonx_fallback_integration.py` / `test_fallback_failover.py`.
+- No production change. The other 3 clauses (broad-except wraps every exception
+  type, `__cause__` chaining + model-name stamping, post-call
+  `UnexpectedModelBehavior` unwrapped — Req 4.3) were already GREEN.
+
+### Decisions / learnings
+
+- **The recovery test uses a real `LiteLLMModel`, not a double.** Mirroring
+  `test_watsonx_fallback_integration.py`'s shape, but the failing member is the
+  actual transport (with only `acompletion` mocked) — so the test exercises
+  *this transport's own* broad-except → `ModelAPIError` wrapping, closing the
+  unit→integration loop. A `FunctionModel` raising `ModelAPIError` would only
+  re-test `FallbackModel`, not the litellm wrapping under test.
+- **`run_sync` over an `async` request call.** The wrapping unit tests await
+  `request()` directly; the recovery test drives through `Agent.run_sync` because
+  `FallbackModel`'s recovery semantics live in the agent run loop, not in a bare
+  `request()`. Both halves (mechanism + actionability) are now pinned.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `mise run test -- tests/unit/test_litellm_error_classification.py -q` | **9 passed** (4 seeded + 5 params + 1 recovery; net +1 file-level vs seed) |
+| Full suite | `mise run test` (`uv run pytest`) | **273 passed, 2 skipped** (was 272+2; +1 recovery test; env-gated integration lanes skipped) |
+| Lint | `mise run lint` (`uv run ruff check .`) | All checks passed |
+| Typecheck | `mise run typecheck` (`uv run pyright`) | 0 errors, 0 warnings, 0 informations |
+
+**Status**: Task 3.4 `[x]`. Remaining in major 3: 3.5 (timeout-passthrough),
+3.6 (streaming-deferral) — files seeded during major 2, pending
+formalisation/strengthening.
+
+---
+
+## 2026-06-10 — Task 3.5 (C4 timeout-passthrough tests for `request()`)
+
+**Task 3.5 (P)** — Timeout-passthrough tests: both connect and read timeouts reach
+`acompletion` as `httpx.Timeout(read, connect=connect)` (Req 10.1, supporting 5.1).
+
+**Method (TDD)**: New file `tests/unit/test_litellm_timeout_config.py` (it did not
+exist — RED = no assertion pinned the timeout shaping). The production wiring landed
+in Task 2.2 (`litellm.py:235` builds `httpx.Timeout(self._timeout_read,
+connect=self._timeout_connect)` and passes it as `timeout=`), so these tests pin
+existing behaviour against regression rather than driving new code — the proper
+shape for a `(P)` test-only sub-task that depends on a completed major 2.
+
+### Changes
+
+- **`test_timeout_passed_as_httpx_timeout_instance`** — the `timeout` kwarg reaches
+  `acompletion` as a structured `httpx.Timeout`, asserting both
+  `isinstance(httpx.Timeout)` and `not isinstance(float)`. A bare single float would
+  silently collapse the connect and read phases into one budget, dropping the
+  distinct connect timeout; this guard fails loud on that regression.
+- **`test_both_connect_and_read_phases_reach_acompletion`** (parametrized, 3 cases)
+  — `.connect`/`.read` map verbatim from construction values. Distinct custom
+  (7/300) catches a single-float collapse and a connect/read swap; the project
+  defaults (30/120) and an equal-phase case (15/15) guard the boundaries.
+- **`test_timeout_shape_matches_sdk_read_seeds_overall_default`** — parity pin: the
+  read value seeds `write`/`pool` (the positional-default semantics of
+  `httpx.Timeout(read, connect=connect)`), proving the LiteLLM path matches
+  `WatsonxSDKModel._build_client`'s shaping rather than an equivalent
+  `Timeout(connect=…, read=…)` spelling that would leave write/pool unset.
+- No production change. Reused the sibling files' `_capturing` / `_text_response`
+  kwarg-capture pattern (a real `litellm.ModelResponse` success so `request()`'s
+  post-call `.model_dump()` → `build_response` path runs unchanged).
+
+### Decisions / learnings
+
+- **Why pin write/pool, not just connect/read.** Req 5.1's literal wording is "both
+  phases reach `acompletion`", which `.connect`/`.read` alone satisfy. The
+  write/pool assertion is added deliberately: it's the only thing that distinguishes
+  the *exact documented shape* (`httpx.Timeout(read, connect=connect)`, where read
+  is the positional default) from a functionally-similar but non-parity spelling.
+  Both transports must construct timeouts identically (research.md / SDK
+  `_build_client`), so the shape — not just the two values — is the contract.
+- **`asyncio_mode = "auto"`** — async tests need no decorator (matches all sibling
+  `test_litellm_*` files).
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_litellm_timeout_config.py -v` | **5 passed** (1 + 3 params + 1) |
+| Full suite | `uv run pytest -q` | **278 passed, 2 skipped** (was 273+2 at 3.4; +5 timeout cases; env-gated integration lanes skipped) |
+| Lint | `uv run ruff check` (new file) | All checks passed |
+| Format | `uv run ruff format --check` (new file) | 1 file already formatted |
+| Typecheck | `uv run pyright` (new file) | 0 errors, 0 warnings, 0 informations |
+
+> Note: `uv`/`mise` resolve only in a profile-loaded PowerShell on this host;
+> commands were run via `powershell.exe -Command "uv run …"`. The `--cov` ratchet
+> remains owned by Task 7.1 (default `pytest` is the clean lane — see Task 1
+> Implementation Notes re: the beartype-claw `--cov` circular import).
+
+**Status**: Task 3.5 `[x]`. Remaining in major 3: 3.6 (streaming-deferral) —
+file seeded during major 2 (`test_litellm_streaming_deferred.py`, 2 cases),
+pending formalisation/strengthening.
+
+---
+
+## 2026-06-10 — Task 3.6 (C4 streaming-deferral tests) — Major 3 complete
+
+**Scope**: Formalise/strengthen `test_litellm_streaming_deferred.py` so it fully
+covers the task's four enumerated clauses. The `request_stream` override (Task
+2.4) was already complete; this is a test-only `(P)` task, so the behaviour was
+driven RED-first during major 2 — the work here is closing the one clause the
+seeded cases covered only implicitly.
+
+**Method (TDD, strengthening)**: Captured GREEN baseline (2 cases pass) against
+the existing 2.4 override, then added a third case for the uncovered clause and
+re-ran. No production change.
+
+### Changes
+
+- The 2 seeded cases covered three clauses: raises `NotImplementedError`,
+  greppable `"streaming support deferred"` message, model route named in the
+  message. The fourth — **"before any yield"** — was only implicit (a
+  `pragma: no cover` on the `async with` body).
+- Added `test_request_stream_raises_before_any_yield_without_downgrading`,
+  pinning it two ways:
+  - **(a) Raise precedes the yield.** A `body_ran` sentinel asserted `False`
+    proves `@asynccontextmanager` raises on `__aenter__` (the generator raises
+    before reaching its `yield`), not from inside the managed block.
+  - **(b) No silent downgrade (Req 8.2).** `litellm.acompletion` monkeypatched
+    to detonate (`AssertionError`); reaching it fails the test, proving the
+    override refuses streaming outright rather than quietly servicing it via the
+    non-streaming transport path — the regression a future "just call
+    `request()`" shortcut would introduce.
+
+### Decisions / learnings
+
+- **Detonating `acompletion` is the load-bearing guard.** `request_stream` does
+  not even import `litellm` today (it raises first), so the monkeypatch can only
+  ever be hit by a future regression — which is exactly the point: it converts
+  "never silently downgrades" (Req 8.2) from prose into an enforced invariant.
+- **Function-local `import litellm`** in the test mirrors the production
+  transport's own function-local import (no `PLC0415` lane enabled), keeping the
+  detonation target consistent with how `request()` resolves the module.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Task tests | `uv run pytest tests/unit/test_litellm_streaming_deferred.py -q` | **3 passed** (2 seeded + 1 strengthening) |
+| Regression | `uv run pytest tests/unit -k litellm -q` | **54 passed, 225 deselected** |
+| Lint | `uv run ruff check` (changed file) | All checks passed |
+| Format | `uv run ruff format --check` (changed file) | 1 file already formatted |
+| Typecheck | `uv run pyright` (changed file) | 0 errors, 0 warnings, 0 informations |
+
+> Commands run via `pwsh -Command "uv run …"` (uv/mise resolve only in a
+> profile-loaded PowerShell on this host). Full-suite `--cov` ratchet remains
+> owned by Task 7.1.
+
+**Status**: Task 3.6 `[x]`. **Major 3 complete** (3.1–3.6 all `[x]`). Next wave:
+major 4 (rewrite watsonx `_build_litellm` wrapper) — already unblocked (depends
+only on major 2).

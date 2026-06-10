@@ -17,14 +17,19 @@ from typing import TYPE_CHECKING, Any
 
 import litellm
 import pytest
+from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import ModelMessage, ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models import ModelRequestParameters
+from pydantic_ai.models.fallback import FallbackModel
+from pydantic_ai.models.function import FunctionModel
 
 from pydantic_ai_sandbox.llm.providers.litellm import LiteLLMModel
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from pydantic_ai.models.function import AgentInfo
 
 _ROUTE = "watsonx/dummy-watsonx-model"
 
@@ -127,3 +132,55 @@ async def test_post_call_mapping_error_not_wrapped(
 
     with pytest.raises(UnexpectedModelBehavior):
         await _model().request(messages, None, ModelRequestParameters())
+
+
+def _recovering_function_model(model_name: str, text: str) -> FunctionModel:
+    """A success fake returning a single ``TextPart`` — the recovering chain member.
+
+    Kept local (not promoted to ``tests.support.model_fakes``) for the same reason
+    ``tests/unit/test_watsonx_fallback_integration.py`` records: no other test needs
+    the parametric ``text`` knob, so promoting it would widen the shared support
+    surface for a single caller.
+    """
+
+    def _respond(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[TextPart(text)])
+
+    return FunctionModel(_respond, model_name=model_name)
+
+
+def test_litellm_failure_recovered_by_fallback_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failing ``LiteLLMModel`` is recovered by ``FallbackModel`` end-to-end (Req 10.2).
+
+    This closes the loop the unit-level wrapping tests above only assert one half
+    of: they prove ``acompletion`` failures become ``ModelAPIError``; this proves
+    that classification is *actionable* — a real :class:`LiteLLMModel` (with
+    ``acompletion`` monkeypatched to raise) seated first in a
+    :class:`FallbackModel` yields control to the next member, whose answer is
+    returned. ``FallbackModel``'s default ``fallback_on`` is ``(ModelAPIError,)``
+    and it tries each member exactly once (no retry loop), so the recovering
+    member answering *is* the proof: the LiteLLM failure never escapes the chain.
+
+    Mirrors the failover shape of
+    ``tests/unit/test_watsonx_fallback_integration.py`` but with a genuine
+    ``LiteLLMModel`` as the failing member (not a ``FunctionModel`` double), so the
+    transport's own broad-except → ``ModelAPIError`` wrapping is what is exercised.
+    Hermetic: ``acompletion`` is mocked, so no request leaves the process.
+    """
+    monkeypatch.setattr(
+        litellm,
+        "acompletion",
+        _raising(RuntimeError("backend exploded")),
+    )
+    litellm_fail = _model()
+    recovering = _recovering_function_model(
+        model_name="ollama",
+        text="answered after litellm failed",
+    )
+    agent = Agent(model=FallbackModel(litellm_fail, recovering))
+
+    result = agent.run_sync("trigger litellm failover")
+
+    assert result.output == "answered after litellm failed"

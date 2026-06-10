@@ -117,11 +117,13 @@ def test_profile_keeps_json_schema_output_falsy() -> None:
 async def test_response_provider_name_matches_system(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The built ``ModelResponse.provider_name`` equals ``system`` (Req 1.4 parity).
+    """The built ``ModelResponse`` identity fields match ``system`` / route (Req 1.4 / 10.6 parity).
 
     The same route-derived ``system`` value passed to ``build_response`` must
     surface on the response, so ``gen_ai.system`` and the response provider agree
-    and match the SDK path for the watsonx route.
+    and match the SDK path for the watsonx route. The ``model_name`` (route) is
+    likewise stamped, so ``gen_ai.request.model`` agrees too — together these
+    prove full observability parity, not just the provider segment.
     """
     fake: Callable[..., Any] = _returning(_text_completion())
     monkeypatch.setattr(litellm, "acompletion", fake)
@@ -132,6 +134,7 @@ async def test_response_provider_name_matches_system(
 
     assert isinstance(result, ModelResponse)
     assert result.provider_name == model.system == "watsonx"
+    assert result.model_name == model.model_name == _WATSONX_ROUTE
 
 
 def _returning(response: Any) -> Any:

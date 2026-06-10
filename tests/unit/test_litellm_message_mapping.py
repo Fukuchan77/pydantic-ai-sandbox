@@ -17,6 +17,14 @@ from pydantic_ai.messages import ImageUrl, ModelMessage, ModelRequest, UserPromp
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.tools import ToolDefinition
 
+# The shared mapping helpers ``request()`` is required to delegate to (Req 11):
+# asserting ``acompletion`` receives exactly their output proves the single-
+# implementation reuse, not merely an equivalent inline shape. The scoped
+# suppressions acknowledge the cross-module underscore hop (tech.md convention).
+from pydantic_ai_sandbox.llm._openai_mapping import (
+    _map_messages,  # pyright: ignore[reportPrivateUsage]
+    _map_tools,  # pyright: ignore[reportPrivateUsage]
+)
 from pydantic_ai_sandbox.llm.providers.litellm import LiteLLMModel
 
 if TYPE_CHECKING:
@@ -67,6 +75,9 @@ async def test_request_maps_messages_via_openai_mapping(
     await _model().request(messages, None, ModelRequestParameters())
 
     assert captured["messages"] == [{"role": "user", "content": "hello"}]
+    # Delegation proof (Req 11): the payload is exactly the shared helper's output,
+    # not an equivalent inline mapping that could later drift from the SDK path.
+    assert captured["messages"] == _map_messages(messages)
     assert captured["model"] == _ROUTE
 
 
@@ -99,6 +110,9 @@ async def test_request_maps_tools_via_openai_mapping(
             },
         },
     ]
+    # Delegation proof (Req 11): the advertised tools are exactly the shared
+    # helper's output, pinning single-implementation reuse with the SDK path.
+    assert captured["tools"] == _map_tools(params)
 
 
 async def test_request_passes_none_tools_when_no_definitions(

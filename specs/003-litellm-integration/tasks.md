@@ -135,35 +135,103 @@ _Boundary:_ `tests/unit/test_litellm_construction.py`, `tests/unit/test_litellm_
 _Depends:_ 2
 _Requirements:_ 10.1, 10.2, 10.5, 10.6
 
-- [ ] 3.1 (P) Construction + observability/output-mode parity tests (hermetic, no network): I/O-free `__init__`; `model_name` returns the configured route; `system` resolves to the route provider segment — `"watsonx"` for a `watsonx/<id>` route and `"litellm"` for a prefix-less route; the `ModelResponse` built from a mocked `acompletion` carries `provider_name` equal to that same `system` value (parity with the SDK path, Req 1.4); and the model's `profile` does not report `supports_json_schema_output` truthy for the watsonx route (no forced `NativeOutput`/`response_format`, Req 1.5).
+- [x] 3.1 (P) Construction + observability/output-mode parity tests (hermetic, no network): I/O-free `__init__`; `model_name` returns the configured route; `system` resolves to the route provider segment — `"watsonx"` for a `watsonx/<id>` route and `"litellm"` for a prefix-less route; the `ModelResponse` built from a mocked `acompletion` carries `provider_name` equal to that same `system` value (parity with the SDK path, Req 1.4); and the model's `profile` does not report `supports_json_schema_output` truthy for the watsonx route (no forced `NativeOutput`/`response_format`, Req 1.5).
   _Boundary:_ `tests/unit/test_litellm_construction.py`
   _Depends:_ 2
   _Requirements:_ 10.1, 10.6
-- [ ] 3.2 (P) Message/tool mapping tests for `request()`: messages mapped via `_map_messages`, tools via `_map_tools`, and an unsupported part raises `NotImplementedError`.
+- [x] 3.2 (P) Message/tool mapping tests for `request()`: messages mapped via `_map_messages`, tools via `_map_tools`, and an unsupported part raises `NotImplementedError`.
   _Boundary:_ `tests/unit/test_litellm_message_mapping.py`
   _Depends:_ 2
   _Requirements:_ 10.1
-- [ ] 3.3 (P) Response mapping tests with mocked `acompletion`: the `litellm.ModelResponse` → `.model_dump()` → `build_response` path, finish-reason mapping, empty choices raise `UnexpectedModelBehavior`, absent usage yields zeroed `RequestUsage`, and tool-call `arguments` stay a raw JSON string.
+- [x] 3.3 (P) Response mapping tests with mocked `acompletion`: the `litellm.ModelResponse` → `.model_dump()` → `build_response` path, finish-reason mapping, empty choices raise `UnexpectedModelBehavior`, absent usage yields zeroed `RequestUsage`, and tool-call `arguments` stay a raw JSON string.
   _Boundary:_ `tests/unit/test_litellm_response_mapping.py`
   _Depends:_ 2
   _Requirements:_ 10.1
-- [ ] 3.4 (P) Error-classification tests: broad-except wraps all `acompletion` exceptions as `ModelAPIError`, chaining is preserved, `FallbackModel` recovers, and mapping errors are NOT wrapped.
+- [x] 3.4 (P) Error-classification tests: broad-except wraps all `acompletion` exceptions as `ModelAPIError`, chaining is preserved, `FallbackModel` recovers, and mapping errors are NOT wrapped.
   _Boundary:_ `tests/unit/test_litellm_error_classification.py`
   _Depends:_ 2
   _Requirements:_ 10.1, 10.2
-- [ ] 3.5 (P) Timeout-passthrough tests: both connect and read timeouts reach `acompletion` as `httpx.Timeout(read, connect=connect)`.
+- [x] 3.5 (P) Timeout-passthrough tests: both connect and read timeouts reach `acompletion` as `httpx.Timeout(read, connect=connect)`.
   _Boundary:_ `tests/unit/test_litellm_timeout_config.py`
   _Depends:_ 2
   _Requirements:_ 10.1
-- [ ] 3.6 (P) Streaming-deferral tests: `request_stream` raises `NotImplementedError` with the greppable message and model name, before any yield.
+- [x] 3.6 (P) Streaming-deferral tests: `request_stream` raises `NotImplementedError` with the greppable message and model name, before any yield.
   _Boundary:_ `tests/unit/test_litellm_streaming_deferred.py`
   _Depends:_ 2
   _Requirements:_ 10.5
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **3.1 done.** The 6 cases were already seeded as major 2's RED driver and pass
+  GREEN. Reviewing against the task's 5 enumerated clauses, the parity case
+  (clause 4) asserted only `provider_name` stamping; it was strengthened with a
+  `result.model_name == route` assertion so the test proves **both** observability
+  span identities (`gen_ai.system` *and* `gen_ai.request.model`) match the SDK
+  path, fully covering Req 1.4 / 10.6 parity rather than the provider segment
+  alone. All other clauses (I/O-free `__init__` via detonated httpx send hooks,
+  `model_name` route, `system` watsonx/litellm derivation, `profile`
+  `supports_json_schema_output` falsy) were already complete.
+- **3.2 done.** The 4 cases (messages-via-`_map_messages`, tools-via-`_map_tools`,
+  `None`-tools when no definitions, multimodal part → `NotImplementedError` with
+  `acompletion` detonated) were seeded as major 2's RED driver and pass GREEN.
+  Strengthened the two mapping cases the same way 3.1's parity case was: alongside
+  the literal-shape assertions, added `captured["messages"] == _map_messages(...)`
+  / `captured["tools"] == _map_tools(...)` equivalence so the test proves
+  `request()` **delegates to** the shared helpers (Req 11 single-implementation
+  reuse, no inline drift from the SDK path) rather than merely producing an
+  equivalent shape. The unsupported-part case asserts the raise happens *before*
+  `acompletion` (mapping fails loud, unwrapped — Req 4.3), via an `acompletion`
+  stub that raises `AssertionError` if reached.
+- **3.3 done.** The 4 seeded cases (text round-trip through a real
+  `litellm.ModelResponse` → `.model_dump()` → `build_response`; Granite
+  double-encoded tool-args surfaced raw — Req 2.4; absent-usage → zeroed
+  `RequestUsage`; choiceless → `UnexpectedModelBehavior` unwrapped) already cover
+  4 of the task's 5 clauses GREEN. **Strengthened the finish-reason clause**, the
+  one gap: the seeded file only exercised `"stop"`/`"tool_calls"` incidentally.
+  Added a parametrized `test_finish_reason_mapping` covering the full
+  `_FINISH_REASON_MAP` (`stop`, `length`, `tool_calls`→`tool_call`,
+  `content_filter`, `function_call`→`tool_call`) **plus the absent / explicit-`None`
+  / unmapped key → `None` branches** (Req 3.2) — exercised *through* the LiteLLM
+  `request()` path, not the shared helper in isolation, so transport parity with
+  the SDK normalisation is pinned. An `_ABSENT` sentinel distinguishes a missing
+  `finish_reason` key from an explicit `None` (different `build_response` branches).
+- **3.4 done.** The file already covered 3 of the task's 4 clauses GREEN
+  (broad-except wraps every exception *type* → `ModelAPIError`, `__cause__`
+  chaining preserved + model-name stamped, and a post-call choiceless
+  `UnexpectedModelBehavior` surfaced **unwrapped** — Req 4.3). **Added the missing
+  fourth clause, the `FallbackModel`-recovery assertion** (Req 10.2) — the half the
+  unit-level wrapping tests can't prove: that the classification is *actionable*. A
+  genuine `LiteLLMModel` (not a `FunctionModel` double) with `acompletion`
+  monkeypatched to raise is seated first in `FallbackModel(litellm_fail,
+  recovering)` and driven via `Agent.run_sync`; the recovering member answering
+  *is* the proof — the LiteLLM failure became a `ModelAPIError`, hit
+  `FallbackModel`'s default `fallback_on=(ModelAPIError,)`, and never escaped the
+  chain. Mirrors `test_watsonx_fallback_integration.py`'s failover shape but
+  exercises the transport's **own** broad-except wrapping rather than a double's,
+  closing the unit→integration loop hermetically (`acompletion` mocked, no network).
+- **3.5 done.** New `test_litellm_timeout_config.py` (5 cases) pins that both
+  phases reach `acompletion` shaped as `httpx.Timeout(read, connect=connect)`.
+  Beyond the literal `.connect`/`.read` mapping it adds two regression guards the
+  bare Req 5.1 wording doesn't force: (a) an `isinstance(httpx.Timeout)` +
+  `not isinstance(float)` check so a single-float passthrough — which would
+  silently collapse the distinct connect budget — fails loud; (b) a parity pin
+  that `read` seeds `write`/`pool` (the positional-default semantics of
+  `httpx.Timeout(read, connect=connect)`), proving the LiteLLM path matches the
+  SDK transport's `_build_client` shaping byte-for-byte rather than an equivalent
+  `Timeout(connect=…, read=…)` spelling that leaves write/pool unset. Distinct
+  connect/read values (7/300) plus a default (30/120) and equal-phase (15/15) case
+  guard swap + collapse + boundaries. GREEN against the existing 2.2 wiring.
+- **3.6 done. Major 3 complete (3.1–3.6 all `[x]`).** The 2 cases seeded by 2.4
+  covered three of the task's four clauses (raises `NotImplementedError`, greppable
+  `"streaming support deferred"` message, model route named) but only *implicitly*
+  covered the fourth — **"before any yield"** — via `pragma: no cover` on the
+  `async with` body. Added a third case that pins it explicitly two ways: (a) a
+  `body_ran` sentinel asserted `False`, proving `@asynccontextmanager` raises on
+  `__aenter__` (the generator raises before reaching its `yield`) rather than from
+  inside the managed block; (b) `litellm.acompletion` monkeypatched to detonate,
+  proving the override refuses streaming outright and never silently downgrades to
+  the non-streaming transport call (Req 8.2) — the regression a future "just call
+  request()" shortcut would introduce. GREEN against the existing 2.4 override.
 
 ---
 
