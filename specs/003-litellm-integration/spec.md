@@ -302,11 +302,14 @@ into a reusable module to avoid duplication.
   ratchet (`fail_under`).
 - **Hermetic default**: The standard `pytest` run SHALL make no network calls;
   live exercise is opt-in behind `RUN_INTEGRATION_WATSONX=1`.
-- **Observability**: The LiteLLM path SHALL emit the same span attributes as the
-  SDK path (`gen_ai.system`, `gen_ai.request.model`, `error.class`). For the
-  watsonx route this means `gen_ai.system` SHALL resolve to `"watsonx"` (via the
-  route-segment derivation in Req 1.4), not `"litellm"`, so an operator filtering
-  on `gen_ai.system="watsonx"` observes both transports identically.
+- **Observability**: The LiteLLM path SHALL emit the same `gen_ai.system` and
+  `error.class` span attributes as the SDK path. For the watsonx route this means
+  `gen_ai.system` SHALL resolve to `"watsonx"` (via the route-segment derivation
+  in Req 1.4), not `"litellm"`, so an operator filtering on
+  `gen_ai.system="watsonx"` observes both transports identically.
+  `gen_ai.request.model` differs intentionally by transport per Req 1.2/1.4: the
+  SDK path emits the bare `<model_id>` while the LiteLLM path emits the route form
+  `watsonx/<model_id>` (the `model_name` is the LiteLLM route string by design).
 - **Security**: No credentials in logs; `litellm` is an import-guarded optional
   extra; the security lane (gitleaks, pip-audit, ruff `S`) SHALL stay green.
 
