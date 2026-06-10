@@ -25,7 +25,7 @@ Two lanes live here:
    the ``search_kb`` tool round-trip (the path through which Granite's
    double-encoded tool-call arguments are surfaced, Req 2.4) — identically
    for each transport.
-2. :func:`test_litellm_lane_parity_env_routing_and_single_upstream_attempt`
+2. :func:`test_litellm_lane_parity_env_routing_and_observability`
    — the **litellm-only** lane. It drives the agent directly with an
    in-memory span exporter so it can assert the contracts a hermetic test
    cannot reach for the live transport (Task 6 bullets):
@@ -37,14 +37,26 @@ Two lanes live here:
    * **observability parity** — ``gen_ai.system == "watsonx"`` (matching
      the SDK lane, Req 1.4 parity) and ``gen_ai.request.model ==
      "watsonx/<model_id>"`` (the LiteLLM route) on the ``chat`` span.
-   * **``num_retries=0`` honored, not merely passed** (ADR-2 / Req 4.2) —
-     ``num_retries`` rides ``acompletion``'s ``**kwargs`` and could be
-     silently dropped, leaving LiteLLM's internal retry loop as a second
-     resilience layer behind ``FallbackModel``'s. A hermetic test can only
-     prove it is *passed*; only the live lane can observe that it is
-     *respected*. The proof: instrument the underlying httpx client and
-     assert **one upstream POST to the inference host per ``chat`` span**
-     (one ``acompletion`` attempt per model request, no retry inflation).
+   ``num_retries=0`` honoring is **deliberately not asserted in this lane**
+   (Task 7.4 live finding, see ``do.md``). Two independent reasons make a
+   happy-path upstream-POST count unfit for the job:
+
+   1. **The inference call is invisible to ``instrument_httpx``.** LiteLLM
+      issues the watsonx chat completion over its own (aiohttp) transport;
+      only the auxiliary IAM-token POST rides the ``httpx`` client that
+      ``instrument_httpx`` patches. So the inference attempt never surfaces
+      as an httpx span — the count comes back ``0``, not ``1``.
+   2. **A successful request cannot reveal a retry budget.** Retries fire
+      only on a *retryable failure*; on the happy path there is exactly one
+      attempt whether ``num_retries`` is ``0`` or ``N``. A success-path count
+      therefore cannot distinguish a honored ``num_retries=0`` from a dropped
+      one.
+
+   ``num_retries=0`` is instead pinned hermetically by the kwarg-passthrough
+   unit test (``acompletion`` receives ``num_retries=0``). Genuinely proving
+   *suppression* needs a forced-failure lane — inject a retryable error and
+   assert exactly one LiteLLM attempt via a LiteLLM callback (transport-
+   agnostic) — which is deferred to future work.
 
 Gating contract (Req 10.1, plan.md AD-5 mirror):
 
@@ -79,7 +91,6 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
 
 import logfire
 import pytest
@@ -231,10 +242,9 @@ def captured_spans() -> Iterator[TestExporter]:
     Uses the *bare* :func:`logfire.instrument_pydantic_ai` /
     :func:`logfire.instrument_httpx` (no ``InstrumentationSettings``) — the same
     calls the production ``configure_observability`` makes — so the captured
-    span surface matches what ships. ``instrument_httpx`` is load-bearing for
-    the ``num_retries=0`` assertion: it patches the httpx client LiteLLM uses
-    under the hood, so each upstream attempt to the inference host becomes a
-    span we can count.
+    span surface matches what ships and the ``chat`` span identity attributes
+    (``gen_ai.system`` / ``gen_ai.request.model``) can be asserted against the
+    SDK lane.
     """
     exporter = TestExporter()
     logfire.configure(
@@ -261,36 +271,11 @@ def _chat_spans(exporter: TestExporter) -> list[dict[str, Any]]:
     return [s for s in spans if s.get("attributes", {}).get("gen_ai.operation.name") == "chat"]
 
 
-def _inference_post_count(exporter: TestExporter, inference_host: str) -> int:
-    """Count upstream HTTP POST spans whose target is the watsonx inference host.
-
-    Counts only POSTs to ``inference_host`` (the host of ``WATSONX_URL``) so the
-    watsonx IAM token fetch — a POST to a *different* host
-    (``iam.cloud.ibm.com``) — is excluded; only the chat/generation attempts are
-    counted. Tolerant of the httpx OTel attribute-key churn: reads the new
-    ``url.full`` / ``server.address`` keys and falls back to the legacy
-    ``http.url`` / ``net.peer.name`` so the count survives an
-    ``opentelemetry-instrumentation-httpx`` version bump.
-    """
-    spans = exporter.exported_spans_as_dict(include_resources=False)
-    count = 0
-    for span in spans:
-        attrs = span.get("attributes", {})
-        method = attrs.get("http.request.method") or attrs.get("http.method")
-        if method != "POST":
-            continue
-        target = str(attrs.get("url.full", "") or attrs.get("http.url", ""))
-        server = str(attrs.get("server.address", "") or attrs.get("net.peer.name", ""))
-        if inference_host and (inference_host in target or inference_host == server):
-            count += 1
-    return count
-
-
-def test_litellm_lane_parity_env_routing_and_single_upstream_attempt(
+def test_litellm_lane_parity_env_routing_and_observability(
     monkeypatch: pytest.MonkeyPatch,
     captured_spans: TestExporter,
 ) -> None:
-    """The litellm transport: env routing, observability parity, no internal retry (Task 6).
+    """The litellm transport: env routing + observability parity (Task 6 / 7.4).
 
     Drives the agent **directly** (not via the FastAPI route) so the in-memory
     span exporter wired by :func:`captured_spans` is not clobbered by the app's
@@ -311,12 +296,12 @@ def test_litellm_lane_parity_env_routing_and_single_upstream_attempt(
       ``gen_ai.system == "watsonx"`` (the SAME value the SDK lane stamps — the
       route-derived provider segment, not a hard-coded ``"litellm"``) and
       ``gen_ai.request.model == "watsonx/<model_id>"`` (the LiteLLM route).
-    * **``num_retries=0`` honored (ADR-2 / Req 4.2).** Exactly **one** upstream
-      POST to the inference host **per ``chat`` span** — one ``acompletion``
-      attempt per model request, with no retry inflation. Formulating it as a
-      per-request equality (rather than a flat "== 1") keeps it correct when the
-      tool-calling agent legitimately issues several model requests: a silent
-      LiteLLM retry would push the POST count *above* the chat-span count.
+
+    ``num_retries=0`` honoring is **not** asserted here — see the module
+    docstring for why a happy-path upstream-POST count cannot prove it (LiteLLM's
+    inference call rides an aiohttp transport invisible to ``instrument_httpx``,
+    and a successful request reveals no retry budget). It is pinned hermetically
+    by the kwarg-passthrough unit test; a forced-failure live lane is future work.
     """
     monkeypatch.setenv("WATSONX_TRANSPORT", "litellm")
     get_settings.cache_clear()
@@ -381,18 +366,4 @@ def test_litellm_lane_parity_env_routing_and_single_upstream_attempt(
     assert request_model == f"watsonx/{settings.watsonx_model_id}", (
         f"litellm chat span gen_ai.request.model must be the LiteLLM route "
         f"'watsonx/{settings.watsonx_model_id}'; got {request_model!r}, attrs={chat_attrs}"
-    )
-
-    # num_retries=0 honored (ADR-2 / Req 4.2): one upstream POST to the
-    # inference host per chat span. More POSTs than chat spans means LiteLLM
-    # silently re-attempted — a second resilience layer behind FallbackModel,
-    # which ADR-2 forbids.
-    inference_host = urlsplit(str(settings.watsonx_url)).hostname or ""
-    inference_posts = _inference_post_count(captured_spans, inference_host)
-    assert inference_posts == len(chat_spans), (
-        f"expected exactly one upstream POST to {inference_host!r} per chat span "
-        f"(num_retries=0 honored, ADR-2); got {inference_posts} inference POST(s) "
-        f"for {len(chat_spans)} chat span(s). More POSTs than chat spans indicates "
-        "LiteLLM performed an internal retry; zero indicates instrument_httpx did "
-        "not patch LiteLLM's client (investigate before trusting the result)."
     )
