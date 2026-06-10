@@ -312,8 +312,10 @@ class WatsonxSDKModel(Model):
         ``provider_name="watsonx"``) onto the response so ``gen_ai.request.model``
         and ``gen_ai.system`` satisfy the instrumentation contract. The mapping
         logic — including the no-``choices`` :class:`UnexpectedModelBehavior`
-        guard — now lives in ``_openai_mapping`` and is unchanged from the
-        original in-module method (byte-for-byte behaviour, Req 11.4).
+        guard — now lives in ``_openai_mapping``; the *observable* behaviour is
+        unchanged from the original in-module method (Req 11.4). The only edit is
+        transport-neutral fail-loud wording, since the messages are now shared
+        with the LiteLLM route (tests assert on substrings, so no regression).
 
         Args:
             raw: The dict returned by :meth:`ModelInference.achat`.
