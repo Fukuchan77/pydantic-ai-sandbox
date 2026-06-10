@@ -680,3 +680,56 @@ import-guard, route-prefix, secret-leak and `None`-cred-guard cases). Rewrote
 major 6 (opt-in live `litellm` lane) and major 7 (quality gates: coverage ratchet,
 security lane, integration). Act item carried from major 2 still open: amend the
 literal "carries a scoped `# noqa: BLE001`" wording in tasks 2.3/7.2.
+
+---
+
+## Task 6 — Opt-in live integration lane for the litellm transport (C4)
+
+**Boundary**: `tests/integration/test_watsonx_chat_e2e.py` (single file, test-only).
+**Depends**: 4 (builder rewrite, done). No production code touched — the litellm
+transport (majors 2–4) is already implemented; major 6 is pure test authoring.
+
+### What changed
+
+- **Parametrized the existing `/chat` E2E test over `["sdk", "litellm"]`**,
+  forcing `WATSONX_TRANSPORT` per param so one `RUN_INTEGRATION_WATSONX=1` run
+  exercises both transports end-to-end through the FastAPI route (Task 7.4).
+- **Added `test_litellm_lane_parity_env_routing_and_single_upstream_attempt`** —
+  drives the agent directly (preserving an in-memory `TestExporter`) and asserts
+  the litellm-only contracts: `WATSONX_PROJECT_ID` env routing (ADR-3),
+  `gen_ai.system == "watsonx"` + `gen_ai.request.model == "watsonx/<id>"` parity
+  (Req 1.4/10.6), response transformation, and `num_retries=0` honored.
+
+### Design decisions (trial reasoning)
+
+- **`num_retries=0` proof via per-request POST equality.** The pydantic-ai `chat`
+  span is created once per `request()` regardless of LiteLLM internal retries, so
+  it cannot prove retry-suppression. Counting upstream httpx POSTs (via
+  `instrument_httpx`) to the inference host and asserting
+  `inference_posts == len(chat_spans)` is the robust signal: it holds across
+  multi-turn tool-calling runs and catches both a silent retry (count > spans) and
+  an instrumentation miss (count 0). Filtered to the `WATSONX_URL` host to exclude
+  the IAM token POST.
+- **WATSONX_PROJECT_ID env routing** asserted by `delenv` → build → assert
+  `os.environ` set by the builder — directly exercises the `.env`-loaded-but-not-
+  exported silent-404 class ADR-3 exists to kill.
+
+### Verification gate (evidence)
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Collect + skip | `uv run pytest tests/integration/test_watsonx_chat_e2e.py -v` | **3 skipped** (gate off — hermetic) |
+| Full suite | `uv run pytest` | **277 passed, 4 skipped** |
+| Lint | `uv run ruff check tests/integration/test_watsonx_chat_e2e.py` | All checks passed |
+| Format | `uv run ruff format --check …` | already formatted |
+| Typecheck | `uv run pyright tests/integration/test_watsonx_chat_e2e.py` | 0 errors, 0 warnings |
+
+> The **live** assertions (Req 10.3 — real watsonx round-trip) cannot run in the
+> hermetic gate without operator creds; they are validated under Task 7.4
+> (`[ ]*`, optional) with `RUN_INTEGRATION_WATSONX=1`. The lane is authored and
+> collection-clean; green-against-live is the operator's remaining step.
+
+**Status**: **Major 6 complete.** Remaining: major 7 (7.1 coverage ratchet, 7.2
+pyright/ruff S+BLE lanes, 7.3 security lane, 7.4 optional live integration run).
+Carried act item: amend the literal "carries a scoped `# noqa: BLE001`" wording
+in tasks 2.3/7.2 (re-raising except is BLE-compliant).

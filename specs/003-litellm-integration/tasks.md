@@ -338,8 +338,41 @@ _Requirements:_ 10.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **Major 6 complete.** `test_watsonx_chat_e2e.py` now ships two lanes behind
+  the unchanged `RUN_INTEGRATION_WATSONX=1` gate. (1) The existing single
+  `/chat` E2E test was **parametrized over `["sdk", "litellm"]`**, forcing
+  `WATSONX_TRANSPORT` per param (monkeypatch + `get_settings`/`get_chat_agent`
+  cache-clear) so one opt-in run drives **both** transports through the full
+  FastAPI route — closing Task 7.4's "both transports E2E" with one run rather
+  than two operator invocations. It covers response transformation + the
+  `search_kb` tool round-trip (the Granite double-encode path, Req 2.4) for each.
+- **litellm-only lane drives the agent directly** (not via `/chat`) so an
+  in-memory `TestExporter` is not clobbered by the app's
+  `configure_observability`. It asserts the four contracts only the live
+  transport can prove: (a) **`WATSONX_PROJECT_ID` env routing** — `delenv` before
+  `get_model("watsonx")`, then assert the *builder* wrote it to `os.environ`
+  (ADR-3; monkeypatch restores); (b) **response transformation** — `result.output`
+  is a non-empty `ChatResponse`; (c) **observability parity** — `gen_ai.system ==
+  "watsonx"` (route-derived, not `"litellm"`) and `gen_ai.request.model ==
+  "watsonx/<id>"` on the `chat` span; (d) **`num_retries=0` honored**.
+- **`num_retries=0` formulated as a per-request equality, not "== 1".** A
+  tool-calling agent legitimately issues multiple model requests (decide-tool →
+  post-tool), so the robust signal is **one upstream inference POST per `chat`
+  span**: `instrument_httpx()` captures LiteLLM's underlying httpx attempts, the
+  count is filtered to the `WATSONX_URL` host (excluding the `iam.cloud.ibm.com`
+  token fetch), and `inference_posts == len(chat_spans)` flags a silent retry
+  (count > spans) *and* an instrumentation miss (count 0). This is the one Req
+  4.2/ADR-2 guarantee a hermetic test structurally cannot reach (the kwarg rides
+  `acompletion(**kwargs)`), so the live lane is its only home.
+- **ADR-3 open question stands.** The `os.environ["WATSONX_PROJECT_ID"]` write is
+  retained: this lane *asserts* the builder performs it but does not yet confirm
+  an `acompletion(project_id=...)` kwarg would route equivalently, so 4.3's
+  "prefer the kwarg and drop the env write" remains contingent on an operator's
+  live `RUN_INTEGRATION_WATSONX=1` run (Task 7.4). No production code changed.
+- **Hermetic verification** (the live assertions await Task 7.4 with creds): the
+  module collects as 3 tests, all **skipped** without the gate; `uv run pytest`
+  full suite **277 passed / 4 skipped**; `ruff check`, `ruff format --check`,
+  `pyright` all clean on the file.
 
 ---
 
