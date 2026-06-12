@@ -21,6 +21,7 @@ expected wording.
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, get_args, get_type_hints
 
 import pytest
@@ -29,7 +30,7 @@ from pydantic import ValidationError
 from pydantic_ai_sandbox.config import Settings, get_settings
 
 if TYPE_CHECKING:
-    from tests.conftest import SettingsFactory
+    from tests.conftest import SettingsFactory, WatsonxSettingsFactory
 
 
 # A placeholder model name that is intentionally outside
@@ -213,6 +214,351 @@ def test_secret_field_value_is_recoverable_via_get_secret_value(
     assert settings.logfire_token.get_secret_value() == raw
 
 
+# --------------------------------------------------------------------------- #
+# Task 2 — watsonx configuration & fail-fast validation (Req 2.2/2.4/2.5,      #
+# 3.1/3.2/3.3, 4.1/4.2/4.3, 5.1/5.2/5.3/5.5).                                   #
+#                                                                              #
+# These lock the config-layer contract for the watsonx provider: timeout       #
+# fields + validators, transport normalization/default, URL-format validation, #
+# and the credential gate. Per Pydantic v2 a validator-raised ``ValueError`` is #
+# surfaced to the caller as :class:`pydantic.ValidationError`, so the tests     #
+# assert on that class and inspect the message for the required wording.        #
+# --------------------------------------------------------------------------- #
+
+# Placeholder credentials kept outside FORBIDDEN_MODEL_ID_LITERALS so this file
+# never regresses the hardcoded-model-ID guard.
+DUMMY_WATSONX_URL = "https://us-south.ml.cloud.ibm.com"
+DUMMY_WATSONX_MODEL = "dummy-watsonx-model"
+DUMMY_WATSONX_SECRET = "k-watsonx-test-secret"
+DUMMY_WATSONX_PROJECT = "proj-0000"
+
+
+def _watsonx_creds() -> dict[str, str]:
+    """Return a complete, valid watsonx credential override set."""
+    return {
+        "WATSONX_APIKEY": DUMMY_WATSONX_SECRET,
+        "WATSONX_PROJECT_ID": DUMMY_WATSONX_PROJECT,
+        "WATSONX_URL": DUMMY_WATSONX_URL,
+        "WATSONX_MODEL_ID": DUMMY_WATSONX_MODEL,
+    }
+
+
+# --- 2.1 / 5.1-5.3: timeout fields + defaults + env overrides --------------- #
+
+
+def test_watsonx_timeout_defaults_are_30_and_120(
+    settings_factory: SettingsFactory,
+) -> None:
+    """Unset timeout env → 30s connect / 120s read (Req 5.1, SC-014)."""
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    assert settings.watsonx_timeout_connect == 30
+    assert settings.watsonx_timeout_read == 120
+
+
+def test_watsonx_timeout_env_overrides(
+    settings_factory: SettingsFactory,
+) -> None:
+    """`WATSONX_TIMEOUT_CONNECT` / `_READ` override the defaults (Req 5.2/5.3)."""
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        WATSONX_TIMEOUT_CONNECT="10",
+        WATSONX_TIMEOUT_READ="240",
+    )
+    assert settings.watsonx_timeout_connect == 10
+    assert settings.watsonx_timeout_read == 240
+
+
+# --- 2.5: timeout validators reject non-positive / non-numeric -------------- #
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-5", "abc", "3.5"])
+def test_watsonx_timeout_connect_rejects_invalid(
+    settings_factory: SettingsFactory,
+    bad_value: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            WATSONX_TIMEOUT_CONNECT=bad_value,
+        )
+    assert "WATSONX_TIMEOUT_CONNECT" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-1", "not-a-number"])
+def test_watsonx_timeout_read_rejects_invalid(
+    settings_factory: SettingsFactory,
+    bad_value: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            WATSONX_TIMEOUT_READ=bad_value,
+        )
+    assert "WATSONX_TIMEOUT_READ" in str(exc_info.value)
+
+
+# --- 2.3: transport normalization, default, and valid-value error ----------- #
+
+
+def test_watsonx_transport_defaults_to_sdk(
+    settings_factory: SettingsFactory,
+) -> None:
+    """Unset `WATSONX_TRANSPORT` → `"sdk"` (Req 2.2)."""
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    assert settings.watsonx_transport == "sdk"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("SDK", "sdk"), ("sdk", "sdk"), ("LiteLLM", "litellm"), ("LITELLM", "litellm")],
+)
+def test_watsonx_transport_is_case_insensitive(
+    settings_factory: SettingsFactory,
+    raw: str,
+    expected: str,
+) -> None:
+    """`WATSONX_TRANSPORT` is matched case-insensitively (Req 2.4)."""
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        WATSONX_TRANSPORT=raw,
+    )
+    assert settings.watsonx_transport == expected
+
+
+def test_watsonx_transport_rejects_unknown_value(
+    settings_factory: SettingsFactory,
+) -> None:
+    """Out-of-set transport fails fast and lists the valid values (Req 2.5)."""
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            WATSONX_TRANSPORT="grpc",
+        )
+    msg = str(exc_info.value)
+    assert "sdk" in msg
+    assert "litellm" in msg
+
+
+def test_watsonx_transport_blank_value_defaults_to_sdk(
+    settings_factory: SettingsFactory,
+) -> None:
+    """An empty `WATSONX_TRANSPORT` (`""`) normalises to `"sdk"` (Req 2.2).
+
+    A blank string is a real env-channel value (`WATSONX_TRANSPORT=` in a
+    `.env`), distinct from an unset var: the `mode="before"` validator strips and
+    lower-cases it to `""`, then falls back to the `"sdk"` default rather than
+    failing the `Literal` check.
+    """
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        WATSONX_TRANSPORT="",
+    )
+    assert settings.watsonx_transport == "sdk"
+
+
+def test_watsonx_transport_none_value_defaults_to_sdk(
+    settings_factory: SettingsFactory,
+) -> None:
+    """An explicit `None` for `watsonx_transport` normalises to `"sdk"` (Req 2.2).
+
+    The env channel can only carry strings, so the validator's `value is None`
+    branch is reachable only via a direct init kwarg. Seat valid ollama env via
+    the factory's side effects (it clears `_MANAGED_ENV_KEYS` and sets the ollama
+    vars), then pass `watsonx_transport=None` directly: the `mode="before"`
+    validator must run (returning `"sdk"`) — were it skipped, `None` would fail
+    the non-optional `Literal["sdk", "litellm"]` check instead.
+    """
+    settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    settings = Settings(watsonx_transport=None)  # pyright: ignore[reportArgumentType]
+    assert settings.watsonx_transport == "sdk"
+
+
+def test_watsonx_transport_non_string_value_is_rejected(
+    settings_factory: SettingsFactory,
+) -> None:
+    """A non-string `watsonx_transport` fails fast listing the valid values (Req 2.5).
+
+    Like the `None` branch, a non-string value cannot arrive via the env channel;
+    a direct init kwarg (`123`) drives the validator's `not isinstance(value, str)`
+    guard, which raises the same valid-values `ValueError` as an out-of-set string
+    (wrapped by Pydantic into `ValidationError`).
+    """
+    settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(watsonx_transport=123)  # pyright: ignore[reportArgumentType]
+    msg = str(exc_info.value)
+    assert "sdk" in msg
+    assert "litellm" in msg
+
+
+# --- 2.4: URL format validation (I/O-free) ---------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "good_url",
+    [
+        "https://us-south.ml.cloud.ibm.com",
+        "http://localhost:8080",
+        "https://eu-de.ml.cloud.ibm.com/v1",
+    ],
+)
+def test_watsonx_url_accepts_valid_format(
+    settings_factory: SettingsFactory,
+    good_url: str,
+) -> None:
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        WATSONX_URL=good_url,
+    )
+    assert settings.watsonx_url == good_url
+
+
+@pytest.mark.parametrize(
+    "bad_url",
+    ["not-a-url", "ftp://example.com", "https://", "://nohost", "us-south.ml.cloud.ibm.com"],
+)
+def test_watsonx_url_rejects_invalid_format(
+    settings_factory: SettingsFactory,
+    bad_url: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            WATSONX_URL=bad_url,
+        )
+    assert "WATSONX_URL" in str(exc_info.value)
+
+
+def test_watsonx_url_validation_makes_no_network_call(
+    settings_factory: SettingsFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """URL validation is structural only — never opens a socket (Req 4.1/4.3).
+
+    Patches the stdlib socket constructor to explode on use, then constructs a
+    fully-credentialled watsonx Settings. Construction (incl. URL validation
+    and the credential gate) must complete without touching the network.
+    """
+    import socket
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        msg = "construction must not open a network socket"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(socket, "socket", _boom)
+
+    settings = settings_factory(
+        LLM_PROVIDER="watsonx",
+        **_watsonx_creds(),
+    )
+    assert settings.watsonx_url == DUMMY_WATSONX_URL
+
+
+# --- 2.2 / 3.1-3.3: credential gate (direct + fallback selection) ----------- #
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["WATSONX_APIKEY", "WATSONX_PROJECT_ID", "WATSONX_URL", "WATSONX_MODEL_ID"],
+)
+def test_watsonx_direct_selection_requires_each_credential(
+    settings_factory: SettingsFactory,
+    missing_key: str,
+) -> None:
+    """LLM_PROVIDER=watsonx + one missing cred → ValueError naming it (Req 3.2)."""
+    creds = _watsonx_creds()
+    creds[missing_key] = None  # type: ignore[assignment]  # express "explicitly absent"
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(LLM_PROVIDER="watsonx", **creds)
+    assert missing_key in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["WATSONX_APIKEY", "WATSONX_PROJECT_ID", "WATSONX_URL", "WATSONX_MODEL_ID"],
+)
+def test_watsonx_fallback_membership_requires_each_credential(
+    settings_factory: SettingsFactory,
+    missing_key: str,
+) -> None:
+    """watsonx in FALLBACK_ORDER + missing cred → boot-time ValueError (Req 3.3).
+
+    The gate is intentionally stricter than the Ollama gate: a
+    ``FALLBACK_ORDER=ollama,watsonx`` deployment with partial watsonx creds
+    fails fast at boot rather than at the first failover (plan.md Entity 1).
+    """
+    creds = _watsonx_creds()
+    creds[missing_key] = None  # type: ignore[assignment]
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="fallback",
+            FALLBACK_ORDER="ollama,watsonx",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            **creds,
+        )
+    assert missing_key in str(exc_info.value)
+
+
+def test_watsonx_direct_selection_with_full_creds_constructs(
+    settings_factory: SettingsFactory,
+) -> None:
+    settings = settings_factory(LLM_PROVIDER="watsonx", **_watsonx_creds())
+    assert settings.llm_provider == "watsonx"
+    assert settings.watsonx_project_id == DUMMY_WATSONX_PROJECT
+    assert settings.watsonx_apikey is not None
+    assert settings.watsonx_apikey.get_secret_value() == DUMMY_WATSONX_SECRET
+
+
+def test_watsonx_gate_dormant_when_not_selected(
+    settings_factory: SettingsFactory,
+) -> None:
+    """An ollama deployment with no watsonx creds must still construct.
+
+    The watsonx gate must NOT fire when watsonx is neither the direct provider
+    nor a member of an active fallback chain — otherwise a plain Ollama
+    deployment would be forced to supply watsonx credentials it never uses.
+    """
+    settings = settings_factory(
+        LLM_PROVIDER="ollama",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    assert settings.watsonx_apikey is None
+
+
 def test_get_settings_is_cached(
     monkeypatch: pytest.MonkeyPatch,
     settings_factory: SettingsFactory,  # used for env-clearing side-effect; clear cache below.
@@ -233,3 +579,173 @@ def test_get_settings_is_cached(
         assert first is second
     finally:
         get_settings.cache_clear()
+
+
+# --------------------------------------------------------------------------- #
+# Task 7.8 — credential-gate exhaustive edges (Req 3.2, 3.3 / SC-004).         #
+#                                                                              #
+# Task 2 landed the gate itself and its one-cred-missing naming tests above    #
+# (Req 3.2 — "names the specific variable"). Per the coverage matrix Req       #
+# 3.2/3.3 map to *both* 2.2 and 7.8; this section is 7.8's authoritative home  #
+# for the slices Task 2 left uncovered:                                        #
+#                                                                              #
+#   * Req 3.3 / SC-004 — the boot-time *2-second* fail-fast ceiling. This is   #
+#     the only genuinely net-new contract: Task 2 asserted *which* variable    #
+#     is named, never the *timing* of the failure.                             #
+#   * the all-credentials-missing message shape (the one-at-a-time tests       #
+#     always leave three creds present, so the gate's ``missing:`` list only   #
+#     ever holds a single entry there).                                        #
+#   * gate membership robustness — ``FALLBACK_ORDER`` case/whitespace — and    #
+#     the dormant-under-fallback-without-watsonx False branch.                 #
+#   * the fallback full-creds positive (symmetric to the direct happy path).   #
+#                                                                              #
+# These exercise the *existing* Task 2.2 gate (characterization tests written  #
+# after the source landed), not new source — same posture as Tasks 7.1/7.3-7.5.#
+# --------------------------------------------------------------------------- #
+
+
+# Generous ceiling for SC-004's "fail within 2 seconds". The gate is pure
+# Python with no I/O (the socket-boom test above proves construction opens no
+# socket), so real elapsed is sub-millisecond; 2.0s is the literal spec ceiling,
+# not a perf benchmark, so this asserts the contract without flaking on a loaded
+# CI runner.
+_FAIL_FAST_CEILING_SECONDS = 2.0
+
+
+@pytest.mark.parametrize("selection", ["direct", "fallback"])
+def test_watsonx_missing_credential_fails_within_two_seconds(
+    settings_factory: SettingsFactory,
+    watsonx_settings_factory: WatsonxSettingsFactory,
+    selection: str,
+) -> None:
+    """Missing watsonx cred → boot-time ValueError within 2s (Req 3.3 / SC-004).
+
+    Task 2's tests pin *which* variable is named (Req 3.2); this pins the
+    *timing* half — SC-004's 2-second startup-failure ceiling — on both the
+    direct (``LLM_PROVIDER=watsonx``) and fallback-membership selection paths.
+    """
+    start = time.perf_counter()
+    with pytest.raises(ValidationError) as exc_info:
+        if selection == "direct":
+            watsonx_settings_factory(WATSONX_APIKEY=None)
+        else:
+            settings_factory(
+                LLM_PROVIDER="fallback",
+                FALLBACK_ORDER="ollama,watsonx",
+                OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+                OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+                WATSONX_PROJECT_ID=DUMMY_WATSONX_PROJECT,
+                WATSONX_URL=DUMMY_WATSONX_URL,
+                WATSONX_MODEL_ID=DUMMY_WATSONX_MODEL,
+                # WATSONX_APIKEY intentionally omitted → gate must fire.
+            )
+    elapsed = time.perf_counter() - start
+    assert "WATSONX_APIKEY" in str(exc_info.value)
+    assert elapsed < _FAIL_FAST_CEILING_SECONDS
+
+
+def test_watsonx_direct_all_credentials_missing_names_var_and_lists_all(
+    watsonx_settings_factory: WatsonxSettingsFactory,
+) -> None:
+    """All four creds absent → ValueError names a variable AND lists every one.
+
+    Task 2's one-at-a-time tests always leave three creds present, so the gate's
+    ``missing:`` list only ever holds a single entry there. This pins the
+    multi-missing message shape: the leading clause names a concrete
+    ``WATSONX_*`` variable (Req 3.2) and *every* absent variable appears in the
+    enumerated list, so an operator missing all four sees the full set.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        watsonx_settings_factory(
+            WATSONX_APIKEY=None,
+            WATSONX_PROJECT_ID=None,
+            WATSONX_URL=None,
+            WATSONX_MODEL_ID=None,
+        )
+    msg = str(exc_info.value)
+    for name in (
+        "WATSONX_APIKEY",
+        "WATSONX_PROJECT_ID",
+        "WATSONX_URL",
+        "WATSONX_MODEL_ID",
+    ):
+        assert name in msg
+
+
+def test_watsonx_fallback_all_credentials_missing_fails_fast(
+    settings_factory: SettingsFactory,
+) -> None:
+    """watsonx in FALLBACK_ORDER with no watsonx creds → boot-time ValueError."""
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="fallback",
+            FALLBACK_ORDER="ollama,watsonx",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        )
+    assert "WATSONX_APIKEY" in str(exc_info.value)
+
+
+def test_watsonx_fallback_membership_is_case_and_whitespace_insensitive(
+    settings_factory: SettingsFactory,
+) -> None:
+    """The gate detects watsonx membership after strip()/lower() (Req 3.3).
+
+    The gate lower-cases and strips each ``FALLBACK_ORDER`` entry before the
+    membership test. Were it to compare raw tokens, a deployer writing
+    ``FALLBACK_ORDER=ollama, WatsonX`` would slip partial creds past the gate
+    and defer the failure to the first failover — defeating fail-fast. This
+    pins that a spaced, mixed-case ``watsonx`` entry still arms the gate.
+    """
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="fallback",
+            FALLBACK_ORDER="ollama, WatsonX",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            # watsonx creds intentionally absent → gate must fire.
+        )
+    assert "WATSONX_APIKEY" in str(exc_info.value)
+
+
+def test_watsonx_gate_dormant_under_fallback_without_watsonx(
+    settings_factory: SettingsFactory,
+) -> None:
+    """A fallback chain that excludes watsonx needs no watsonx creds.
+
+    Complements ``test_watsonx_gate_dormant_when_not_selected`` (direct ollama)
+    by pinning the gate's False branch under ``LLM_PROVIDER=fallback``: with
+    ``FALLBACK_ORDER=ollama,anthropic`` and no watsonx creds, construction must
+    succeed — otherwise a watsonx-free fallback deployment would be forced to
+    supply credentials it never uses.
+    """
+    settings = settings_factory(
+        LLM_PROVIDER="fallback",
+        FALLBACK_ORDER="ollama,anthropic",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+    )
+    assert settings.llm_provider == "fallback"
+    assert settings.watsonx_apikey is None
+
+
+def test_watsonx_fallback_membership_with_full_creds_constructs(
+    settings_factory: SettingsFactory,
+) -> None:
+    """watsonx in FALLBACK_ORDER + full creds → constructs (positive symmetric).
+
+    The direct-selection happy path is pinned above
+    (``test_watsonx_direct_selection_with_full_creds_constructs``); this is its
+    fallback-membership twin, proving the gate *passes* — not merely stays
+    dormant — when watsonx participates in the chain with complete creds.
+    """
+    settings = settings_factory(
+        LLM_PROVIDER="fallback",
+        FALLBACK_ORDER="ollama,watsonx",
+        OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+        OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+        **_watsonx_creds(),
+    )
+    assert settings.llm_provider == "fallback"
+    assert settings.watsonx_apikey is not None
+    assert settings.watsonx_apikey.get_secret_value() == DUMMY_WATSONX_SECRET

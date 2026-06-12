@@ -1,0 +1,12 @@
+{
+  "feature_name": "002-watsonx-provider",
+  "language": "en",
+  "phase": "tasks-generated",
+  "created_at": "2026-06-08T00:00:00Z",
+  "updated_at": "2026-06-08T04:55:38Z",
+  "approvals": {
+    "requirements": { "generated": true, "approved": true },
+    "design": { "generated": true, "approved": true },
+    "tasks": { "generated": true, "approved": true }
+  }
+}

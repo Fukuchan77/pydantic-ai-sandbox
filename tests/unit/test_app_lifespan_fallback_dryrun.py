@@ -5,7 +5,7 @@ the FastAPI lifespan must construct the fallback chain eagerly so a
 misconfigured deployment fails at boot rather than at the first
 ``/chat`` request. Three branches matter:
 
-1. ``FALLBACK_ORDER=watsonx,anthropic`` — every member is in
+1. ``FALLBACK_ORDER=anthropic,bedrock`` — every member is in
    ``_MVP_STUB_PROVIDERS``. ``_build_fallback`` raises ``RuntimeError``;
    the lifespan must propagate it so ``with TestClient(app)`` aborts at
    startup and no request traffic ever sees a half-built chain.
@@ -53,10 +53,14 @@ def test_lifespan_fails_fast_when_fallback_order_is_all_stub(
     The error message must mention ``FALLBACK_ORDER`` so operators can
     grep logs for the offending env var (mirrored from the
     ``test_factory_fallback`` contract).
+
+    Uses ``anthropic,bedrock`` — the providers that remain stubs after
+    002-watsonx-provider promotes watsonx — so the all-stub scenario does
+    not trip the new watsonx credential gate (config Task 2.2).
     """
     settings_factory(
         LLM_PROVIDER="fallback",
-        FALLBACK_ORDER="watsonx,anthropic",
+        FALLBACK_ORDER="anthropic,bedrock",
     )
     get_settings.cache_clear()
 
