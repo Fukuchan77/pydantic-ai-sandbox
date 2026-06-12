@@ -52,8 +52,12 @@ if TYPE_CHECKING:
 # contract test) can import it without tripping ``reportPrivateUsage``.
 __all__ = ["_MVP_STUB_PROVIDERS", "get_model"]
 
-_MVP_STUB_PROVIDERS: frozenset[str] = frozenset({"watsonx", "anthropic", "bedrock"})
+_MVP_STUB_PROVIDERS: frozenset[str] = frozenset({"anthropic", "bedrock"})
 """Provider names whose builder is a NotImplementedError stub in MVP.
+
+watsonx was promoted out of this set in feature ``002-watsonx-provider``
+(Task 4.2): it now resolves to a real :func:`_build_watsonx` Model. Only
+``anthropic`` and ``bedrock`` remain stubs.
 
 Public so :func:`pydantic_ai_sandbox.llm.fallback._build_fallback` (T5.4)
 can detect "every member of FALLBACK_ORDER is a stub" configurations and
@@ -80,7 +84,8 @@ def get_model(provider: str | None = None) -> Model:
 
     Raises:
         NotImplementedError: When ``provider`` resolves to a name in
-            :data:`_MVP_STUB_PROVIDERS` (watsonx / anthropic / bedrock).
+            :data:`_MVP_STUB_PROVIDERS` (anthropic / bedrock). watsonx is no
+            longer a stub — it routes to :func:`_build_watsonx`.
         RuntimeError: Surfaced from :func:`_build_fallback` when
             ``provider == "fallback"`` and every member of
             ``Settings.fallback_order`` is itself a stub provider
@@ -94,7 +99,7 @@ def get_model(provider: str | None = None) -> Model:
     if resolved == "ollama":
         return _build_ollama(settings)
     if resolved == "watsonx":
-        _build_watsonx(settings)  # Never returns; explicit call for trace fidelity.
+        return _build_watsonx(settings)
     if resolved == "anthropic":
         _build_anthropic(settings)
     if resolved == "bedrock":

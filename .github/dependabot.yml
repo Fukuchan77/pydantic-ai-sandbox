@@ -8,11 +8,17 @@
 #              Catches deprecation of e.g. actions/checkout@v3, action
 #              SHA rotation, etc.
 #
-# Supply-chain watchlist (Spec Req 9.5 + idea0.md §14): packages with a
+# Supply-chain watchlist (Spec Req 9.5 + 11.4 + idea0.md §14): packages with a
 # documented incident history get an extra `supply-chain-watch` label
 # AND explicit reviewers, marking them as never-auto-merge. The labels
 # are also surfaced in security.yml's job summary so reviewers don't
 # need to remember the policy.
+#
+# Registered watchlist packages (spec 002-watsonx-provider task 1.2):
+#   - litellm        — 2026-03 release yank (idea0.md §14).
+#   - ibm-watsonx-ai — 1.5.12 broke import on Python 3.14.5 (ADR-1); a bad
+#                      bump can silently re-break the SDK lane, so it is
+#                      reviewed individually rather than auto-grouped.
 
 version: 2
 
@@ -42,23 +48,27 @@ updates:
           - "*"
         exclude-patterns:
           - "litellm"            # supply-chain-watch — never group
+          - "ibm-watsonx-ai"     # supply-chain-watch (ADR-1) — never group
           - "pydantic-ai*"       # V2 Beta is unstable; review individually
         update-types:
           - minor
           - patch
     # ------------------------------------------------------------------
-    # Spec Req 9.5: supply-chain-watch dependencies are flagged with
+    # Spec Req 9.5 / 11.4: supply-chain-watch dependencies are flagged with
     # extra labels + reviewers so they're visibly not-auto-mergeable.
-    # `litellm` is the canonical example (idea0.md §14, 2026-03 yank).
+    # `litellm` and `ibm-watsonx-ai` are the registered watchlist packages
+    # (idea0.md §14 2026-03 yank; ADR-1 py3.14 import break respectively).
     # When a new package joins the watchlist, add it here AND mention
     # it in security.yml's `supply-chain-summary` job.
     # ------------------------------------------------------------------
     ignore: []
-    # Per-dep overrides cannot be expressed in the v2 schema as a map;
-    # the watchlist is enforced via the `groups.exclude-patterns` above
-    # (so litellm bumps surface as standalone PRs) plus a label-bump
-    # workflow (see README.md "Supply-chain watch operational rule"
-    # for the manual review checklist).
+    # Per-dep overrides cannot be expressed in the v2 schema as a map (a
+    # second pip block for "/" would overlap and is rejected; `labels`
+    # apply per-block, not per-dependency). The watchlist is therefore
+    # enforced via the `groups.exclude-patterns` above (so litellm and
+    # ibm-watsonx-ai bumps surface as standalone PRs) plus a label-bump
+    # workflow that applies the `supply-chain-watch` label (see README.md
+    # "Supply-chain watch operational rule" for the manual review checklist).
 
   # ---------------------------------------------------------------------------
   # GitHub Actions pinned in .github/workflows/*.yml.

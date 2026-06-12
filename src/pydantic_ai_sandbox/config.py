@@ -17,10 +17,21 @@ singleton via :func:`functools.lru_cache`. Tests reset the cache with
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+from urllib.parse import urlparse
 
-from pydantic import HttpUrl, SecretStr, model_validator
+from pydantic import HttpUrl, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from pydantic import ValidationInfo
+
+_WATSONX_TRANSPORTS: tuple[str, ...] = ("sdk", "litellm")
+"""Valid ``WATSONX_TRANSPORT`` values; the validator's error message lists
+these verbatim (Req 2.5)."""
+
+_WATSONX_URL_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+"""Accepted ``WATSONX_URL`` protocols (plan.md §Contract 2: ``^https?://``)."""
 
 LLMProvider = Literal["ollama", "watsonx", "anthropic", "bedrock", "fallback"]
 """Authoritative provider alphabet — must stay in lockstep with the
@@ -93,7 +104,13 @@ class Settings(BaseSettings):
     watsonx_apikey: SecretStr | None = None
     watsonx_project_id: str | None = None
     watsonx_model_id: str | None = None
-    watsonx_transport: Literal["sdk", "litellm"] | None = None
+    # Normalized to lower-case and defaulted to ``"sdk"`` by
+    # :meth:`_normalize_watsonx_transport` (Req 2.2/2.4/2.5).
+    watsonx_transport: Literal["sdk", "litellm"] = "sdk"
+    # Connect/read timeouts (seconds) applied to both transports (Req 5.1-5.4).
+    # Validated positive by :meth:`_validate_watsonx_timeout` (Req 5.5).
+    watsonx_timeout_connect: int = 30
+    watsonx_timeout_read: int = 120
 
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str | None = None
@@ -105,6 +122,72 @@ class Settings(BaseSettings):
     fallback_order: str = ""
     logfire_token: SecretStr | None = None
     log_sensitive_payloads: bool = False
+
+    @field_validator("watsonx_transport", mode="before")
+    @classmethod
+    def _normalize_watsonx_transport(cls, value: object) -> str:
+        """Lower-case ``WATSONX_TRANSPORT`` and default it to ``"sdk"``.
+
+        Runs before the ``Literal`` check so ``SDK`` / ``LiteLLM`` are accepted
+        case-insensitively (Req 2.4) and an unset / blank value falls back to
+        the ``sdk`` default (Req 2.2). An out-of-set value raises a
+        ``ValueError`` whose message lists the valid values (Req 2.5),
+        replacing Pydantic's generic ``Literal`` error.
+        """
+        if value is None:
+            return "sdk"
+        if not isinstance(value, str):
+            msg = f"WATSONX_TRANSPORT must be one of {_WATSONX_TRANSPORTS}; got {value!r}."
+            raise ValueError(msg)
+        normalized = value.strip().lower()
+        if not normalized:
+            return "sdk"
+        if normalized not in _WATSONX_TRANSPORTS:
+            msg = f"WATSONX_TRANSPORT must be one of {_WATSONX_TRANSPORTS}; got {value!r}."
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("watsonx_timeout_connect", "watsonx_timeout_read", mode="before")
+    @classmethod
+    def _validate_watsonx_timeout(cls, value: object, info: ValidationInfo) -> int:
+        """Reject non-numeric / non-positive timeout values (Req 5.5).
+
+        The env var name is the upper-cased field name
+        (``watsonx_timeout_connect`` → ``WATSONX_TIMEOUT_CONNECT``), so the
+        message points operators straight at the offending variable.
+        """
+        env_name = (info.field_name or "watsonx_timeout").upper()
+        try:
+            parsed = int(value)  # type: ignore[arg-type]  # str/int from env
+        except TypeError, ValueError:
+            msg = f"{env_name} must be a positive integer (seconds); got {value!r}."
+            raise ValueError(msg) from None
+        if parsed <= 0:
+            msg = f"{env_name} must be a positive integer (seconds); got {parsed}."
+            raise ValueError(msg)
+        return parsed
+
+    @field_validator("watsonx_url", mode="after")
+    @classmethod
+    def _validate_watsonx_url(cls, value: str | None) -> str | None:
+        """Validate ``WATSONX_URL`` structure only — no network call.
+
+        Uses :func:`urllib.parse.urlparse` to require an ``http(s)`` scheme and
+        a non-empty host (Req 4.1); reachability is deferred to runtime
+        (Req 4.3). An invalid structure fails fast with a detailed message
+        (Req 4.2).
+        """
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if parsed.scheme not in _WATSONX_URL_SCHEMES or not parsed.netloc:
+            msg = (
+                "WATSONX_URL must be a valid URL with an http(s):// scheme and a "
+                "host (e.g. https://us-south.ml.cloud.ibm.com); "
+                f"got {value!r}."
+            )
+            raise ValueError(msg)
+        return value
 
     @model_validator(mode="after")
     def _check_provider_constraints(self) -> Settings:
@@ -140,6 +223,32 @@ class Settings(BaseSettings):
                     "FALLBACK_ORDER must contain at least one known provider "
                     f"name from {sorted(_KNOWN_FALLBACK_MEMBERS)}; "
                     f"got only unknown entries: {unknown}."
+                )
+                raise ValueError(msg)
+
+        # watsonx credential gate (Req 3.1/3.2/3.3). Fires when watsonx is
+        # actually selected — directly (LLM_PROVIDER=watsonx) or as a member of
+        # an active fallback chain (LLM_PROVIDER=fallback with watsonx in
+        # FALLBACK_ORDER). Intentionally stricter than the Ollama gate: a
+        # partially-credentialled watsonx in the chain must fail at boot rather
+        # than defer to the first failover (plan.md Entity 1, SC-004/SC-005).
+        fallback_members = {m.strip().lower() for m in self.fallback_order.split(",")}
+        watsonx_selected = self.llm_provider == "watsonx" or (
+            self.llm_provider == "fallback" and "watsonx" in fallback_members
+        )
+        if watsonx_selected:
+            required = {
+                "WATSONX_APIKEY": self.watsonx_apikey,
+                "WATSONX_PROJECT_ID": self.watsonx_project_id,
+                "WATSONX_URL": self.watsonx_url,
+                "WATSONX_MODEL_ID": self.watsonx_model_id,
+            }
+            missing = [name for name, val in required.items() if not val]
+            if missing:
+                msg = (
+                    f"{missing[0]} is required when watsonx is selected "
+                    "(LLM_PROVIDER=watsonx or watsonx in FALLBACK_ORDER); "
+                    f"missing: {missing}."
                 )
                 raise ValueError(msg)
 
