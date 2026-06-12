@@ -151,7 +151,7 @@ def configure_observability(app: FastAPI, settings: Settings) -> None:
         logfire.instrument_pydantic_ai()
         logfire.instrument_fastapi(app)
         logfire.instrument_httpx()
-    except Exception:
+    except Exception:  # noqa: BLE001 — Req 5.5: fail-soft, Logfire failures are not enumerable (see below)
         # Bare-Exception catch is the explicit fail-soft contract for
         # Req 5.5: Logfire transport failure modes are not enumerable in
         # advance (network, OTel SDK, auth, JSON encoding) and re-raising

@@ -91,6 +91,8 @@ _MANAGED_ENV_KEYS: tuple[str, ...] = (
     "WATSONX_PROJECT_ID",
     "WATSONX_MODEL_ID",
     "WATSONX_TRANSPORT",
+    "WATSONX_TIMEOUT_CONNECT",
+    "WATSONX_TIMEOUT_READ",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
     "BEDROCK_REGION",
@@ -103,6 +105,18 @@ _MANAGED_ENV_KEYS: tuple[str, ...] = (
 )
 
 
+# Canonical valid watsonx credential set for the unit suite (Task 3.1). Kept
+# outside FORBIDDEN_MODEL_ID_LITERALS so consuming tests never regress the
+# hardcoded-model-ID guard (mirrors the local constants in test_config.py).
+# Exposed as module constants so consumers (Tasks 7.1-7.8) can assert a built
+# Model's ``model_name`` / URL against the same source of truth the fixture
+# seats, rather than re-typing literals.
+WATSONX_TEST_URL = "https://us-south.ml.cloud.ibm.com"
+WATSONX_TEST_MODEL_ID = "dummy-watsonx-model"
+WATSONX_TEST_APIKEY = "k-watsonx-test-secret"
+WATSONX_TEST_PROJECT_ID = "proj-0000"
+
+
 class SettingsFactory(Protocol):
     """Callable returned by the ``settings_factory`` fixture.
 
@@ -110,6 +124,19 @@ class SettingsFactory(Protocol):
     freshly-built :class:`Settings`. Passing ``None`` for a key leaves it
     unset (after the initial clear), letting callers express "explicitly
     absent" without tripping ``monkeypatch.delenv`` on a missing key.
+    """
+
+    def __call__(self, **overrides: str | None) -> Settings: ...  # pragma: no cover
+
+
+class WatsonxSettingsFactory(Protocol):
+    """Callable returned by the ``watsonx_settings_factory`` fixture.
+
+    Like :class:`SettingsFactory`, but seats a complete, valid watsonx
+    credential set (``LLM_PROVIDER=watsonx`` + the four required ``WATSONX_*``
+    vars) before applying caller overrides. Pass ``None`` for any seated key to
+    express "explicitly absent" — useful for exercising the fail-fast
+    credential gate (Task 7.8).
     """
 
     def __call__(self, **overrides: str | None) -> Settings: ...  # pragma: no cover
@@ -151,6 +178,39 @@ def settings_factory(monkeypatch: pytest.MonkeyPatch) -> SettingsFactory:
                 continue
             monkeypatch.setenv(key, value)
         return Settings()
+
+    return _build
+
+
+@pytest.fixture
+def watsonx_settings_factory(
+    settings_factory: SettingsFactory,
+) -> WatsonxSettingsFactory:
+    """Yield a builder that seats valid watsonx creds, then applies overrides.
+
+    The builder layers caller overrides on top of a complete, valid watsonx
+    credential set (``LLM_PROVIDER=watsonx`` + ``WATSONX_APIKEY`` /
+    ``WATSONX_PROJECT_ID`` / ``WATSONX_URL`` / ``WATSONX_MODEL_ID``) and
+    delegates to :func:`settings_factory`, inheriting its ambient-shell
+    isolation (``_MANAGED_ENV_KEYS`` is cleared first).
+
+    Override semantics match ``settings_factory``: a key set to ``None`` is
+    left unset, so ``watsonx_settings_factory(WATSONX_APIKEY=None)`` drives the
+    fail-fast credential gate. Any non-seated key (e.g. ``WATSONX_TRANSPORT``,
+    ``WATSONX_TIMEOUT_CONNECT``) is simply forwarded.
+    """
+
+    def _build(**overrides: str | None) -> Settings:
+        seated: dict[str, str | None] = {
+            "LLM_PROVIDER": "watsonx",
+            "WATSONX_APIKEY": WATSONX_TEST_APIKEY,
+            "WATSONX_PROJECT_ID": WATSONX_TEST_PROJECT_ID,
+            "WATSONX_URL": WATSONX_TEST_URL,
+            "WATSONX_MODEL_ID": WATSONX_TEST_MODEL_ID,
+        }
+        # Caller overrides win (including an explicit ``None`` to drop a cred).
+        seated.update(overrides)
+        return settings_factory(**seated)
 
     return _build
 
