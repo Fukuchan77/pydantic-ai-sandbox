@@ -22,6 +22,13 @@ run = "uv run pyright"
 description = "Run unit + integration suites under pytest-asyncio auto mode."
 run = "uv run pytest"
 
+[tasks.cov]
+# Coverage-gated run; `--cov` (no path) measures the `[tool.coverage.run] source`
+# from pyproject.toml and enforces the `fail_under` ratchet (currently 98). This
+# is the canonical invocation for the coverage gate (spec 003 Task 7.1 / Req 10.4).
+description = "Coverage-gated test run enforcing the fail_under ratchet."
+run = "uv run pytest --cov --cov-report=term-missing"
+
 [tasks.check]
 description = "Aggregate quality gate (Constitution V, Req 7.5)."
 depends = ["lint", "format", "typecheck", "test"]
