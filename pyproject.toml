@@ -64,7 +64,7 @@ prerelease = "allow"
 target-version = "py314"
 line-length = 100
 # patterns/ lanes are independent uv projects with their own interpreters,
-# dependency sets, and ruff/pyright configs (Spec 003 AD-1/AD-5). Excluding
+# dependency sets, and ruff/pyright configs (Spec 005 AD-1/AD-5). Excluding
 # them here keeps `mise run check` scoped to the root app; lane gates run
 # via `mise run patterns:check`.
 extend-exclude = ["patterns"]
