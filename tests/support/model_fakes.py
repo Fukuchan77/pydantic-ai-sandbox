@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
@@ -31,7 +32,11 @@ if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo
 
-__all__ = ["function_model_raising", "function_model_returning_json"]
+__all__ = [
+    "function_model_raising",
+    "function_model_returning_json",
+    "watsonx_function_model_failing",
+]
 
 
 def function_model_raising(
@@ -99,3 +104,38 @@ def function_model_returning_json(
         return ModelResponse(parts=[TextPart(encoded)])
 
     return FunctionModel(_respond, model_name=model_name)
+
+
+def watsonx_function_model_failing(
+    *,
+    message: str = "simulated watsonx failure",
+    model_name: str = "watsonx",
+) -> FunctionModel:
+    """Build a watsonx-flavoured ``FunctionModel`` that always raises ``ModelAPIError``.
+
+    A thin specialisation of :func:`function_model_raising` for the watsonx
+    failover lane (Task 3.2, consumed by Task 7.6). The double stands in for a
+    failing ``WatsonxSDKModel`` *without* importing the SDK or touching the
+    network: it raises :class:`pydantic_ai.exceptions.ModelAPIError`, which is
+    the exact class ``FallbackModel`` recovers by default
+    (``fallback_on=(ModelAPIError,)``). A real ``WatsonxSDKModel`` is required
+    to wrap every SDK failure into ``ModelAPIError`` for this same reason
+    (plan.md Entity 2); this fake encodes that contract on the test side so
+    fallback tests stay hermetic.
+
+    Args:
+        message: Error text carried by the raised ``ModelAPIError`` — vary it
+            to distinguish multiple failing members in one chain.
+        model_name: Identifier surfaced in the ``FallbackModel`` chain span
+            (``"fallback:...,watsonx"``); defaults to ``"watsonx"`` so failover
+            tests can assert watsonx participated in (and failed out of) the
+            chain.
+
+    Returns:
+        A ``FunctionModel`` ready to seat as a ``FallbackModel`` member or to
+        drive a direct ``Agent(model=...)`` failure path.
+    """
+    return function_model_raising(
+        ModelAPIError(model_name=model_name, message=message),
+        model_name=model_name,
+    )

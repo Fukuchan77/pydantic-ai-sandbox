@@ -1,0 +1,114 @@
+# Spec Req 11.1-11.3 / Plan §File Structure / tasks.md Task 9.
+#
+# The ONLY lane that exercises tests/integration/test_watsonx_chat_e2e.py
+# against a *live* watsonx.ai endpoint. Unlike integration-ollama.yml, this
+# lane is deliberately starved of automatic triggers: watsonx.ai is hosted,
+# metered SaaS, so every run costs real API spend. Req 11.2 / SC-007 therefore
+# mandate a single, manual trigger surface.
+#
+# Trigger surface (Req 11.2 / SC-007):
+#   workflow_dispatch ONLY — no push, pull_request, schedule, or cron. A
+#   reviewer runs this by hand from the Actions tab when they want a live
+#   smoke-test. The cheap, network-free unit lane (ci.yml) covers every PR;
+#   the hermetic watsonx suite (tests/unit/test_watsonx_*.py) proves the
+#   provider contract without spend.
+#
+# Fail-not-skip (Req 11.3): GitHub injects an absent secret as the empty
+# string rather than failing, so a misconfigured repo would otherwise run the
+# lane with blank credentials and the watsonx credential gate (config.py Task
+# 2.2) would surface a confusing ValueError mid-test. The explicit
+# "Validate required watsonx secrets" step below converts a missing secret
+# into a clear, early, non-zero exit — the lane fails loudly, never skips.
+#
+# Concurrency (Req 11.2): duplicate manual dispatches on the same ref collapse
+# to one active run, so an impatient double-click does not double the API bill.
+
+name: integration-watsonx
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: integration-watsonx-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Provider selection + integration gate live at workflow scope so every step
+# reads the same values. RUN_INTEGRATION_WATSONX=1 opts the gated e2e test in
+# (Req 10.1); without it the module would skip and the lane would pass green
+# without touching watsonx — defeating Req 11.3's fail-not-skip intent.
+# WATSONX_TRANSPORT defaults to "sdk"; set the repo variable to "litellm" to
+# exercise the alternate transport (uv sync --all-groups installs litellm).
+env:
+  LLM_PROVIDER: watsonx
+  RUN_INTEGRATION_WATSONX: '1'
+  WATSONX_TRANSPORT: ${{ vars.WATSONX_TRANSPORT || 'sdk' }}
+
+jobs:
+  e2e:
+    name: integration-watsonx (live API)
+    runs-on: ubuntu-latest
+    # Hosted SaaS round-trip + cold dependency sync; generous but bounded so a
+    # hung endpoint cannot run indefinitely against the metered API.
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mise + tooling
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          install: true
+          cache: true
+
+      - name: Sync project dependencies
+        run: uv sync --all-groups
+
+      # ----------------------------------------------------------------------
+      # Req 11.3 — fail explicitly (non-zero exit) when any required secret is
+      # missing, BEFORE any code runs. GitHub maps an unconfigured secret to an
+      # empty string, so `-z` is the correct emptiness test. Bash indirect
+      # expansion (`${!var}`) reads each named secret from the env block below.
+      # All four are required by the Task 2.2 credential gate; naming the
+      # missing ones up-front beats a deep ValueError stack trace mid-test.
+      # ----------------------------------------------------------------------
+      - name: Validate required watsonx secrets
+        env:
+          WATSONX_APIKEY: ${{ secrets.WATSONX_APIKEY }}
+          WATSONX_PROJECT_ID: ${{ secrets.WATSONX_PROJECT_ID }}
+          WATSONX_URL: ${{ secrets.WATSONX_URL }}
+          WATSONX_MODEL_ID: ${{ secrets.WATSONX_MODEL_ID }}
+        run: |
+          missing=()
+          for var in WATSONX_APIKEY WATSONX_PROJECT_ID WATSONX_URL WATSONX_MODEL_ID; do
+            if [ -z "${!var}" ]; then
+              missing+=("$var")
+            fi
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::Missing required watsonx CI secret(s): ${missing[*]}. \
+            Configure them under Settings → Secrets and variables → Actions. \
+            This lane fails rather than skips (Req 11.3) so a misconfigured \
+            integration environment can never appear green."
+            exit 1
+          fi
+          echo "all four required watsonx secrets are present"
+
+      # ----------------------------------------------------------------------
+      # Req 10.1 / 10.2 — the live contract under test. RUN_INTEGRATION_WATSONX
+      # (workflow env above) opts the gated module in; we run only the watsonx
+      # e2e file so the unset-gate Ollama lane is not collected here. `uv run
+      # pytest <path>` mirrors ci.yml's coverage step (the second Tool
+      # Execution Priority tier); there is no watsonx-specific mise task and
+      # adding one is outside this workflow's boundary.
+      # ----------------------------------------------------------------------
+      - name: Run watsonx integration test (live API)
+        env:
+          WATSONX_APIKEY: ${{ secrets.WATSONX_APIKEY }}
+          WATSONX_PROJECT_ID: ${{ secrets.WATSONX_PROJECT_ID }}
+          WATSONX_URL: ${{ secrets.WATSONX_URL }}
+          WATSONX_MODEL_ID: ${{ secrets.WATSONX_MODEL_ID }}
+        run: uv run pytest tests/integration/test_watsonx_chat_e2e.py -v
