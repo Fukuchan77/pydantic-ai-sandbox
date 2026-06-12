@@ -29,11 +29,11 @@ repos:
   - repo: local
     hooks:
       # `exclude: ^patterns/` on the three tool hooks below: patterns/ lanes
-      # are independent uv projects (Spec 003 AD-1) whose deps are absent
+      # are independent uv projects (Spec 005 AD-1) whose deps are absent
       # from the root venv, so root-venv ruff/pyright would fail on them.
       # Lane quality gates are enforced by `mise run patterns:check` and the
       # patterns-ci.yml matrix instead of at commit time (documented
-      # trade-off, Spec 003 plan §7). gitleaks and the model-ID guard keep
+      # trade-off, Spec 005 plan §7). gitleaks and the model-ID guard keep
       # covering patterns/ — secrets and hardcoded model IDs are repo-wide
       # invariants.
       - id: ruff-check
