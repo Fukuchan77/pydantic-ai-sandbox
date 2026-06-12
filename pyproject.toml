@@ -129,6 +129,9 @@ pythonpath = ["."]
 # Limit coverage measurement to first-party code; tests and stubs are excluded.
 source = ["src/pydantic_ai_sandbox"]
 branch = true
+# Store relative paths in .coverage so the CI coverage-comment action (Docker,
+# different workdir) can map files; absolute paths break py-cov-action.
+relative_files = true
 
 [tool.coverage.report]
 # Coverage ratchet: raise this in lockstep with each provider-implementation task
