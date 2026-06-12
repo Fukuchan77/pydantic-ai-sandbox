@@ -53,6 +53,81 @@ run = "uv run pre-commit run --all-files --hook-stage manual"
 description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
 run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
 
+# ---------------------------------------------------------------------------
+# patterns/ framework lanes (Spec 005 Req 9.1). Each lane is an independent
+# uv project (plan AD-1); these tasks loop over them with `set -e` so the
+# first failing lane stops the run. CI's patterns-ci.yml matrix runs the
+# same uv commands per-lane instead (one lane's breakage must not mask the
+# others — plan §6).
+# ---------------------------------------------------------------------------
+
+[tasks."patterns:setup"]
+description = "Sync all pattern lanes (uv resolves each lane's .python-version)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== setup $d"; (cd "$d" && uv sync --all-groups)
+done
+"""
+
+[tasks."patterns:lint"]
+description = "Ruff lint across all pattern lanes."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== lint $d"; (cd "$d" && uv run ruff check .)
+done
+"""
+
+[tasks."patterns:format"]
+description = "Ruff format verification across all pattern lanes."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== format $d"; (cd "$d" && uv run ruff format --check .)
+done
+"""
+
+[tasks."patterns:typecheck"]
+description = "Pyright strict across all pattern lanes (per-lane venv/python)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== typecheck $d"; (cd "$d" && uv run pyright)
+done
+"""
+
+[tasks."patterns:test"]
+description = "Offline unit suites across all pattern lanes (coverage floor 85)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== test $d"; (cd "$d" && uv run pytest --cov)
+done
+"""
+
+[tasks."patterns:audit"]
+description = "pip-audit per lane lockfile (Spec 005 Req 7.2)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== audit $d"; (cd "$d" && uv run pip-audit)
+done
+"""
+
+[tasks."patterns:check"]
+description = "Aggregate lane quality gate (lint / format / typecheck / test)."
+depends = ["patterns:lint", "patterns:format", "patterns:typecheck", "patterns:test"]
+
+[tasks."patterns:test:integration"]
+description = "Gated Ollama integration lanes (RUN_INTEGRATION_PATTERNS=1)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== integration $d"; (cd "$d" && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
+done
+"""
+
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
 run = "uv run uvicorn pydantic_ai_sandbox.main:app --reload --env-file .env"

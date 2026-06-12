@@ -1,0 +1,119 @@
+# Spec 005 Req 8.2 / plan §6.
+#
+# Live-Ollama integration lane for the patterns/ framework lanes. The
+# daemon scaffolding (docker run + ~/.ollama cache + readiness loop +
+# pull-if-missing + log artifact) is cloned from integration-ollama.yml —
+# see that file for the rationale on each step. The `restore-keys:
+# ollama-model-` prefix deliberately shares the existing model blob cache
+# with the app's integration lane so the ~5GB granite pull happens at most
+# once per cache epoch.
+#
+# Single job (not a matrix): `mise run patterns:test:integration` runs the
+# three lanes sequentially against one daemon, so the model is pulled and
+# warmed exactly once (plan §6).
+
+name: patterns-integration-ollama
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'patterns/**'
+      - '.github/workflows/patterns-integration-ollama.yml'
+  schedule:
+    - cron: '47 4 * * 1'  # off-zero minute; one hour after the app lane's cron
+  pull_request:
+    branches: [main]
+    paths:
+      - 'patterns/frameworks/*/src/**'
+      - 'patterns/frameworks/*/tests/integration/**'
+      - 'patterns/frameworks/*/pyproject.toml'
+      - '.github/workflows/patterns-integration-ollama.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: patterns-integration-ollama-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  OLLAMA_MODEL_NAME: granite4.1:8b
+  OLLAMA_BASE_URL: http://localhost:11434/v1
+
+jobs:
+  e2e:
+    name: patterns integration (3 lanes, one daemon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install mise + tooling
+        uses: jdx/mise-action@v2
+        with:
+          experimental: true
+          install: true
+          cache: true
+
+      - name: Sync pattern lanes
+        run: mise run "patterns:setup"
+
+      - name: Restore Ollama model cache
+        id: ollama-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ollama-model-${{ hashFiles('.github/workflows/patterns-integration-ollama.yml') }}-granite4.1-8b
+          restore-keys: |
+            ollama-model-
+
+      - name: Start Ollama daemon
+        run: |
+          mkdir -p "${HOME}/.ollama"
+          docker run -d \
+            --name ollama \
+            --restart unless-stopped \
+            -p 11434:11434 \
+            -v "${HOME}/.ollama:/root/.ollama" \
+            ollama/ollama:latest
+
+      - name: Wait for daemon readiness
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -sf http://localhost:11434/api/tags > /dev/null; then
+              echo "daemon ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Ollama daemon failed to become ready within 60s"
+          docker logs ollama || true
+          exit 1
+
+      - name: Pull model (skip if cached)
+        run: |
+          if docker exec ollama ollama list 2>/dev/null \
+              | awk 'NR>1 {print $1}' \
+              | grep -Fxq "${OLLAMA_MODEL_NAME}"; then
+            echo "model already cached: ${OLLAMA_MODEL_NAME}"
+          else
+            echo "pulling ${OLLAMA_MODEL_NAME}..."
+            docker exec ollama ollama pull "${OLLAMA_MODEL_NAME}"
+          fi
+
+      - name: Run pattern integration lanes
+        run: mise run "patterns:test:integration"
+
+      - name: Capture Ollama daemon logs
+        if: always()
+        run: docker logs ollama > ollama-daemon.log 2>&1 || true
+
+      - name: Upload daemon logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patterns-ollama-daemon-${{ github.run_id }}
+          path: ollama-daemon.log
+          retention-days: 14

@@ -1,0 +1,82 @@
+# Spec 005 Req 8.1 / plan §6.
+#
+# Quality gates for the patterns/ framework lanes. Each lane is an
+# independent uv project (plan AD-1) with its own lockfile, interpreter
+# (.python-version) and tool config, so this workflow runs the per-lane uv
+# commands directly in a `fail-fast: false` matrix rather than the looping
+# `mise run patterns:check` task — a deliberate divergence from the
+# "everything through mise" rule (Constitution V): the loop stops at the
+# first failing lane, which would mask the other lanes' status on PRs.
+# Local development still uses `mise run patterns:check`.
+#
+# The root app's ci.yml is intentionally untouched (Req 8.3); root gates
+# exclude patterns/ (root pyproject extend-exclude) and this workflow only
+# triggers on the patterns surface.
+
+name: patterns-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'patterns/**'
+      - 'mise.toml'
+      - '.github/workflows/patterns-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'patterns/**'
+      - 'mise.toml'
+      - '.github/workflows/patterns-ci.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: patterns-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lane:
+    name: ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: [pydantic-ai, beeai, llamaindex]
+    defaults:
+      run:
+        working-directory: patterns/frameworks/${{ matrix.lane }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads each lane's .python-version and provisions the matching
+      # interpreter (3.14 for pydantic-ai, 3.13 for beeai/llamaindex) —
+      # no mise needed in this workflow (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/frameworks/${{ matrix.lane }}/uv.lock
+
+      - name: Sync lane dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      - name: pytest (offline, coverage floor 85)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 005 Req 7.2: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
