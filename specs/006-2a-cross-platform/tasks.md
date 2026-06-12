@@ -25,8 +25,9 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
 - [ ] 1.1 契約パッケージの骨組みを作成する（`pydantic` のみ runtime 依存、
   `requires-python >=3.13`、`.python-version`=3.13 ピン、hatchling build、
   レーンと揃えた ruff/pyright ミラー設定、空の再エクスポート `__init__`、
-  パッケージ概要 README）
-  _Boundary:_ `patterns/contracts/pyproject.toml`, `patterns/contracts/.python-version`, `patterns/contracts/README.md`, `patterns/contracts/src/patterns_contracts/__init__.py`
+  **PEP 561 `py.typed` マーカー**（レーン pyright strict が型情報を解決する
+  ために必須）、パッケージ概要 README）
+  _Boundary:_ `patterns/contracts/pyproject.toml`, `patterns/contracts/.python-version`, `patterns/contracts/README.md`, `patterns/contracts/src/patterns_contracts/__init__.py`, `patterns/contracts/src/patterns_contracts/py.typed`
   _Depends:_ none
   _Requirements:_ 1.1, 1.2
 - [ ] 1.2 (P) 既存 routing / orchestrator-workers 契約をサブモジュールへ移行する
@@ -71,13 +72,18 @@ _Depends:_ 1
 _Requirements:_ 2.1, 2.2, 2.3, 1.5, NFR-5
 
 - [ ] 2.1 (P) 新4パターン README を作成し、契約の正本となる ```python fenced
-  block（Pydantic クラス定義のフィールドと `Literal` 語彙のみ）を記載する
+  block（先頭行 `# [contract]` マーカー、Pydantic クラス定義のフィールドと
+  `Literal` 語彙のみの `ast.parse` 可能な純 Python。エントリ signature は
+  `model/llm` 疑似構文を含むため**マーカー無しの別ブロック**に分離）を記載する
   （必須4セクション本文はタスク11で追記）
   _Boundary:_ `patterns/prompt-chaining/README.md`, `patterns/parallelization/README.md`, `patterns/evaluator-optimizer/README.md`, `patterns/autonomous-agent/README.md`
   _Depends:_ 1
   _Requirements:_ 2.1
 - [ ] 2.2 (P) routing / orchestrator-workers README の契約所在記述を「パッケージ
-  実体 + README 正本」へ更新する（既存正本ブロックは維持）
+  実体 + README 正本」へ更新し、既存正本ブロックを `# [contract]` マーカー付き
+  契約ブロックと signature 用の別ブロックへ**分離・再整形**する（現行は
+  `model/llm` 疑似構文の signature が同一ブロック内に混在しており
+  `ast.parse` 不能）
   _Boundary:_ `patterns/routing/README.md`, `patterns/orchestrator-workers/README.md`
   _Depends:_ 1
   _Requirements:_ 1.5
@@ -85,9 +91,11 @@ _Requirements:_ 2.1, 2.2, 2.3, 1.5, NFR-5
   パッケージは Task 1/2.1 で既に一致しているため、初回は意図的な不一致
   （例: 1フィールド改名 or 1 Literal 値除去）を一時注入してテストが失敗する
   ことを確認 → 注入を戻して緑化、という順で憲法 I の赤状態を成立させる →
-  各 README 正本ブロックを `ast` でパースしクラス集合・フィールド集合・
-  `Literal` 語彙を抽出、`patterns_contracts` を introspect、両者を比較。
-  `Tool` Protocol / `ApprovalHook` / エントリ signature は parser がスキップ）
+  各 README の `# [contract]` マーカー付きブロック**のみ**を `ast` でパースし
+  クラス集合・フィールド集合・`Literal` 語彙を抽出（`Route = Literal[...]` は
+  plain `Assign` のため `AnnAssign` に加え `Assign` も抽出）、
+  `patterns_contracts` を introspect、両者を比較。`Tool` Protocol /
+  `ApprovalHook` / エントリ signature はマーカー無しブロックのため対象外）
   _Boundary:_ `patterns/contracts/tests/unit/test_contract_drift.py`
   _Depends:_ 2.1, 2.2
   _Requirements:_ 2.1, 2.2, 2.3
