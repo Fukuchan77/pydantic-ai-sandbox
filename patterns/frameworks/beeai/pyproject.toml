@@ -1,0 +1,86 @@
+# patterns/frameworks/beeai — BeeAI Framework lane (Spec 005 Req 1.1/1.2).
+#
+# Independent uv project (plan AD-1). Python is capped at <3.14 by
+# beeai-framework's own requires-python — the very constraint that rules
+# out a uv workspace for this repo (research.md R-3).
+#
+# beeai-framework is pinned EXACT (==) because the offline test fake
+# subclasses ChatModel and implements its internal _create/_create_stream
+# surface (no official mock exists — upstream issue #750); a silent minor
+# bump could break the fake. Dependabot surfaces bumps as individual PRs
+# (see .github/dependabot.yml patterns group exclude).
+
+[project]
+name = "patterns-beeai"
+version = "0.1.0"
+description = "Cross-framework agent patterns — BeeAI Framework implementations (routing, orchestrator-workers)."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "beeai-framework==0.1.39",
+    "pydantic>=2",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_beeai"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_beeai"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/patterns_beeai"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = false
