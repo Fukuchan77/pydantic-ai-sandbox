@@ -28,17 +28,27 @@ repos:
   # --------------------------------------------------------------------------
   - repo: local
     hooks:
+      # `exclude: ^patterns/` on the three tool hooks below: patterns/ lanes
+      # are independent uv projects (Spec 003 AD-1) whose deps are absent
+      # from the root venv, so root-venv ruff/pyright would fail on them.
+      # Lane quality gates are enforced by `mise run patterns:check` and the
+      # patterns-ci.yml matrix instead of at commit time (documented
+      # trade-off, Spec 003 plan §7). gitleaks and the model-ID guard keep
+      # covering patterns/ — secrets and hardcoded model IDs are repo-wide
+      # invariants.
       - id: ruff-check
         name: ruff check (lint; S/C90/D/N/T20)
         language: system
         entry: uv run ruff check
         types: [python]
+        exclude: ^patterns/
 
       - id: ruff-format-check
         name: ruff format --check
         language: system
         entry: uv run ruff format --check
         types: [python]
+        exclude: ^patterns/
 
       - id: pyright
         name: pyright (strict, py3.14)
@@ -47,6 +57,7 @@ repos:
         types: [python]
         pass_filenames: false
         require_serial: true
+        exclude: ^patterns/
 
       # Mirror of tests/unit/test_no_hardcoded_model_ids.py::FORBIDDEN_MODEL_ID_LITERALS.
       # Both guards intentionally share the same vocabulary; update them in
