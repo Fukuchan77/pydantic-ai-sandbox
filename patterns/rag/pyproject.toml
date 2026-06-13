@@ -1,0 +1,44 @@
+# patterns/rag — PoC pyproject for Task 0 placement spike (007-2b-cross-platform).
+#
+# THROWAWAY SCAFFOLD. This file exists only to resolve the planned RAG-lane
+# runtime dependency set and measure its footprint (uv.lock size, torch/
+# transformers pull-in, `uv sync --locked` time) so ADR-1 (independent lane vs
+# co-located with the llamaindex lane) and Risk R-2 (heavy-dep CI isolation,
+# R11.4) can be finalized empirically. Task 1.1 replaces this with the real
+# lane pyproject (ruff/pyright/pytest/coverage config, dev group, fail_under).
+#
+# `package = false`: the PoC only needs its dependency closure resolved into a
+# venv — no build of patterns_rag itself, so no src/ tree is required yet.
+
+[project]
+name = "patterns-rag-poc"
+version = "0.0.0"
+description = "PoC scaffold for the RAG-lane placement spike (Task 0)."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # Shared contract package (path dep). patterns/rag/ sits at depth 1 under
+    # patterns/ (like contracts), so the relative path is ../contracts — one
+    # segment shallower than the frameworks/*/ lanes' ../../contracts.
+    "patterns-contracts",
+    # RAG-core runtime per ADR-3: docling-core (HybridChunker +
+    # DoclingDocument.load_from_json), NOT the full `docling` converter (layout
+    # models are pushed off the CI path via pre-converted *.docling.json
+    # fixtures). [chunking] extra is required for HybridChunker's tokenizer.
+    "docling-core[chunking]>=2.82",
+    "llama-index-core>=0.14",
+    # Embedding + LLM integrations for the gated Ollama integration lane.
+    # Measured here to decide whether they belong in an isolated extra (R11.4).
+    "llama-index-embeddings-ollama",
+    "llama-index-llms-ollama",
+    "pydantic>=2",
+    # Observability parity with the llamaindex lane (OpenInference -> OTel).
+    "openinference-instrumentation-llama-index",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+patterns-contracts = { path = "../contracts", editable = true }
