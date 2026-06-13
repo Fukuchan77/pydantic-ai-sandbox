@@ -6,8 +6,13 @@
 
 ## パターン契約（正本）
 
-各レーンの `contracts.py` はこの定義の複製（ドリフトはルートの
-`tests/unit/test_patterns_contract_sync.py` が検知）。
+契約の実体は依存ゼロの [`patterns_contracts`](../contracts/) パッケージ（旧
+各レーンの `contracts.py` 複製はここへ移行・廃止、Req 1.5）。下記の Python
+コードブロックがその**正本**であり、
+[`patterns/contracts/tests/unit/test_contract_drift.py`](../contracts/tests/unit/test_contract_drift.py)
+が両者（クラス集合・フィールド集合・`Literal` 語彙）の一致を1点で検証する
+（Req 2.1–2.3 / NFR-5）。エントリ signature はドキュメント目的で、ドリフト
+parser はスキップする。
 
 ```python
 Route = Literal["billing", "technical", "general"]
