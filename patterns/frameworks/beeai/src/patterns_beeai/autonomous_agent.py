@@ -12,10 +12,10 @@ The four guardrails:
 * **max_iterations** (Req 6.3) — the loop stops after at most ``max_iterations``
   model turns with ``stop_reason="max_iterations"``.
 * **allowed_tools** (Req 6.4, least privilege) — a requested tool absent from
-  ``allowed_tools`` is *refused*: it is never executed, a refusal observation is
-  fed back, and the loop continues. This is a per-call refusal, not a
-  loop-terminating guardrail, which is why ``stop_reason`` has no "forbidden"
-  member.
+  ``allowed_tools`` is *refused*: it is never executed, the refused attempt is
+  recorded as a step, and the loop stops with ``stop_reason="disallowed_tool"``
+  and ``final_output=None``. A disallowed tool call is a hard stop (OWASP
+  "excessive agency"), distinct from the ``denied`` approval rejection.
 * **approval_hook** (Req 6.5) — a tool flagged ``dangerous`` must clear
   ``approval_hook`` first; a rejection stops the loop with
   ``stop_reason="denied"`` and ``final_output=None``.
@@ -111,7 +111,7 @@ async def run_autonomous_agent(
         An :class:`~patterns_contracts.AgentRunResult` whose ``steps`` record
         every attempted iteration, whose ``final_output`` is the answer on
         ``completed`` (else ``None``), and whose ``stop_reason`` is fixed to the
-        four-value guardrail vocabulary (Req 6.2).
+        five-value guardrail vocabulary (Req 6.2).
 
     Raises:
         ValueError: If ``max_iterations`` is not positive or ``budget`` is
@@ -150,8 +150,21 @@ async def run_autonomous_agent(
         tool = registry.get(name)
 
         if tool is None:
-            observation = _refused_observation(name)
-        elif tool.dangerous and not approval_hook(name, args):
+            steps.append(
+                AgentStep(
+                    index=index,
+                    tool=name,
+                    observation=_refused_observation(name),
+                    budget_spent=tokens,
+                )
+            )
+            return AgentRunResult(
+                steps=steps,
+                final_output=None,
+                stop_reason="disallowed_tool",
+                total_budget_spent=total + tokens,
+            )
+        if tool.dangerous and not approval_hook(name, args):
             steps.append(
                 AgentStep(
                     index=index,
@@ -166,8 +179,7 @@ async def run_autonomous_agent(
                 stop_reason="denied",
                 total_budget_spent=total + tokens,
             )
-        else:
-            observation = tool.run(args)
+        observation = tool.run(args)
 
         steps.append(
             AgentStep(index=index, tool=name, observation=observation, budget_spent=tokens)

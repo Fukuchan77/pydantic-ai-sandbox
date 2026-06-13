@@ -82,7 +82,9 @@ class AgentRunResult(BaseModel):
         default=None,
         description="Goal answer, or None when a guardrail stopped the loop first.",
     )
-    stop_reason: Literal["completed", "max_iterations", "budget_exceeded", "denied"] = Field(
+    stop_reason: Literal[
+        "completed", "max_iterations", "budget_exceeded", "denied", "disallowed_tool"
+    ] = Field(
         description="Closed vocabulary recording why the loop stopped.",
     )
     total_budget_spent: int = Field(
