@@ -69,7 +69,7 @@ _Boundary:_ `patterns/rag/.python-version`, `patterns/rag/pyproject.toml`, `patt
 _Depends:_ 0
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 6.1, 6.5
 
-- [ ] 1.1 Task 0 で確定した配置に従い、レーンの Python を `3.13` に固定し、独立 uv
+- [x] 1.1 Task 0 で確定した配置に従い、レーンの Python を `3.13` に固定し、独立 uv
   プロジェクトの `pyproject.toml` を作成する（deps: docling / llama-index-core / 埋め込み
   プロバイダ、`tool.uv.sources` で `../contracts` パス依存、ruff・pyright strict・pytest
   設定、`fail_under` 初期フロア、pip-audit を dev 依存に追加、pytest env に
@@ -77,7 +77,7 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.4, 6.1, 6.5
   _Boundary:_ `patterns/rag/.python-version`, `patterns/rag/pyproject.toml`
   _Depends:_ 0
   _Requirements:_ 1.1, 1.2, 6.1, 6.5
-- [ ] 1.2 パッケージ初期化と import スモークテストを作成し、`uv.lock` を `--locked`
+- [x] 1.2 パッケージ初期化と import スモークテストを作成し、`uv.lock` を `--locked`
   解決可能に生成する（`patterns_rag` パッケージが import でき、レーン間 import を
   持たないことをテストで担保）。
   _Boundary:_ `patterns/rag/src/patterns_rag/__init__.py`, `patterns/rag/tests/unit/test_smoke.py`, `patterns/rag/uv.lock`
@@ -86,8 +86,22 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.4, 6.1, 6.5
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+実装（Task 1, 2026-06-13 / uv sync 140 pkg）:
+
+- **PoC 上書き完了**: throwaway `package=false` PoC pyproject を正式レーン定義へ置換
+  （hatchling build, `packages=["src/patterns_rag"]`, dev群: pip-audit/pyright/
+  pytest/pytest-asyncio/pytest-cov/**pytest-env**/ruff）。runtime deps は Task 0 で
+  実証済みの閉包を温存（docling-core[chunking]>=2.82 / llama-index-core>=0.14 /
+  ollama embed+llm / openinference / otel）。`.python-version` は uv が PoC 時に
+  既に `3.13` を生成済みで無変更。
+- **HF_HUB_OFFLINE 配線**: `[tool.pytest.ini_options] env=["HF_HUB_OFFLINE=1"]`
+  を `pytest-env` で実現（conftest は 1.x boundary 外のため pyproject 経由を採用）。
+- **pyright strict の罠**: 副作用 import の `# noqa: F401` は ruff を黙らせるが
+  pyright `reportUnusedImport` は残る。`importlib.import_module("patterns_rag")` で
+  名前束縛を回避して解消（レーン独立性テストの sys.modules 検査）。
+- **ルート無変更（R1.4/12.2）**: 触れたのは `patterns/rag/**` のみ。root ruff
+  `extend-exclude=["patterns"]` / pyright `exclude=["patterns",…]` により root
+  `mise run check` は構造的に不変。`uv sync --locked` exit 0（NFR-1 再現性）。
 
 ---
 

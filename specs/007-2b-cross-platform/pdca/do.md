@@ -63,3 +63,49 @@ R-1 / R-2 が固定した合否基準）に対する実測値」そのもの。t
   オフライン hermetic（R6.1）の主戦場はここ → Task 1.1/3 で tiktoken 注入を優先実装する。
 - PoC `pyproject.toml` は Task 1.1 で正式レーン定義（ruff/pyright/pytest/coverage/dev 群・
   `fail_under`）に上書きされる throwaway。`package=false` は依存閉包の実測専用設定。
+
+---
+
+## Task 1 — RAG レーンの新設と契約パス配線（2026-06-13）
+
+### 実施（TDD: Red→Green→Refactor）
+
+- **1.1** throwaway PoC pyproject を正式レーン定義へ上書き。hatchling build
+  (`packages=["src/patterns_rag"]`)、`[tool.uv.sources]` で `../contracts` editable
+  パス依存、ruff（llamaindex 等価ルールセット, `known-first-party=["patterns_rag"]`）、
+  pyright strict(py3.13)、pytest(asyncio auto)、`[tool.coverage] fail_under=85`(初期フロア)、
+  dev 群に **pytest-env** 追加、`[tool.pytest] env=["HF_HUB_OFFLINE=1"]`。`.python-version`
+  は PoC 時に uv が生成済みの `3.13` を温存（無変更）。
+- **1.2** RED: `tests/unit/test_smoke.py`（import 健全性 + sys.modules ベースの sibling
+  レーン非 import 検査）を先行作成し、stale PoC venv で `ModuleNotFoundError:
+  patterns_rag` を確認。GREEN: `src/patterns_rag/__init__.py`（scaffold docstring、
+  公開再エクスポートは Task 7.3）作成 → `uv sync`（140 pkg, patterns-rag editable build）
+  → `uv sync --locked` exit 0（NFR-1 再現性）。
+
+### エラーと根本原因（Refactor 痕跡）
+
+- **pyright strict reportUnusedImport**: 副作用 import の `# noqa: F401` は ruff のみ抑止。
+  pyright は別系統で残存。→ 名前束縛を捨てる `importlib.import_module("patterns_rag")` に
+  置換して根治（symptom の `# type: ignore` 追加を回避）。
+- **ruff format**: 初版の `frozenset({...})` 改行を format 規約が 1 行へ。`ruff format`
+  適用で解消。
+
+### VERIFY（検証ゲート証跡）
+
+```
+ruff check .          → All checks passed!
+ruff format --check . → 2 files already formatted
+pyright               → 0 errors, 0 warnings, 0 informations
+pytest --cov          → 2 passed / src/patterns_rag/__init__.py 100% /
+                        Required 85.0% reached (Total 100.00%)
+uv sync --locked      → exit 0
+git status            → patterns/rag/** のみ（root 無変更）
+```
+
+### 学び（Act 候補）
+
+- patterns/ レーンの「副作用 import を伴う独立性テスト」は `importlib.import_module` が
+  pyright strict と両立する正攻法。今後の sibling-isolation テストの定石にする。
+- root の `extend-exclude=["patterns"]`（ruff）/ `exclude=["patterns"]`（pyright）により、
+  レーン追加は root `mise run check` を構造的に汚さない。R1.4/12.2 は「root ファイル
+  無変更 + 除外設定」で機械的に担保でき、毎回 root 全チェックを回す必要はない。
