@@ -211,3 +211,238 @@
   root `.venv` に対する `VIRTUAL_ENV` 不一致 warning を出すが、contracts 配下の
   `.venv` を対象に解決・検証は正常完了（exit 0）— 無害。
 - これで Major Task 1（shared-contracts パッケージ新設）の全サブタスク（1.1〜1.5）完了。
+
+---
+
+## Task 2.1 — 新4パターン README 正本 fenced block 新設
+
+### 実施内容
+
+- `patterns/prompt-chaining/`・`parallelization/`・`evaluator-optimizer/`・
+  `autonomous-agent/` の4ディレクトリと各 `README.md` を新設。各 README に
+  `## パターン契約（正本）` を置き、`patterns_contracts` の実体と一致する正本
+  ```python fenced block を記載（routing/orchestrator-workers の既存スタイル踏襲:
+  bare annotation + JP インラインコメント、`Literal` はフィールド annotation 内
+  インライン）。必須4セクション本文・3実装表は Task 11 が所有のため未記載。
+- 正本ブロック内容（パッケージと完全一致）:
+  - prompt-chaining: `ChainStep{name,output}` / `GateOutcome{passed,detail}` /
+    `ChainResult{steps,gate,final_output=None}`（Literal なし）
+  - parallelization: `Branch{index,output}` /
+    `ParallelResult{variant:Literal["sectioning","voting"],branches,aggregate}`
+  - evaluator-optimizer: `Iteration{index,candidate,verdict:Literal["pass","revise"],feedback}` /
+    `OptimizationResult{iterations,final_output,stop_reason:Literal["passed","max_iterations"]}`
+  - autonomous-agent: `AgentStep{index,tool,observation,budget_spent}` /
+    `AgentRunResult{steps,final_output=None,stop_reason:Literal["completed","max_iterations","budget_exceeded","denied"],total_budget_spent}`
+    + `Tool` Protocol / `ApprovalHook` 併記（parser スキップを本文明示）
+
+### RED→GREEN（憲法 I）
+
+境界の正規 drift test は Task 2.3 所有で未存在。その parser 挙動を先取り再現する
+アドホック検証（`/tmp/verify_drift_2_1.py`）を RED→GREEN ゲートに採用 — README の
+fenced block を `ast` でクラス単位抽出（不正 signature `model/llm`・`Tool` Protocol・
+`ApprovalHook` をスキップ）し、`patterns_contracts` の `model_fields` / `Literal`
+語彙と照合。
+
+- RED: README 4件不在 → `MISSING README ×4`, exit 1（パッケージ import は成功 =
+  ゲートに teeth がある）。
+- GREEN: 4 README とも class/field/Literal 完全一致 → `ALL MATCH`, exit 0。
+- ドリフト検知力の実証: parallelization で `aggregate→aggregated` 改名 + `voting`
+  語彙除去を一時注入 → `DRIFT in parallelization`（field set / Literal 両方の差分を
+  検出, exit 1）→ 復元で `ALL MATCH`（exit 0）。
+
+### 検証ゲート（実測）
+
+- 境界は README.md（markdown）のみ。プロジェクトに markdown linter（markdownlint/
+  mdformat）・該当 test/build コマンドは未設定（正規 drift test は Task 2.3 が新設）。
+  → 本タスクの意味ある検証は上記 drift-mirror ゲート（`ALL MATCH`, exit 0）。
+- `patterns/contracts/` は無改変（`git status --short patterns/contracts/` 空）。
+- root `mise run check` は patterns/ 除外により本変更の影響を受けない（NFR-3 / R13.2）。
+
+### 計画からの逸脱・知見
+
+- 逸脱なし（plan.md「docs / security / taxonomy」§ Owns: 正本 fenced block）。
+- 知見: 正本ブロック抽出の曖昧性回避として所在説明の散文に literal な ```python を
+  置かない（「下記の Python コードブロック」表記）。Task 2.3 parser の
+  `index("```python")` 誤マッチ防止の前提を README 側で先に確立。
+- 知見: drift parser は `model/llm` 等の不正 signature を含むため**全ブロック
+  `ast.parse` 不可** → クラス単位の textual 抽出が必須。この設計制約を 2.1 の
+  検証ハーネスで実証済み（Task 2.3 実装の前提として有効）。
+
+## Task 2.2 — routing / orchestrator-workers README 契約所在記述の更新
+
+### 実施内容
+
+- `patterns/routing/README.md`・`patterns/orchestrator-workers/README.md` の
+  `## パターン契約（正本）` 直下の所在記述を、新4パターン（Task 2.1）と同一の
+  散文テンプレへ統一: 「契約の実体は依存ゼロの `patterns_contracts` パッケージ /
+  下記 Python コードブロックが正本 / `test_contract_drift.py` が両者一致を1点検証
+  （Req 2.1–2.3 / NFR-5）/ エントリ signature は parser スキップ」。
+- routing は旧記述（「各レーンの `contracts.py` はこの定義の複製。ドリフトは
+  ルートの `tests/unit/test_patterns_contract_sync.py` が検知」）を置換 — 旧 root
+  クロス複製テストへの参照を除去（Req 1.5、その実体は Task 2.4 で削除）。
+- orchestrator-workers は元々所在記述が無く、heading 直後に同テンプレを新規挿入。
+- 既存正本 ```python fenced block（routing 3シンボル / orchestrator-workers 4
+  シンボル + 不変条件）は**無改変**。所在記述に literal な ```python を置かない
+  Task 2.1 の前提も維持。
+
+### RED→GREEN（憲法 I）
+
+境界の正規 drift test は Task 2.3 所有で未存在のため、その parser 挙動を先取り
+再現する drift-mirror に Task 2.2 固有の prose-location アサーションを足した
+アドホック検証（`/tmp/verify_drift_2_2.py`）を RED→GREEN ゲートに採用。両 README
+正本ブロックを `ast`/textual でクラス単位抽出（`model/llm` 不正 signature を
+スキップ）し `patterns_contracts.model_fields` / `Literal` 語彙と照合 + 所在記述の
+文言を検査。
+
+- RED: 編集前 → drift 部は ALL MATCH（正本無改変なので当然）だが prose 部が 6 件
+  失敗（routing: 旧 sync-test 参照残存 / 旧「複製」記述残存 / `patterns_contracts`
+  参照欠如 / `test_contract_drift.py` 参照欠如、orchestrator-workers: 新2参照欠如）、
+  exit 1。ゲートに teeth がある（所在記述の差分を検知する）ことを確認。
+- GREEN: 編集後 → `ALL MATCH (drift mirror) + prose location updated`, exit 0。
+
+### 検証ゲート（実測）
+
+- 境界は README.md（markdown）2件のみ。markdown linter / 該当 test/build は
+  プロジェクト未設定（正規 drift test は Task 2.3 が新設）→ 意味ある検証は上記
+  drift-mirror + prose ゲート（exit 0）。
+- 正本ブロック無改変の機械確認: `git diff` 上 class/field/`async def` 行の増減は
+  ゼロ（変更は所在記述の散文行のみ。routing -2/+9、orchestrator-workers +8）。
+- `patterns/contracts/` は無改変（`git status --short patterns/contracts/` 空）。
+- root `mise run check` は patterns/ 除外により本変更の影響を受けない（NFR-3 / R13.2）。
+
+### 計画からの逸脱・知見
+
+- 逸脱なし（plan.md「docs / security / taxonomy」§ Owns: 所在記述更新）。
+- 知見: orchestrator-workers は旧 README に所在記述自体が無かった（routing のみ旧
+  root テスト参照を持っていた）。タスク文言「契約所在記述を…へ更新」を、欠落側は
+  新規挿入で充足する解釈を採り、2レーンで所在記述テンプレを対称化。
+- 知見: drift-mirror 部は正本ブロック無改変ゆえ RED 時点で既に MATCH。Task 2.2 の
+  実質的な RED→GREEN は prose-location アサーションが担う（ドキュメント更新タスク
+  でも実行可能ゲートに teeth を持たせるための構成）。
+
+## Task 2.3 — 単一点ドリフトテストの作成
+
+### 実施内容
+
+- `patterns/contracts/tests/unit/test_contract_drift.py` を新設（境界どおり1ファイル）。
+  Task 2.1/2.2 で先取り実証した drift-mirror parser を正規テストへ昇格し、旧 root
+  クロス複製テスト（`tests/unit/test_patterns_contract_sync.py`、削除は Task 2.4）の
+  検知力を単一点へ縮約。
+- **README 側パース**: 6 README（routing/orchestrator-workers/新4）の `## パターン契約`
+  見出し直下 ```python fence を heading anchor で抽出（Task 11 が追加する4セクションの
+  python ブロック混入に頑健）。fence 全体は entry signature の `*, model/llm` が非合法
+  Python のため `ast.parse` 不可 → col-0 を境に top-level 構文へ分割し**構文単位**で
+  パース。クラス（Pydantic モデル）の field 名 + inline `Literal` 語彙、module-level
+  Literal alias（`Route`）を抽出。`Route` のような named alias は2パス（先に alias 収集
+  → 次に `route: Route` の bare Name を解決）でパッケージ側 field-level Literal と対称化。
+- **パッケージ側 introspect**: `patterns_contracts.__all__` を走査し、`BaseModel`
+  サブクラスは `model_fields` + 各 field annotation の `get_origin is Literal` 判定で
+  field literal を、module-level Literal alias は `_value_literal` で抽出。`Tool`
+  （Protocol class, 非 BaseModel）/`ApprovalHook`（Callable, `get_origin` 非 Literal）は
+  **型ベースで自然にスキップ**（plan「型システムの責務」）。
+- **比較（Req 2.3 の3集合）**: クラス集合 / フィールド集合 / Literal 語彙の3テスト +
+  one-class-one-README 不変条件テスト（README merge が二重定義でドリフトを隠す穴を封鎖）。
+
+### TDD（RED→GREEN・憲法 I）
+
+- README↔package は Task 1/2.1/2.2 で既に一致のため、新規テストは生まれながら GREEN。
+  憲法 I の「赤を一度も見ていないテストは証拠でない」を満たすため、タスク指示どおり
+  意図的ドリフトを一時注入して RED を成立させた。
+  - RED: parallelization 正本の `variant: Literal["sectioning", "voting"]` から
+    `"voting"` を一時除去 → `test_documented_literal_vocabularies_match_package` のみ
+    FAILED（`{('ParallelResult','variant'): {'sectioning'}} != {... 'sectioning','voting'}`）。
+    他3テストは PASSED = parser が空集合誤一致でなく**実データを抽出**しており、かつ
+    `Route` alias 解決が README/package 両側で機能している証左（teeth 確認）。
+  - GREEN: 注入を戻す（`git diff patterns/parallelization/README.md` 空 = 完全復元）→
+    `4 passed`。
+
+### 検証ゲート（実測, `patterns/contracts/` 配下）
+
+- `uv run pytest tests/unit/test_contract_drift.py -q` → `4 passed in 0.06s`
+- `uv run pyright`（strict / 3.13）→ `0 errors, 0 warnings, 0 informations`
+- `uv run ruff check .` → `All checks passed!`
+- `uv run ruff format --check .` → `8 files already formatted`
+- `uv run pytest --cov` → `Total coverage: 100.00%`（floor 85% 充足。契約モジュールは
+  宣言のみで import が全行を被覆）
+
+### 計画からの逸脱・知見
+
+- 逸脱なし（plan.md「contract drift guard」§ Owns: README パース + パッケージ
+  introspect + 差分アサート。比較範囲も plan 明示の3集合に限定し Protocol/alias/
+  signature を除外）。
+- 知見: 当初 `import patterns_contracts` を pydantic より前に置き I001、heading 定数に
+  `（正本）` を含め RUF001/002（fullwidth paren ambiguous）、`_readme_shape` が C901
+  （複雑度12>10）に抵触。修正 — import 順を third-party→first-party へ、heading は
+  `（正本）` を落とした ASCII-safe prefix `## パターン契約` で照合（kana/kanji は
+  ambiguous 非該当のため RUF 不発火、かつ前方一致で一意特定）、`_readme_shape` を
+  `_collect_named_literals` / `_collect_model` へ分割。
+- 知見: pyright strict で `getattr(...)` 結果を `member: object` と明示し、
+  `isinstance(member, type)` ブロック末尾で `continue` する構造にすると、フォール
+  スルー時の型が `object`（`type[Unknown]` を含まない）に narrowing され
+  `reportUnknownArgumentType` を回避できる（issubclass を isinstance 内へネスト）。
+
+## Task 2.4 — 旧 root クロス複製ドリフトテストの削除（検知の単一点化）
+
+### 実施内容
+
+- `tests/unit/test_patterns_contract_sync.py` を `git rm` で削除。旧テストは3レーンの
+  `contracts.py` 複製を `ast` で相互比較（クラス集合・フィールド集合の一致）し、Route
+  Literal 語彙 `["billing", "technical", "general"]` の各レーン存在を検査する root-venv
+  テストだった（Spec 005 の AD-3 由来）。Task 2.3 の単一点ドリフトテスト
+  （`patterns/contracts/tests/unit/test_contract_drift.py`、README 正本↔パッケージ実体）が
+  これを置換済みのため、redundant な旧テストを除去（Req 2.2）。
+
+### TDD（RED→GREEN・憲法 I）
+
+- 削除タスクのため新規 test は生まれない。憲法 I の「赤を見ていない検知は証拠でない」を
+  満たすべく、**置換 = 検知喪失でない**ことを生存検知器の teeth 実証で担保した。
+  - baseline GREEN: 生存検知器 `test_contract_drift.py` → `4 passed`。
+  - RED（teeth 実証）: 削除直前に parallelization 正本（`patterns/parallelization/README.md`
+    L22）の `variant: Literal["sectioning", "voting"]` から `"voting"` を一時除去 →
+    `test_documented_literal_vocabularies_match_package` のみ FAILED
+    （`{('ParallelResult','variant'): {'sectioning'}} != {... 'sectioning','voting'}`、
+    他3 PASSED）。単一点に検知力がある証左。
+  - GREEN: `git checkout -- patterns/parallelization/README.md`（diff 空 = 完全復元）→
+    `4 passed`。その後 `git rm` で旧テスト削除。
+
+### 検証ゲート（実測）
+
+- `git ls-files --error-unmatch tests/unit/test_patterns_contract_sync.py` → tracked
+  （削除前確認）。削除後 `ls` → `No such file or directory`、`git status` → `D`（staged）。
+- `uv run pytest --collect-only -q`（root）→ `281 tests collected`、dangling 参照ゼロ
+  （削除モジュールへの import 残存なし）。
+- `mise run cov`（root 完全スイート + カバレッジゲート）→ `277 passed, 4 skipped`、
+  `Total coverage: 98.83%`（floor 98% 充足）。旧テストは src/ を import せず `ast` 解析
+  のみのため、削除による root カバレッジ低下はゼロ（想定どおり）。
+- 生存検知器 `test_contract_drift.py`（contracts venv）→ `4 passed`。
+
+### 計画からの逸脱・知見
+
+- 逸脱なし（plan.md File Structure Plan: `tests/unit/test_patterns_contract_sync.py` =
+  Delete、R2.2「単一点ドリフトテストへ置換」どおり）。
+- 削除順序の妥当性: 旧テストは Task 3 で削除される各レーン `contracts.py` を読むため、
+  置換器（2.3）確立後・レーン複製削除（3）前の本タスクが正しい削除点。今削除しないと
+  Task 3 で旧テストが `FileNotFoundError` で赤化する。
+- **境界外 stale 参照の申し送り**: `patterns/README.md:50-51` が旧テスト名と「契約は
+  レーン間で複製」という旧アーキテクチャを記述。当該ファイルは Task 11.2 の境界
+  （「contracts パッケージを注記する」）に属するため本タスクでは無改変とし、11.2 で
+  集約パッケージ + 単一点ドリフトテストへの書換えを申し送り（境界規律遵守。Task 2.2 が
+  routing README から旧 sync-test 参照を除去しつつ本体削除を 2.4 へ申し送ったのと対称）。
+- これで Major Task 2（契約ドリフト検知の単一点化）の全サブタスク（2.1〜2.4）完了。
+
+### Task 2.3 — adversarial-review 指摘の修正（one-README 不変条件の teeth 化）
+
+- **指摘（HIGH）**: `test_each_package_model_is_documented_in_exactly_one_readme` が
+  「同一クラスを2 README に記載した場合を検知する」と名称・コメントで明言する一方、
+  `_OWNERS` が `dict[str,str]` のため重複キーが潰れ、`set(_OWNERS) == _PACKAGE.classes`
+  は二重ドキュメントに対し不変 = **検知できない**ことを実証（`Branch` を
+  evaluator-optimizer README へ複製注入 → 4テスト全 PASS）。
+- **修正**: `_readme_shape` の `owners` を `list[tuple[str,str]]` へ変更し全
+  `(class, pattern)` ペアを保持。不変条件テストを `Counter` ベースの重複検出
+  （`count > 1` を列挙）+ set 一致の2段アサートへ書換え。`collections.Counter` を import。
+- **RED→GREEN（憲法 I）**: 修正後に同一注入を再投入 → 当該テストのみ FAILED
+  （`{'Branch': ['evaluator-optimizer', 'parallelization']}`、他3 PASSED）= teeth 確認。
+  注入を `git restore` で完全除去（diff 空）→ `4 passed`。
+- **検証ゲート（contracts）**: ruff All checks passed / format 8 files clean /
+  pyright(strict,3.13) 0 errors / coverage 100%（floor 85%）/ pytest 4 passed。
+  境界（`patterns/contracts/tests/`）内のみ改変、README 6件は無改変。
