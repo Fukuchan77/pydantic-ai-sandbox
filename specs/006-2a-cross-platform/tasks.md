@@ -64,6 +64,21 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
 <!-- Empty at generation. Implementer appends 1-3 bullet learnings after
 completing this major task. -->
 
+- 5.2: beeai は `run_prompt_chain` を BeeAI Workflow（Pydantic `_ChainState`）の
+  `outline → draft → finalize` 逐次ステップで実装（routing/orchestrator-workers と
+  同型）。早期終了は draft ステップ内でゲート判定し**不合格時に `Workflow.END` へ
+  即遷移**（`final_output` は `None` のまま）＝ステートマシン上で silent 継続を構造的に
+  封鎖（Req 3.3）。`steps` はゲート前2件のみ。GATE_MIN_WORDS=3 を3レーン共通に維持。
+- 5.2: 手動スパン（Req 9.1）は routing/orchestrator と同様パターン関数に instrumentation
+  引数を持たせず、呼出側が `traced(provider, "pattern.prompt_chaining", ...)` でラップ
+  （pydantic-ai 5.1 の `instrument_model` 注入とは異なるレーン固有方式）。span test は
+  既存 `test_observability.py` の routing 流儀を踏襲し pattern-level span 名の存在を確認。
+- 5.2: 連鎖（3.2）・早期終了（3.3）の観測には constant-text の `ScriptedChatModel` では
+  不十分なため、test 境界に `_RecordingChatModel`（call cursor + prompt 記録）をローカル
+  定義（pydantic-ai 5.1 の `_recording_model` と対称。境界は本2ファイルのみ、support は
+  Task 4.2 所有のため無改変）。`Message.text` で UserMessage 本文を抽出し step n の prompt が
+  step n-1 出力を含むことをアサート、呼出回数 = pre-gate ステップ数で finalize 未到達を観測。
+
 - 1.1: スケルトン検証は test ファイル不在（drift test は Task 2.3 が所有）のため
   `import patterns_contracts` の RED→GREEN + ruff/format/pyright ミラー + `uv build`
   をゲートとした。pyright strict・全 ruff ルールが空 `__init__`（docstring + 空
@@ -419,23 +434,46 @@ _Boundary:_ `patterns/frameworks/*/src/patterns_*/prompt_chaining.py`, `patterns
 _Depends:_ 4
 _Requirements:_ 3.1, 3.2, 3.3, 7.3, 9.1
 
-- [ ] 5.1 (P) pydantic-ai: `run_prompt_chain` を複数 `agent.run` の逐次連結で
+- [x] 5.1 (P) pydantic-ai: `run_prompt_chain` を複数 `agent.run` の逐次連結で
       実装し（instrument 適用）、正常系 + ゲート不合格の単体テストを書く
       _Boundary:_ `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/prompt_chaining.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_prompt_chaining.py`
       _Depends:_ 4.1
       _Requirements:_ 3.1, 3.2, 3.3, 7.3, 9.1, NFR-2
-- [ ] 5.2 (P) beeai: `run_prompt_chain` を Workflow（Pydantic state）の逐次ステップで
+- [x] 5.2 (P) beeai: `run_prompt_chain` を Workflow（Pydantic state）の逐次ステップで
       実装し（手動スパン）、正常系 + ゲート不合格の単体テストを書く
       _Boundary:_ `patterns/frameworks/beeai/src/patterns_beeai/prompt_chaining.py`, `patterns/frameworks/beeai/tests/unit/test_prompt_chaining.py`
       _Depends:_ 4.2
       _Requirements:_ 3.1, 3.2, 3.3, 7.3, 9.1
-- [ ] 5.3 (P) llamaindex: `run_prompt_chain` を `@step` の直列連鎖で実装し
+- [x] 5.3 (P) llamaindex: `run_prompt_chain` を `@step` の直列連鎖で実装し
       （OpenInference 計装）、正常系 + ゲート不合格の単体テストを書く
       _Boundary:_ `patterns/frameworks/llamaindex/src/patterns_llamaindex/prompt_chaining.py`, `patterns/frameworks/llamaindex/tests/unit/test_prompt_chaining.py`
       _Depends:_ 4.3
       _Requirements:_ 3.1, 3.2, 3.3, 7.3, 9.1
 
 ### Implementation Notes
+
+- 5.3: llamaindex は `run_prompt_chain` を `PromptChainWorkflow`（event-driven
+  `@step` 直列連鎖）で実装。routing/orchestrator と同型に **イベントで出力を連結** —
+  `outline(StartEvent) → _DraftEvent → draft → _FinalizeEvent | StopEvent →
+  finalize → StopEvent`。早期終了は draft ステップが gate 不合格時に **終端
+  `StopEvent`（`final_output=None`）を直接 emit** し finalize イベントを発行しない＝
+  ステートマシン上で silent 継続を構造封鎖（Req 3.3、beeai の `Workflow.END` 相当を
+  union-return で表現）。`steps` はゲート前2件、GATE_MIN_WORDS=3 を3レーン共通維持。
+- 5.3: 全ステップは plain-text で `llm.acomplete`（structured 不要）。連鎖（3.2）・
+  早期終了（3.3）の観測には constant-text の `ScriptedLLM` では不十分なため、test 境界に
+  `_RecordingLLM`（`CustomLLM` の call cursor + prompt 記録）をローカル定義（pydantic-ai
+  `_recording_model` / beeai `_RecordingChatModel` と対称。support の fake_llm.py は
+  Task 4.3 所有のため無改変）。`complete` シーム1点で `acomplete` 由来の全 entry を駆動、
+  step n prompt が step n-1 出力を含むことをアサート、呼出回数 = pre-gate ステップ数で
+  finalize 未到達を観測。
+- 5.3: 計装は OpenInference の process-global `LlamaIndexInstrumentor`（pydantic-ai 5.1 の
+  `instrument_model` 注入・beeai 5.2 の手動 `traced` とは異なるレーン固有方式）。span test は
+  既存 `test_observability.py` の routing 流儀を踏襲し `instrument_llamaindex` 設置 →
+  run → `uninstrument_llamaindex` で detach、末端 LLM span（`"llm"`/`"complete"` 名）の
+  存在を確認。検証ゲート: ruff All checks passed / format 12 files clean /
+  pyright(strict,3.13) 0 errors / pytest 16 passed・2 skipped（無回帰）/
+  prompt_chaining.py coverage 100%・total 98.35%（floor 85%）。これで Major Task 5
+  （prompt-chaining 3レーン）の全サブタスク（5.1〜5.3）完了。
 
 ---
 
