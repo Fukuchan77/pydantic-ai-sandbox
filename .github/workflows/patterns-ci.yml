@@ -20,12 +20,20 @@ on:
     branches: [main]
     paths:
       - 'patterns/**'
+      # `patterns/**` already matches the shared package, but contracts is a
+      # first-class CI surface (the single source of truth the lanes import),
+      # so it is listed explicitly per Req 12.1.
+      - 'patterns/contracts/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   pull_request:
     branches: [main]
     paths:
       - 'patterns/**'
+      # `patterns/**` already matches the shared package, but contracts is a
+      # first-class CI surface (the single source of truth the lanes import),
+      # so it is listed explicitly per Req 12.1.
+      - 'patterns/contracts/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -78,5 +86,50 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 7.2: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # The shared patterns/contracts package (Spec 006-2a Req 1.1) is the single
+  # source of truth the lanes import via `tool.uv.sources`. It is its own uv
+  # project on Python 3.13 (the lane floor, NFR-5), so it gets a dedicated job
+  # mirroring the lane gates rather than a matrix entry. The pytest step runs
+  # tests/unit/test_contract_drift.py — the single-point drift guard asserting
+  # README 正本 == package (Req 2.1/2.2). Req 12.1.
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/contracts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads patterns/contracts/.python-version (3.13) and provisions the
+      # matching interpreter — no mise needed (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/contracts/uv.lock
+
+      - name: Sync contracts dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Includes the single-point contract drift guard (README 正本 == package).
+      - name: pytest (offline + drift, coverage floor 85)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 005 Req 10.2: dependency CVE scan for the shared package too.
       - name: pip-audit
         run: uv run pip-audit

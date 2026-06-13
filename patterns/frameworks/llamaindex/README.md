@@ -1,26 +1,36 @@
 # patterns-llamaindex — LlamaIndex Workflows レーン
 
-クロスフレームワーク・パターン集（Spec 005）の LlamaIndex 実装。
-パターン契約の正本は `patterns/routing/README.md` /
-`patterns/orchestrator-workers/README.md` を参照。
+クロスフレームワーク・パターン集（Spec 005 / 006-2a）の LlamaIndex 実装。
+6パターン（routing / orchestrator-workers / prompt-chaining / parallelization /
+evaluator-optimizer / autonomous-agent）を提供する。各パターン契約の正本は
+`patterns/<pattern>/README.md`、型実体は共有パッケージ `patterns_contracts`
+（`tool.uv.sources` のパス依存で import、レーン内に複製を持たない — NFR-3 / NFR-5）。
+タクソノミー索引は `patterns/README.md`。
 
 ## セットアップ / 実行
 
 ```bash
 uv sync --all-groups          # Python 3.13 / 独立 venv（ルートとは別解決）
-uv run pytest                 # オフラインユニット（ネットワーク不要）
+uv run pytest                 # 全6パターンのオフラインユニット（ネットワーク不要）
 uv run ruff check . && uv run ruff format --check . && uv run pyright
-RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=<model> uv run pytest tests/integration  # 要ローカル Ollama
+RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=<model> uv run pytest tests/integration  # 6パターン live（要ローカル Ollama）
 ```
+
+各パターンは `run_<pattern>` 非同期エントリ関数として公開され、`llm=` 引数で
+`LLM` を注入する（テストは `ScriptedLLM`、結合は Ollama）。
 
 ## 構成
 
 | ファイル | 役割 |
 |---|---|
-| `src/patterns_llamaindex/contracts.py` | パターン契約（レーン間複製、正本はパターン README） |
 | `src/patterns_llamaindex/routing.py` | routing: Workflow `@step classify`（astructured_predict）→ `@step answer` |
-| `src/patterns_llamaindex/orchestrator_workers.py` | `ctx.send_event` fan-out → 並列 `work` → `ctx.collect_events` fan-in |
+| `src/patterns_llamaindex/orchestrator_workers.py` | orchestrator-workers: `ctx.send_event` fan-out → 並列 `work` → `ctx.collect_events` fan-in |
+| `src/patterns_llamaindex/prompt_chaining.py` | prompt-chaining: `run_prompt_chain` — イベント駆動 `@step` の直列チェーン（outline→draft→finalize）、ステップ間にプログラム検証ゲート |
+| `src/patterns_llamaindex/parallelization.py` | parallelization: `run_parallelization` — `variant` で sectioning / voting を選ぶ並列ファンアウト |
+| `src/patterns_llamaindex/evaluator_optimizer.py` | evaluator-optimizer: `run_evaluator_optimizer` — generator→evaluator ループ（pass/revise、`max_iterations` 上限） |
+| `src/patterns_llamaindex/autonomous_agent.py` | autonomous-agent: `run_autonomous_agent` — `llm.acomplete` 直駆動の手動ツールループ。4ガードレール + 閉じた `stop_reason` 語彙をレーンが保持 |
 | `src/patterns_llamaindex/observability.py` | `configure_tracing()` + OpenInference `LlamaIndexInstrumentor`（プロセスグローバル） |
+| 契約（型実体） | 共有 `patterns_contracts` をパス依存で import（レーン内複製なし、NFR-3） |
 | `tests/support/fake_llm.py` | `ScriptedLLM`（CustomLLM。構造化出力はテキスト補完プログラム + JSON パーサ経由） |
 
 ## 設計メモ

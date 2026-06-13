@@ -97,7 +97,9 @@ branch = true
 relative_files = true
 
 [tool.coverage.report]
-# Initial lane floor (Spec 005 NFR-4); ratchet upward as patterns accrete.
-fail_under = 85
+# Ratcheted 85 -> 98 (Spec 006-2a Req 7.4 / NFR-4): with all six patterns the
+# lane lands at ~99% offline, so the floor rises to the root app's level to
+# lock in the gain. Raise further as coverage climbs.
+fail_under = 98
 show_missing = true
 skip_covered = false
