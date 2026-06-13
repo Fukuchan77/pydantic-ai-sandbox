@@ -157,25 +157,51 @@ _Boundary:_ `patterns/rag/src/patterns_rag/chunking.py`, `patterns/rag/tests/fix
 _Depends:_ 1
 _Requirements:_ 2.1, 2.2, 2.3, 4.4, 6.2
 
-- [ ] 3.1 事前変換 `DoclingDocument` 固定資産 `sample.docling.json` を作成し、変換器を
+- [x] 3.1 事前変換 `DoclingDocument` 固定資産 `sample.docling.json` を作成し、変換器を
   CI 経路外に追い出す（ADR-3）。
   _Boundary:_ `patterns/rag/tests/fixtures/sample.docling.json`
   _Depends:_ 1
   _Requirements:_ 6.2
-- [ ] 3.2 `chunk_document(doc, *, source, tokenizer, max_tokens)` を実装する。実物
+- [x] 3.2 `chunk_document(doc, *, source, tokenizer, max_tokens)` を実装する。実物
   `HybridChunker` で決定論チャンク化し、`locator` 文字列化規約（page→section→char,
   ADR-4）と `chunk_id` 序数導出（`f"{source}::{ordinal:04d}"`）、`ChunkRecord`
   dataclass を提供する。golden 一致テストを先行作成（Red）。
   _Boundary:_ `patterns/rag/src/patterns_rag/chunking.py`, `patterns/rag/tests/unit/test_chunking_golden.py`
   _Depends:_ 3.1
   _Requirements:_ 2.1, 2.2, 2.3, 4.4
-- [ ] 3.3 固定資産をチャンク化した既知結果を `golden_chunks.json` として手動生成し、
+- [x] 3.3 固定資産をチャンク化した既知結果を `golden_chunks.json` として手動生成し、
   チャンク境界・`chunk_id`・`locator` を固定する（更新は差分レビュー必須）。
   _Boundary:_ `patterns/rag/tests/fixtures/golden_chunks.json`
   _Depends:_ 3.2
   _Requirements:_ 6.2
 
 ### Implementation Notes
+
+実装（Task 3, 2026-06-13 / docling-core[chunking], CPython 3.13.7）:
+
+- **トークナイザ確定（R-1 クローズ）**: Task 0 が暫定した tiktoken 注入(b)を**実測で棄却**。
+  `cl100k_base` は cold cache で `openaipublic.blob.core.windows.net` から BPE 表を
+  DL する（空 cache + 不正 proxy で `ProxyError` 再現）ため hermetic unit に不適。
+  **確定**: `chunk_document` の `tokenizer` を DI seam（embed/llm フェイクと同型）とし、
+  unit は決定論オフライン `WordTokenizer(BaseTokenizer)`（語数=トークン数, 資産ゼロ）を
+  注入。`get_tokenizer()` は分割時 `semchunk` が呼ぶため bound counter を返す必須。
+- **実物 HybridChunker**: チャンカは実物・既定（merge_peers）。tokenizer のみ注入フェイク。
+  `chunk_document` は `max_tokens<1` と `tokenizer.get_max_tokens()!=max_tokens` を
+  loud-fail（ValueError）= 境界決定論アンカー。`ChunkRecord`（frozen slots dataclass:
+  chunk_id/source/locator/text）、text=`chunker.contextualize(chunk)`。
+- **locator 規約（ADR-4, R4.4）**: 純関数 `derive_locator(page_no/headings/charspan)` を
+  page→section→char 優先で実装し全分岐を単体被覆。`ProvenanceItem.page_no` は
+  非Optional `int` のため実 docling では実質 `page=` 分岐に収束、section/char は型非依存
+  退避（純関数テストで担保）。アンカー皆無は loud-fail。
+- **pyright strict narrowing**: `chunk()` は `Iterator[BaseChunk]`（meta は BaseMeta）。
+  `DocMeta` へ `isinstance` narrow（不成立は defensive `# pragma: no cover`）。`DocMeta`
+  は正本 `docling_core.transforms.chunker.doc_chunk` から import（reportPrivateImportUsage 回避）。
+- **固定資産**: `sample.docling.json`（3頁・3見出し・prov付, `save_as_json` 生成・
+  `load_from_json` で読込）。`golden_chunks.json`=4チャンク（page1 merge / page2 単 /
+  page3 split×2 = locator 重複でも chunk_id 別）を実装出力から生成・目視確定。
+- **検証**: 12 新規テスト + smoke 2 = 14 passed。ruff/format/pyright strict グリーン、
+  coverage 94.83%（chunking.py 95%, gate 85）。HF_HUB_OFFLINE=1 下・ネットワークゼロ。
+  ルート・他レーン無変更（boundary 4ファイルのみ）。
 
 ---
 
