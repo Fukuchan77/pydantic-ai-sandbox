@@ -193,14 +193,15 @@ async def test_forwards_tool_call_args_to_the_tool() -> None:
     assert result.steps[0].observation == "recorded"
 
 
-async def test_refuses_tool_outside_allowed_list_and_continues() -> None:
+async def test_stops_with_disallowed_tool_outside_allowed_list() -> None:
     # Req 6.4 (least privilege): a call to a tool absent from allowed_tools is
-    # refused — never executed — and a refusal observation is fed back so the
-    # loop can continue to a legitimate completion.
+    # refused — never executed — the refused attempt is recorded, and the loop
+    # stops with stop_reason="disallowed_tool" (a hard stop, distinct from
+    # denied). Only the disallowed turn is scripted: if the loop wrongly
+    # continued it would request a second turn and the fake would fail loudly.
     llm = TurnSequencedLLM(
         [
             ToolTurn(tool="shell", args="rm -rf /", tokens=1),
-            FinalTurn(text="finished safely", tokens=1),
         ]
     )
 
@@ -213,8 +214,8 @@ async def test_refuses_tool_outside_allowed_list_and_continues() -> None:
         budget=100,
     )
 
-    assert result.stop_reason == "completed"
-    assert result.final_output == "finished safely"
+    assert result.stop_reason == "disallowed_tool"
+    assert result.final_output is None
     assert len(result.steps) == 1
     assert result.steps[0].tool == "shell"
     # The refused tool was not executed: the observation is the refusal marker,
