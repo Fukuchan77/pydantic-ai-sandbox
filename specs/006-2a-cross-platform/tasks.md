@@ -308,19 +308,19 @@ _Boundary:_ `patterns/frameworks/*/tests/support/`
 _Depends:_ 3
 _Requirements:_ 7.1, 7.2
 
-- [ ] 4.1 (P) pydantic-ai フェイクを拡張する（`FunctionModel` を履歴中の
+- [x] 4.1 (P) pydantic-ai フェイクを拡張する（`FunctionModel` を履歴中の
       tool-return 数で進むターン列モード、ブランチ index→出力マップモード、
       評価器 verdict 列の cursor モード、決定論的インメモリツールスタブを追加）
       _Boundary:_ `patterns/frameworks/pydantic-ai/tests/support/model_fakes.py`
       _Depends:_ 3.1
       _Requirements:_ 7.1, 7.2
-- [ ] 4.2 (P) beeai フェイクを拡張する（`ScriptedChatModel` の `_create` に呼出
+- [x] 4.2 (P) beeai フェイクを拡張する（`ScriptedChatModel` の `_create` に呼出
       カーソルのターン列モード、index→出力マップ、verdict cursor、インメモリツール
       スタブを追加）
       _Boundary:_ `patterns/frameworks/beeai/tests/support/fake_chat_model.py`
       _Depends:_ 3.2
       _Requirements:_ 7.1, 7.2
-- [ ] 4.3 (P) llamaindex フェイクを拡張する（`CustomLLM` フェイクの `complete` /
+- [x] 4.3 (P) llamaindex フェイクを拡張する（`CustomLLM` フェイクの `complete` /
       `chat` に呼出カーソルのターン列モード、index→出力マップ、verdict cursor、
       インメモリツールスタブを追加）
       _Boundary:_ `patterns/frameworks/llamaindex/tests/support/fake_llm.py`
@@ -328,6 +328,83 @@ _Requirements:_ 7.1, 7.2
       _Requirements:_ 7.1, 7.2
 
 ### Implementation Notes
+
+- 4.1: 既存 `scripted_model`（schema 分岐）を温存しつつ4モードを**独立した factory**
+  へ分割（単一 `_respond` に全部詰めると mccabe C901≤10 を超過するため）。
+  `turn_sequenced_model` は履歴中の `ToolReturnPart` 数を turn index とし（ループ駆動
+  方式に非依存、Req 7.2）、`ToolTurn`/`FinalTurn` 各 turn の `tokens` を
+  `ModelResponse.usage`（`output_tokens`→`total_tokens`）へ載せ予算シームを決定論化。
+  `voting_model` は呼出カーソルで分裂票（例 `["a","a","b"]`→2:1）を供給（Req 4.3）。
+  `verdict_sequenced_model` は output schema に `verdict` プロパティが有れば verdict
+  cursor、無ければ generator text cursor、と既存 schema 分岐方式を踏襲し
+  `revise→…→pass` 遷移を hermetic 再現（Req 5.3/5.4）。`StubTool` は contracts `Tool`
+  Protocol 準拠の決定論スタブ。
+- 4.1: 境界に test ファイル無し（正規 consumer は Task 5–8）のため RED→GREEN は
+  アドホックゲートで成立（Task 1.x/2.x と同パターン）。RED: 新シンボル import が
+  `ImportError`（exit 1）。GREEN: `model.request` 直叩き（`ModelRequestParameters()`
+  必須。`None` だと `prepare_request` で `function_tools` AttributeError）+ `Agent` 経由
+  structured output で4モード全てを決定論アサート → ALL GREEN。
+- 4.1: `StubTool` の Protocol 準拠は `if TYPE_CHECKING: _stubtool_is_tool: type[Tool] = StubTool`
+  で静的保証（関数形 `def _assert...` は pyright `reportUnusedFunction` 違反 → module-level
+  typed 代入へ変更）。`model_fakes.py` は `tests/support/` でカバレッジ source 対象外
+  （`src/` のみ）= 新コードは coverage 値に非影響。検証ゲート: ruff All checks passed /
+  format clean / pyright(strict,3.14) 0 errors / pytest 11 passed・2 skipped（baseline
+  同一）/ coverage 95.77%（floor 85%）。
+- 4.2: beeai は `ChatModel` がクラス基底のため pydantic-ai の factory 関数群ではなく
+  **クラス分割**（`TurnSequencedChatModel`/`VotingChatModel`/`VerdictSequencedChatModel`
+  ＋値クラス `ToolTurn`/`FinalTurn`＋`StubTool`）で4モードを実装。`_BaseScriptedChatModel`
+  が `model_id`/`provider_id`/`_create_stream`（`_create` へ委譲）/structured 既定拒否を
+  共有し、各 `_create` の分岐数を C901≤10 内に保持。turn 進行は履歴非依存で
+  **呼出カーソル**（plan 行165 差分 — beeai はモデル境界に tool-return 履歴が無い）。
+  ToolTurn→`MessageToolCallContent`、FinalTurn→text、`tokens` を
+  `ChatModelUsage.total_tokens` に載せ予算シーム決定論化。verdict は
+  generator=`_create`（text cursor）/ evaluator=`_create_structure`（verdict cursor）の
+  **メソッド分岐**で dispatch（schema 形非依存 → Task 7 の評価器型確定に頑健、4.1 申し送りの
+  schema-property 脆さを回避）。境界に正規 consumer test 無し（Task 5–8）のため 4.1 同様
+  アドホック RED→GREEN: RED=`ImportError: cannot import name 'TurnSequencedChatModel'`、
+  GREEN=4モード＋既存 `ScriptedChatModel` 回帰を `create()`/`create_structure()` 直叩きで
+  決定論アサート（exhaustion は `create()` 経由だと beeai `Run` が `AssertionError`→
+  `ChatModelError` でラップするため `_create` 直叩きで loud-fail を確認）。検証ゲート:
+  ruff All checks passed / format 10 files clean / pyright(strict,3.13) 0 errors /
+  pytest 12 passed・2 skipped（baseline 同一＝無回帰）/ coverage floor 85% 維持
+  （support は coverage source 対象外）。
+- 4.3: llamaindex は `CustomLLM` が Pydantic 基底 + completion-only。beeai と同型の
+  **クラス分割**で4モードを実装（`TurnSequencedLLM`/`VotingLLM`/`VerdictSequencedLLM`
+  ＋値クラス `ToolTurn`/`FinalTurn`＋`StubTool`）。共通 `_BaseScriptedLLM` が
+  `metadata`（non-function-calling）/ `stream_complete`（`complete` へ委譲）を保持し、
+  既存 `ScriptedLLM` もこの基底へ収容（schema 分岐は温存）。`acomplete`/`achat`/
+  `astructured_predict` は `CustomLLM` が sync `complete` から導出するため completion
+  シーム1点で全 entry を駆動（venv 実測で確認）。turn 進行は履歴非依存の**呼出
+  カーソル**（plan 行165 差分）。**dispatch 方式の差異**: beeai は `_create`/
+  `_create_structure` のメソッド分岐だが llamaindex は全出力が `complete` 経由のため
+  **prompt 内容分岐**を採用 — `astructured_predict` の prompt は schema を埋め込み
+  quoted `"verdict"` を含む（venv 実測）ので既存 `ScriptedLLM` の `"route"`/`"subtasks"`
+  ヒューリスティックと同型で verdict cursor を選択（4.1 schema-property dispatch の
+  llamaindex 版）。
+- 4.3: **tool-call シームの設計**: CustomLLM は native tool-call part を持たないため、
+  `ToolTurn`→`{"tool":...,"args":...}` JSON テキスト / `FinalTurn`→plain text とし、
+  Task 8.3 の自律ループが「`"tool"` キーを持つ object に parse できれば tool 呼出、
+  それ以外を最終回答」と解釈する規約を確立（fake docstring + 本ノートで明示）。予算
+  シームは `CompletionResponse.raw["usage"]["total_tokens"]` にターン毎トークンを供給
+  （plan「llamaindex=`CompletionResponse.raw` の usage」/ Task 8.3 が読む）。
+- 4.3: **境界内 pyright 修正2件（loose stubs 起因の根本対応）**: ① `Turn = ToolTurn |
+  FinalTurn` を `type Turn = ...`（真の型エイリアス）へ — 値ユニオンだと PrivateAttr
+  `list[Turn]` 宣言が partially-unknown。② list PrivateAttr の `default_factory=list`
+  を**型付きファクトリ**（`list[Turn]`/`list[dict[str, object]]`/`list[str]`）へ — 
+  LlamaIndex の `CustomLLM` が loose stubs を出すため、bare `list` ファクトリが base
+  経由で `list[Unknown]` に降格する（venv 実測: bare=error / typed=OK / no-default=OK）。
+  verdict 格納は `dict[str, Any]`→`dict[str, object]` とし stored attr から `Any` を排除
+  （pyright strict の reportUnknownVariableType 回避。param は I/O 境界だが concrete dict
+  渡しのため object で十分）。憲法 II の strict を緩めず原因（型情報の供給）を修正。
+- 4.3: RED→GREEN は 4.1/4.2 同様アドホック（境界に正規 consumer test 無し、Task 5–8）。
+  RED=`ImportError: cannot import name 'TurnSequencedLLM'`。GREEN=4モードを実 API
+  （`acomplete`/`apredict`/`astructured_predict`）経由で決定論アサート + `ScriptedLLM`
+  回帰（route/subtasks/text 分岐）+ 各モード exhaustion の loud-fail。検証ゲート: ruff
+  All checks passed / format 10 files clean / pyright(strict,3.13) 0 errors / pytest 12
+  passed・2 skipped（baseline 同一＝無回帰）/ coverage 97.64%（floor 85%、support は
+  coverage source 対象外）。これで Major Task 4（ターン列フェイク基盤の拡張）の全
+  サブタスク（4.1〜4.3）完了 — 3レーンとも turn-sequenced / voting / verdict / StubTool
+  の4モードを備える。
 
 ---
 
