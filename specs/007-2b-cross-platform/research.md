@@ -173,6 +173,29 @@ dev: `pip-audit` / `pyright` / `pytest` / `pytest-asyncio` / `pytest-cov` / `ruf
   + Clarifications と矛盾。(C) グロブ汎用化 = 既存安定タスク広範改修で回帰リスク大。
 - **Consequences**: mise/CI を contracts 前例で**明示配線**（I-6）。observability 複製
   1ファイル。グロブ外配線漏れリスクは contracts 前例の踏襲で緩和。
+- **Spike 実測（Task 0, 2026-06-13 / uv 0.11.21, CPython 3.13.7）**: `patterns/rag/`
+  PoC（`package=false`、runtime = `patterns-contracts`(path `../contracts`) +
+  `docling-core[chunking]>=2.82` + `llama-index-core>=0.14` +
+  `llama-index-embeddings-ollama` + `llama-index-llms-ollama` + OpenInference/OTel）を
+  解決。結果:
+  - **解決パッケージ数 119**（llamaindex レーン 103 → **+16**）。`uv.lock` **240,878 B**
+    （llamaindex 209,045 B → **+31,833 B / +約15%**）。
+  - **`torch` / `nvidia-*` / `onnxruntime` / `scipy` は ABSENT**（最重量の懸念は不発。
+    gap-analysis §3.3 の PyPI 実測を裏付け）。
+  - **`transformers 5.8.1` / `tokenizers 0.22.2` / `safetensors 0.8.0` /
+    `huggingface-hub 1.19.0` / `numpy 2.4.6` / `pillow 12.2.0` は PRESENT**。invert tree で
+    全て **`docling-core[chunking]` 単独経由**（`transformers → docling-core(extra:chunking)
+    → patterns-rag-poc[chunking]`）と確認。
+  - 解決時間 **2.57s**、cold `uv sync --locked` **7.8s wall**、warm `uv sync --locked`
+    再チェック **約2s**（Resolved 119 in 428ms / Checked 116 in 147ms）。
+  - 主要版: `docling-core 2.82.0` / `llama-index-core 0.14.22` /
+    `llama-index-embeddings-ollama 0.9.0` / `llama-index-llms-ollama 0.10.1`。
+- **判断（配置確定）**: **独立レーン `patterns/rag/` を確定**（既定を維持、同居へは倒さない）。
+  torch 不在で同居しても CUDA 級肥大は起きないが、同居は HF トークナイザ群
+  （transformers/tokenizers/safetensors/numpy/pillow, +16 pkg / +約32KB）を RAG 非利用の
+  2 ワークフローパターンが同居する llamaindex レーンの lockfile/CI に注入し責務純度を汚す。
+  タクソノミー不整合（応用レイヤ vs ワークフロー6パターン）は重量と独立した却下理由。
+  → ADR-1 既定（独立）を実測が**上書きせず確定**。
 
 ### ADR-2: RAG 契約を `patterns/contracts/` に単一実体として追加
 
@@ -230,6 +253,13 @@ dev: `pip-audit` / `pyright` / `pytest` / `pytest-asyncio` / `pytest-cov` / `ruf
   オフラインで解決される形（パッケージ同梱資産）でのみ可とし、それも不可なら rag CI ジョブ
   にのみ明示の事前取得ステップを追加する。いずれの場合も unit は `HF_HUB_OFFLINE=1` を強制し
   実ネット到達を loud-fail させ、`max_tokens` を明示固定して境界を決定論化する。
+  - **Spike 実測（Task 0, 2026-06-13）**: 解決閉包に HF トークナイザ群
+    （`transformers`/`tokenizers`/`huggingface-hub`）が `docling-core[chunking]` 経由で入る
+    一方、**`tiktoken` も llama-index-core 経由で既に PRESENT**。rag CI unit ジョブは
+    contracts 前例の `uv sync --locked → pytest` で **`patterns:setup` を経由しない**ため
+    退避策(a)の事前取得は当該ジョブで走らない。→ **主策を (b) tiktoken ベースのトークナイザを
+    `HybridChunker` に注入する方針へ傾ける**（追加依存ゼロでオフライン同梱）。最終確定は
+    ゴールデン安定再生成の可否で Task 3 にて行い、unit は `HF_HUB_OFFLINE=1` を強制する。
 - ⚠️ **R-2 Docling 依存重量の CI 実用性**（R11.4 / NFR-6）— uv.lock 肥大・CI 時間増。
   mitigation: 固定資産化（ADR-3）で変換器を経路外に。実埋め込み（OllamaEmbedding）は
   結合専用 extra に隔離し、必要なら RAG 結合を別ジョブ/別ゲートへ（R11.4 が明示許容）。
@@ -238,6 +268,15 @@ dev: `pip-audit` / `pyright` / `pytest` / `pytest-asyncio` / `pytest-cov` / `ruf
   加えて埋め込みモデル（`OLLAMA_EMBED_MODEL_NAME`）を env 供給 + pull する必要がある
   （現状 env は生成 LLM 1モデルのみ）。埋め込みモデルの追加 pull が daemon ウォームアップ
   時間を著しく増やす場合は、R11.4 隔離（RAG 専用結合ジョブ）へ倒す判断を PoC で確定。
+  - **Spike 判断（Task 0, 2026-06-13）— R11.4 隔離は unit レベルでは非発動**: 実測で
+    `torch`/`nvidia-*`/`onnxruntime`/`scipy` 不在、`uv.lock` +約32KB（+16 pkg）、cold sync
+    7.8s / warm `--locked` 再チェック 約2s。**オフライン unit CI ジョブ**（contracts 前例の
+    `uv sync --locked → pytest`、固定資産ベース、埋め込みモデル不要）には実用的であり、
+    **RAG 専用ジョブへの隔離は不要**。**結合**は既存の gated 結合ジョブに RAG を載せ、
+    `OLLAMA_EMBED_MODEL_NAME` env + 埋め込みモデル pull を追加（Task 12.3）。埋め込み pull が
+    daemon ウォームアップを著しく増やすと**実測された場合のみ** R11.4 の別ジョブ/別ゲートへ
+    隔離（Task 12.3 の CI 実測に委譲）。現時点では先取り隔離せず、隔離はドキュメント化済みの
+    退避策として保持。
 - ⚠️ **R-3 ゴールデン安定性**（R6.2）— Docling/トークナイザ更新でチャンク境界が変動。
   mitigation: バージョンピン + 手動再生成フロー（差分レビュー必須・CI 比較のみ、
   Clarification 4）。固定資産とゴールデンを同時更新。

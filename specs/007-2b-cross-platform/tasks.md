@@ -26,13 +26,13 @@ _Boundary:_ `patterns/rag/pyproject.toml`(PoC), `specs/007-2b-cross-platform/res
 _Depends:_ none
 _Requirements:_ 1.1, 11.4
 
-- [ ] 0.1 `patterns/rag/` 雛形で `uv add docling llama-index-core <埋め込み>` を解決し、
+- [x] 0.1 `patterns/rag/` 雛形で `uv add docling llama-index-core <埋め込み>` を解決し、
   uv.lock サイズ・依存ツリー（`torch`/変換器の引き込み有無）・`uv sync --locked` 時間を
   実測する。
   _Boundary:_ `patterns/rag/pyproject.toml`(PoC)
   _Depends:_ none
   _Requirements:_ 1.1
-- [ ] 0.2 実測に基づき配置（独立 `patterns/rag/` vs llamaindex 同居）と R11.4 隔離（RAG
+- [x] 0.2 実測に基づき配置（独立 `patterns/rag/` vs llamaindex 同居）と R11.4 隔離（RAG
   専用結合ジョブ要否）を確定し、research.md ADR-1 / Risk R-2 に実測値と判断を追記する
   （軽量と実測された場合のみ同居へ倒す。既定は独立レーン）。
   _Boundary:_ `specs/007-2b-cross-platform/research.md`
@@ -41,7 +41,22 @@ _Requirements:_ 1.1, 11.4
 
 ### Implementation Notes
 
-<!-- 実測値（uv.lock 差分・CI 時間・torch 有無）と配置確定判断をここに記録。 -->
+実測（Task 0, 2026-06-13 / uv 0.11.21, CPython 3.13.7）— 詳細は research.md ADR-1 /
+Risk R-1, R-2 の Spike ブロック:
+
+- **依存重量**: 119 pkg / `uv.lock` 240,878 B（llamaindex 103 pkg / 209,045 B 比 +16 pkg /
+  +約32KB）。**`torch`/`nvidia-*`/`onnxruntime`/`scipy` 不在** — 最重量懸念は不発。
+  `transformers 5.8.1`/`tokenizers`/`safetensors`/`numpy`/`pillow` は `docling-core[chunking]`
+  単独経由で PRESENT。`tiktoken` は llama-index-core 経由で既に PRESENT。
+- **時間**: 解決 2.57s / cold `uv sync --locked` 7.8s / warm 再チェック 約2s。
+- **配置確定**: **独立レーン `patterns/rag/`**（既定維持・同居へ倒さない）。torch 不在でも
+  同居は HF 群を RAG 非利用の llamaindex レーンへ注入し責務純度を汚すため却下。
+- **R11.4 隔離**: unit レベルでは**非発動**（オフライン unit に実用的）。結合は既存 gated ジョブに
+  embed pull を追加（Task 12.3）、daemon 肥大が実測された場合のみ別ジョブ隔離（退避策保持）。
+- **R-1 トークナイザ**: rag CI unit は `patterns:setup` 非経由のため、**tiktoken 注入(b)を主策へ**
+  傾ける（追加依存ゼロ）。最終確定は Task 3。unit は `HF_HUB_OFFLINE=1` 強制。
+- **PoC pyproject は throwaway**: Task 1.1 が ruff/pyright/pytest/coverage/dev 群を備えた正式
+  レーン定義で上書きする。`package=false` の PoC は依存閉包の実測専用。
 
 ---
 
