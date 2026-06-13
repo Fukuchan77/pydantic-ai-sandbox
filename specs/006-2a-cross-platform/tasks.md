@@ -856,20 +856,68 @@ _Boundary:_ `patterns/frameworks/*/tests/integration/test_ollama_e2e.py`
 _Depends:_ 5, 6, 7, 8
 _Requirements:_ 8.1, 8.2, 8.3
 
-- [ ] 10.1 (P) pydantic-ai: 新4パターンの契約レベル結合ケースを追加する
+- [x] 10.1 (P) pydantic-ai: 新4パターンの契約レベル結合ケースを追加する
       _Boundary:_ `patterns/frameworks/pydantic-ai/tests/integration/test_ollama_e2e.py`
       _Depends:_ 5.1, 6.1, 7.1, 8.1
       _Requirements:_ 8.1, 8.2, 8.3
-- [ ] 10.2 (P) beeai: 新4パターンの契約レベル結合ケースを追加する
+- [x] 10.2 (P) beeai: 新4パターンの契約レベル結合ケースを追加する
       _Boundary:_ `patterns/frameworks/beeai/tests/integration/test_ollama_e2e.py`
       _Depends:_ 5.2, 6.2, 7.2, 8.2
       _Requirements:_ 8.1, 8.2, 8.3
-- [ ] 10.3 (P) llamaindex: 新4パターンの契約レベル結合ケースを追加する
+- [x] 10.3 (P) llamaindex: 新4パターンの契約レベル結合ケースを追加する
       _Boundary:_ `patterns/frameworks/llamaindex/tests/integration/test_ollama_e2e.py`
       _Depends:_ 5.3, 6.3, 7.3, 8.3
       _Requirements:_ 8.1, 8.2, 8.3
 
 ### Implementation Notes
+
+- 10.1: pydantic-ai lane の `test_ollama_e2e.py` に新4パターンの契約レベル結合ケースを追記
+  （src 無改変、境界はこの test ファイルのみ）。アサーションは contract level のみ — prompt-chaining
+  `steps≥1`＋各 step 非空、parallelization `branches==n`（sectioning, n=2）＋`aggregate` 非空、
+  evaluator/autonomous は `stop_reason ∈ 語彙`（語彙は契約 `model_fields[...].annotation` から
+  `get_args` 導出＝ハードコード回避）。モデル ID は `OLLAMA_MODEL_NAME`/`OLLAMA_BASE_URL` env 由来のみ
+  （Req 8.3）。autonomous は tool schema 未登録のため実モデルは最終回答を返し `completed` 経路、
+  required 引数充足に最小 `_NoopTool`＋`_approve_all`＋budget=1_000_000 を注入。RED→GREEN は
+  test-only タスクのため収集差分（2→6）＋オフライン 6 skipped で import/gate/無回帰を実証し、
+  実モデル GREEN は `RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=granite4.1:8b` で **6 passed
+  in 342.53s**（baseline 2 + 新規 4）。検証ゲート（lane `uv run --no-sync`）: ruff All checks
+  passed / format already formatted / pyright(strict,3.13) 0 errors / オフライン pytest
+  39 passed・6 skipped・coverage 98.85%（floor 85% 満たす, integration は coverage source 対象外）。
+  次は 10.2（beeai）/10.3（llamaindex）。
+- 10.2: beeai lane の `test_ollama_e2e.py` に新4パターンの契約レベル結合ケースを追記
+  （src 無改変、境界はこの test ファイルのみ）。アサーションは 10.1 と完全同一の contract
+  level — prompt-chaining `steps≥1`＋各 step 非空、parallelization `branches==n`（sectioning,
+  n=2）＋`aggregate` 非空、evaluator/autonomous は `stop_reason ∈ 語彙`（`model_fields[...].
+  annotation` の `get_args` 導出＝ハードコード回避）。レーン差分は DI シーム — beeai 全
+  パターン関数は `llm=` キーワード（pydantic-ai 10.1 の `model=` と非対称）で `_ollama_chat_model()`
+  （litellm-backed、`OLLAMA_BASE_URL` の `/v1` を `removesuffix` で剥がす既存 helper）を注入。
+  autonomous は tool schema 未登録のため実モデルは最終回答を返し `completed` 経路、required
+  引数充足に最小 `_NoopTool`（contracts `Tool` 準拠）＋`_approve_all`＋budget=1_000_000 を注入
+  （10.1 と同型、beeai は args が str 固定のため正規化不要）。RED→GREEN は test-only タスクの
+  ため収集差分（2→6）＋オフライン 6 skipped で import/gate/無回帰を実証（実モデル GREEN は
+  Ollama 常駐環境で `RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=granite4.1:8b` 実行時に
+  到達、本環境では未実行＝ゲートにより skip）。検証ゲート（lane `uv run --no-sync`）: ruff
+  All checks passed / format 1 file already formatted / pyright(strict,3.13) 0 errors /
+  オフライン pytest 40 passed・6 skipped（baseline 40 passed・2 skipped + 新規 4 gated = 無回帰）/
+  coverage 98.99%（floor 85% 満たす, integration は coverage source 対象外）。次は 10.3（llamaindex）。
+- 10.3: llamaindex lane の `test_ollama_e2e.py` に新4パターンの契約レベル結合ケースを追記
+  （src 無改変、境界はこの test ファイルのみ）。アサーションは 10.1/10.2 と完全同一の contract
+  level — prompt-chaining `steps≥1`＋各 step 非空、parallelization `branches==n`（sectioning,
+  n=2）＋`aggregate` 非空、evaluator/autonomous は `stop_reason ∈ 語彙`（`model_fields[...].
+  annotation` の `get_args` 導出＝ハードコード回避）。レーン差分は DI シーム — llamaindex 全
+  パターン関数は `llm=` キーワード（beeai と同型, pydantic-ai 10.1 の `model=` と非対称）で
+  `_ollama_llm()`（`llama_index.llms.ollama.Ollama`、`OLLAMA_BASE_URL` の `/v1` を `removesuffix`
+  で剥がす既存 helper、`request_timeout=180.0`）を注入。autonomous は tool schema 未登録のため
+  実モデルは最終回答を返し `completed` 経路、required 引数充足に最小 `_NoopTool`（contracts
+  `Tool` 準拠）＋`_approve_all`＋budget=1_000_000 を注入（10.1/10.2 と同型、llamaindex も args が
+  str 固定のため正規化不要）。RED→GREEN は test-only タスクのため収集差分（2→6）＋オフライン
+  6 skipped で import/gate/無回帰を実証（実モデル GREEN は Ollama 常駐環境で
+  `RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=granite4.1:8b` 実行時に到達、本環境では未実行
+  ＝ゲートにより skip）。検証ゲート（lane `uv run --no-sync`）: ruff All checks passed / format
+  1 file already formatted / pyright(strict,3.13) 0 errors / オフライン pytest 41 passed・6 skipped
+  （baseline 41 passed・2 skipped + 新規 4 gated = 無回帰）/ coverage 99.20%（floor 85% 満たす,
+  integration は coverage source 対象外）。これで Major Task 10（Ollama 結合テスト 3レーン）の全
+  サブタスク（10.1〜10.3）完了。次は Task 11（README・タクソノミー・セキュリティドキュメント）。
 
 ---
 
