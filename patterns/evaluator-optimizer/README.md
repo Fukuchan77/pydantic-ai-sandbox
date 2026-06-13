@@ -32,3 +32,55 @@ async def run_evaluator_optimizer(
 
 不変条件: ループは `verdict == "pass"` か `max_iterations` 到達で停止し、
 `stop_reason` は `passed` / `max_iterations` 以外を取らない（Req 5.2, 5.4）。
+
+## 3実装
+
+| レーン | generator / evaluator dispatch | 評価器の構造化出力 |
+|---|---|---|
+| [pydantic-ai](../frameworks/pydantic-ai/src/patterns_pydantic_ai/evaluator_optimizer.py) | generator=`output_type=str` / evaluator=structured `_Evaluation`。dispatch シームは **JSON schema が `verdict` プロパティを露出**するか | フレームワーク検証済みモデルを直接取得（`instrument_model` 注入） |
+| [beeai](../frameworks/beeai/src/patterns_beeai/evaluator_optimizer.py) | generator=`llm.create`（plain）/ evaluator=`llm.create_structure`。dispatch は**メソッド分岐** | `_Evaluation.model_validate(output.object)` で契約再検証（語彙外 verdict を loud-fail） |
+| [llamaindex](../frameworks/llamaindex/src/patterns_llamaindex/evaluator_optimizer.py) | generator=`llm.acomplete`（plain）/ evaluator=`llm.astructured_predict(_Evaluation, ...)`。dispatch は**プロンプト内容**（quoted `"verdict"`） | 検証済み Pydantic モデルを直接返す（再検証不要なレーン差分） |
+
+3レーンとも **Workflow を使わない plain `for` ループ**（fan-out 無しの純逐次でイベント機構が契約価値を足さないため）。`max_iterations<1` は `ValueError`。
+
+## 必須4セクション
+
+### 型安全
+
+- **構造化出力方式（レーン差分が最も顕著なパターン）**: 評価器のみ構造化出力
+  `_Evaluation{verdict,feedback}`（レーン内 private モデル — `index`/`candidate`
+  はループが stamp）。取得方式が3レーンで異なる: pydantic-ai=schema-property
+  dispatch、beeai=`create_structure` + `model_validate` 再検証、llamaindex=
+  `astructured_predict` の直接検証済みモデル。
+- `verdict` は `Literal["pass","revise"]`、`stop_reason` は
+  `Literal["passed","max_iterations"]` — 早期 return で二値以外を到達不能化
+  （Req 5.4）。
+
+### テスト
+
+- ネットワークゼロ（Req 7.3）。**フェイク台本化手段（レーン差分）**:
+  pydantic-ai=`verdict_sequenced_model`、beeai=`VerdictSequencedChatModel`、
+  llamaindex=`VerdictSequencedLLM` の verdict 列台本フェイクで pass 到達 /
+  max_iterations 打切を決定論検証。
+- feedback の次反復反映（Req 5.3）は cursor フェイクの出力に現れないため、各
+  レーンが**テスト境界ローカル**の記録フェイク（`_recording_model` /
+  `_RecordingChatModel` / `_RecordingLLM`）で「2回目 generator プロンプトが
+  1回目 evaluator feedback + 前 candidate を含む」をアサートする。
+
+### 可観測性
+
+- 計装はレーン毎（routing と同一の3方式）: pydantic-ai=`instrument_model`
+  注入、beeai=手動 `traced`（`pattern.evaluator_optimizer`）、llamaindex=
+  OpenInference process-global instrumentor（Workflow 不在でも
+  `acomplete`/`astructured_predict` の leaf LLM span が dispatcher 経由で出る）。
+- span≥1 を `InMemorySpanExporter` で検証。トークンは末端 LLM span のみ集計
+  （research.md R-5）。
+
+### セキュリティ
+
+- **固有リスク = 無制限な反復消費**: 評価器が永遠に `revise` を返すと生成
+  ループが止まらない。`max_iterations` が上限を構成し（`<1` は `ValueError`）、
+  `stop_reason` の閉じた語彙が打切理由（`passed` / `max_iterations`）を監査
+  可能にする（silent 打切の禁止、OWASP Unbounded Consumption）。
+- `verdict` 語彙外は loud-fail — 評価器の不正判定で silent に進行しない。
+- 依存フロアは [SECURITY-NOTES.md](../SECURITY-NOTES.md)。
