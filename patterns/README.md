@@ -12,12 +12,12 @@ PydanticAI・BeeAI Framework・LlamaIndex Workflows を横断した
 
 | Anthropic パターン | IBM 粒度 | 状態 |
 |---|---|---|
-| Prompt Chaining | Agentic AI | 将来イテレーション |
+| **Prompt Chaining** | Agentic AI（逐次ステップ＋ゲート） | ✅ [prompt-chaining/](prompt-chaining/README.md) |
 | **Routing** | Agentic AI（分類器→専門家の協調） | ✅ [routing/](routing/README.md) |
-| Parallelization | Agentic AI | 将来イテレーション |
+| **Parallelization** | Agentic AI（sectioning / voting の fan-out） | ✅ [parallelization/](parallelization/README.md) |
 | **Orchestrator-Workers** | Agentic AI（動的計画→並列実行→統合） | ✅ [orchestrator-workers/](orchestrator-workers/README.md) |
-| Evaluator-Optimizer | Agentic AI | 将来イテレーション |
-| Autonomous Agent | Agentic AI | 将来イテレーション |
+| **Evaluator-Optimizer** | Agentic AI（生成器⇄評価器ループ） | ✅ [evaluator-optimizer/](evaluator-optimizer/README.md) |
+| **Autonomous Agent** | Agentic AI（ツールループ＋ガードレール） | ✅ [autonomous-agent/](autonomous-agent/README.md) |
 | 単一エージェント（構造化出力・型付きツール） | AI Agent | ルートアプリ `src/pydantic_ai_sandbox` が参照実装 |
 
 > Anthropic の中核主張（逐語）: "Consistently, the most successful
@@ -47,8 +47,11 @@ PydanticAI・BeeAI Framework・LlamaIndex Workflows を横断した
 - [frameworks/beeai/](frameworks/beeai/README.md) — Python 3.13（上限制約）
 - [frameworks/llamaindex/](frameworks/llamaindex/README.md) — Python 3.13
 
-契約はレーン間で複製され、ルートの
-`tests/unit/test_patterns_contract_sync.py` がドリフトを検知する。
+契約は依存ゼロの専用パッケージ [contracts/](contracts/README.md)
+（shared-contracts、`requires-python >=3.13`）に集約され、各レーンは
+`tool.uv.sources` のパス依存で import する（レーン内に複製を持たない）。
+正本（各パターン README）とパッケージ実体の一致は、単一のドリフトテスト
+`patterns/contracts/tests/unit/test_contract_drift.py` が検知する。
 
 ## 実行
 

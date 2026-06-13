@@ -930,17 +930,17 @@ _Boundary:_ `patterns/prompt-chaining/README.md`, `patterns/parallelization/READ
 _Depends:_ 2, 5, 6, 7, 8
 _Requirements:_ 10.1, 11.1, 11.2, 11.3
 
-- [ ] 11.1 (P) 新4パターン README に必須4セクションとフレームワーク差異比較
+- [x] 11.1 (P) 新4パターン README に必須4セクションとフレームワーク差異比較
       （構造化出力方式 / fan-out 機構 / フェイク台本化手段 / 固有リスク）を追記する
       _Boundary:_ `patterns/prompt-chaining/README.md`, `patterns/parallelization/README.md`, `patterns/evaluator-optimizer/README.md`, `patterns/autonomous-agent/README.md`
       _Depends:_ 2, 5, 6, 7, 8
       _Requirements:_ 11.2, 11.3
-- [ ] 11.2 (P) `patterns/README.md` の二軸タクソノミー表で新4パターンを「✅実装済み」
+- [x] 11.2 (P) `patterns/README.md` の二軸タクソノミー表で新4パターンを「✅実装済み」
       として索引にリンクし、contracts パッケージを注記する
       _Boundary:_ `patterns/README.md`
       _Depends:_ 5, 6, 7, 8
       _Requirements:_ 11.1
-- [ ] 11.3 (P) `patterns/SECURITY-NOTES.md` に autonomous-agent 4ガードレールの
+- [x] 11.3 (P) `patterns/SECURITY-NOTES.md` に autonomous-agent 4ガードレールの
       OWASP Agentic AI Top 10 リスク項目（過剰エージェンシー / 無制限消費 等）への
       マッピングを追記する
       _Boundary:_ `patterns/SECURITY-NOTES.md`
@@ -948,6 +948,59 @@ _Requirements:_ 10.1, 11.1, 11.2, 11.3
       _Requirements:_ 10.1
 
 ### Implementation Notes
+
+- 11.1: 新4パターン README（prompt-chaining / parallelization / evaluator-optimizer /
+  autonomous-agent）に `## 3実装` 比較表 + `## 必須4セクション`（型安全 / テスト /
+  可観測性 / セキュリティ）を **既存 `## パターン契約（正本）` ブロックの直後に追記**。
+  routing/orchestrator-workers の確立スタイルを踏襲（impl ファイルリンク + 3レーン
+  差分表）。Req 11.3 の4軸（構造化出力方式 / fan-out 機構 / フェイク台本化手段 /
+  固有リスク）を各 README で比較形式に網羅 — 内容は Task 5–8 の Implementation
+  Notes と support フェイク実体（`voting_model`/`VotingChatModel`/`VotingLLM` 等）
+  から事実抽出（捏造ゼロ）。
+- 11.1: **ドリフト parser 非破壊が最重要制約**。`test_contract_drift.py` は
+  `## パターン契約` 見出し直下の最初の ```python fence を抽出し最初の閉じ fence で
+  停止するため、追記は必ず**契約ブロックの閉じ fence より後**へ置き、新セクション内に
+  `## パターン契約` 見出しや ```python fence を一切導入しない（Task 2.3 の「Task 11
+  追加セクション混入に頑健」設計の前提を遵守）。
+- 11.1: TDD は Task 2.1 の drift-mirror 先例に倣いアドホック検証（throwaway、境界は
+  README 4本のみのため commit せず）。RED: 4 README に必須4セクション/4軸/3レーン名が
+  不在 → 43 checks failed（exit 1）。GREEN: 追記後 ALL PASS（exit 0）。回帰ガードとして
+  drift test を編集前後で実行 — 編集前 4 passed（baseline）→ 編集後も **4 passed**
+  （契約ブロック無改変を実証）。
+- 11.1: `forbid-hardcoded-model-ids` フックは `types: [python]` ゆえ markdown 非対象
+  だが、新文中にモデル ID リテラルは無し（フレームワーク機構名のみ）。検証ゲート
+  （contracts lane `uv run --no-sync`）: ruff All checks passed / format 8 files already
+  formatted / pyright(strict,3.13) 0 errors / pytest 4 passed・coverage 100%（floor 85%）。
+  境界外修正ゼロ。次は Task 11.2（`patterns/README.md` タクソノミー表 + contracts 注記）。
+- 11.2: `patterns/README.md` 二軸タクソノミー表の新4パターン行を「将来イテレーション」→
+  **✅実装済み + パターン README リンク**へ更新（routing/orchestrator 流儀で bold 化 + IBM
+  粒度列に機構説明パレンを spec 用語集から補完）。「レーン構成」節の stale 参照（旧
+  `test_patterns_contract_sync.py` クロス複製記述、Task 2.4 申し送り）を **shared-contracts
+  集約 + `tool.uv.sources` パス依存 + 単一 `test_contract_drift.py`** の現アーキテクチャへ
+  書換え（Req 1.5/2.2/NFR-5 整合）。IBM 粒度の再分類は Req 11.1 範囲外のため既存維持。
+  TDD は Task 11.1 throwaway 先例に倣う — RED: 16/20 FAIL（exit 1）→ GREEN: 20/20 PASS。
+  非回帰: contracts lane drift test 4 passed（`patterns/README.md` は drift parser 対象外＝
+  契約照合に無影響を実証）+ 索引リンク6本 + contracts/README.md 全解決。境界外修正ゼロ。
+  次は Task 11.3（`SECURITY-NOTES.md` OWASP Agentic AI マッピング）。
+- 11.3: `SECURITY-NOTES.md` の OWASP 節に **autonomous-agent 4ガードレール → OWASP
+  Agentic AI リスク項目**の専用マッピング表（`### ...（Spec 006 Req 10.1）`）を既存
+  routing/orchestrator-workers 表の直後・`## 既知の制約` の直前へ追記。4ガードレール
+  →3リスクの非対称写像を事実通り記録: `allowed_tools`→過剰エージェンシー/Insecure Tool
+  Use（per-call refusal＝**ループ継続**, Req 6.4）/ `approval_hook`→Human-in-the-loop
+  bypass（`stop_reason="denied"`, Req 6.5）/ `budget`＋`max_iterations`→Unbounded
+  Consumption（`budget_exceeded`/`max_iterations`, Req 6.6/6.3）。多層防御（Req 10.3）
+  として `steps` 監査証跡を Repudiation/Untraceability 緩和に紐付け。
+- 11.3: **OWASP リスク名の出典規律**（捏造ゼロ）— Web 検索が本モデルで不可・OWASP
+  PDF が threat code を露出しないため、官製 Tx コードは**導入せず**、リポジトリ既存の
+  正本語彙（research.md R-7 / autonomous-agent README §セキュリティ / 既存 OWASP 表）の
+  記述名で写像。`stop_reason` 語彙は drift-test 済み契約 `Literal` を引用。
+- 11.3: TDD は Task 11.1/11.2 の throwaway 先例に倣う（境界 = markdown 1本、正規 test
+  なし）。RED: 19 checks 中 17 FAIL（既存表の "Insecure Tool Use"/"Unbounded Consumption"
+  2件のみ pass）→ GREEN: 追記後 ALL 19 PASS。非回帰: `test_contract_drift.py` 4 passed
+  （SECURITY-NOTES.md は drift parser 非対象＝契約照合無影響を実証）。検証ゲート（contracts
+  lane `uv run --no-sync`）: ruff All checks passed / format 8 files clean / pyright
+  (strict,3.13) 0 errors / pytest 4 passed / coverage 100%（floor 85%）。境界外修正ゼロ。
+  これで Major Task 11（README・タクソノミー・セキュリティ）全サブタスク（11.1〜11.3）完了。
 
 ---
 
