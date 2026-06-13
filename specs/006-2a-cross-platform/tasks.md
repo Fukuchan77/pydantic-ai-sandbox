@@ -793,20 +793,55 @@ _Boundary:_ `patterns/frameworks/*/tests/unit/test_observability.py`
 _Depends:_ 5, 6, 7, 8
 _Requirements:_ 9.2, 9.3
 
-- [ ] 9.1 (P) pydantic-ai: 新4パターンの span≥1 検証を追加する
+- [x] 9.1 (P) pydantic-ai: 新4パターンの span≥1 検証を追加する
       _Boundary:_ `patterns/frameworks/pydantic-ai/tests/unit/test_observability.py`
       _Depends:_ 5.1, 6.1, 7.1, 8.1
       _Requirements:_ 9.2, 9.3
-- [ ] 9.2 (P) beeai: 新4パターンの span≥1 検証を追加する
+- [x] 9.2 (P) beeai: 新4パターンの span≥1 検証を追加する
       _Boundary:_ `patterns/frameworks/beeai/tests/unit/test_observability.py`
       _Depends:_ 5.2, 6.2, 7.2, 8.2
       _Requirements:_ 9.2, 9.3
-- [ ] 9.3 (P) llamaindex: 新4パターンの span≥1 検証を追加する
+- [x] 9.3 (P) llamaindex: 新4パターンの span≥1 検証を追加する
       _Boundary:_ `patterns/frameworks/llamaindex/tests/unit/test_observability.py`
       _Depends:_ 5.3, 6.3, 7.3, 8.3
       _Requirements:_ 9.2, 9.3
 
 ### Implementation Notes
+
+- 9.2: beeai は新4パターンの span≥1 を `test_observability.py` へ集約追加（境界はこの
+  test ファイルのみ、src 無改変）。レーン差分は span 源 — pydantic-ai 9.1 は
+  `instrumentation=settings` 配線で leaf `gen_ai` span を流すが、beeai は first-party
+  OTel API 不在のため**手動スパン fallback**（Req 9.1）= 呼出を
+  `traced(provider, "pattern.<name>", coro)` でラップし `pattern.<name>` span を確認
+  （routing 既存テストと同型）。RED→GREEN は 9.1 の「配線で teeth 実証」を踏襲 — RED:
+  4テストを `traced` 未ラップ（coro 直 await）で追加 → 手動 span が一切流れず `assert
+  spans`（`assert ()`）で **4 failed・2 passed**。GREEN: 各 run を `traced` でラップ →
+  **6 passed**。span 名一致（`pattern.<name>`）のみ確認し token 集計は不問（Req 9.3、
+  二重計上回避）。各パターン固有テストにも span テストは存在するが、本ファイルは可観測性
+  専用集約スイート（routing 内包）として関心分離（9.1 と同判断、重複でなく分離）。
+  検証ゲート（lane `uv run --no-sync`）: ruff All checks passed / format 18 files
+  already formatted / pyright(strict,3.13) 0 errors / pytest 40 passed・2 skipped
+  （baseline 36 + observability 新規 4 = 無回帰）/ coverage floor 85% 満たす（observability
+  は test 専用 = coverage source 対象外）。次は 9.3（llamaindex）。
+- 9.3: llamaindex は新4パターンの span≥1 を `test_observability.py` へ集約追加（境界はこの
+  test ファイルのみ、src 無改変）。レーン差分は span 源 — pydantic-ai 9.1（`instrumentation`
+  配線で leaf `gen_ai` span）・beeai 9.2（手動 `traced` ラップで `pattern.<name>` span）と
+  異なり、llamaindex は **OpenInference process-global instrumentor**（`instrument_llamaindex`
+  install → run → `finally` で `uninstrument_llamaindex` detach）。assertion は leaf LLM span
+  存在のみ（span 名に `"llm"`/`"complete"` 含有、token 集計は不問 = Req 9.3 二重計上回避）。
+  各パターン固有 test にも span test は存在するが、本ファイルは可観測性専用集約スイート
+  （routing 内包）として関心分離（9.1/9.2 と同判断、重複でなく分離）。fake は各パターン固有
+  span test と同一を使用（prompt_chaining/parallelization=`ScriptedLLM`、evaluator=
+  `VerdictSequencedLLM`、autonomous=`TurnSequencedLLM([FinalTurn])`）。
+- 9.3: RED→GREEN は 9.2 の「instrumentation 配線で teeth 実証」を踏襲 — RED: 4テストを
+  instrumentor 未 install（`configure_tracing` のみで run）で追加 → process-global span が
+  一切流れず `assert spans`（`assert ()`）で **4 failed**。GREEN: 各 run を
+  `instrument_llamaindex`/`uninstrument_llamaindex` の try/finally で囲む → **6 passed**
+  （routing + 新4 + noop）。検証ゲート（lane `uv run --no-sync`）: ruff All checks passed /
+  format 1 file already formatted / pyright(strict,3.13) 0 errors / pytest 41 passed・2 skipped
+  （baseline 37 + observability 新規 4 = 無回帰）/ coverage floor 85% 満たす（observability は
+  test 専用 = coverage source 対象外）。これで Major Task 9（可観測性検証 3レーン）の全
+  サブタスク（9.1〜9.3）完了。次は Task 10（Ollama 結合テスト 3レーン）。
 
 ---
 
