@@ -573,6 +573,7 @@ _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
 
 ## 7. evaluator-optimizer パターン実装（3レーン）
 
+
 生成器→評価器のループを `pass` 到達か `max_iterations` まで反復し、`revise`
 フィードバックを次反復に反映する。`stop_reason` を `Literal["passed",
 "max_iterations"]` で語彙固定する。各レーンで `revise→…→pass` 遷移と全 revise
@@ -582,23 +583,84 @@ _Boundary:_ `patterns/frameworks/*/src/patterns_*/evaluator_optimizer.py`, `patt
 _Depends:_ 4
 _Requirements:_ 5.1, 5.2, 5.3, 5.4, 7.3, 9.1
 
-- [ ] 7.1 (P) pydantic-ai: `run_evaluator_optimizer` を実装し（instrument 適用、
+- [x] 7.1 (P) pydantic-ai: `run_evaluator_optimizer` を実装し（instrument 適用、
       verdict cursor フェイク使用）、pass 到達 / max*iterations 打切の単体テストを書く
       \_Boundary:* `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/evaluator_optimizer.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_evaluator_optimizer.py`
       _Depends:_ 4.1
       _Requirements:_ 5.1, 5.2, 5.3, 5.4, 7.3, 9.1, NFR-2
-- [ ] 7.2 (P) beeai: `run_evaluator_optimizer` を実装し（手動スパン、verdict
+- [x] 7.2 (P) beeai: `run_evaluator_optimizer` を実装し（手動スパン、verdict
       cursor フェイク使用）、pass 到達 / max*iterations 打切の単体テストを書く
       \_Boundary:* `patterns/frameworks/beeai/src/patterns_beeai/evaluator_optimizer.py`, `patterns/frameworks/beeai/tests/unit/test_evaluator_optimizer.py`
       _Depends:_ 4.2
       _Requirements:_ 5.1, 5.2, 5.3, 5.4, 7.3, 9.1
-- [ ] 7.3 (P) llamaindex: `run_evaluator_optimizer` を実装し（OpenInference 計装、
+- [x] 7.3 (P) llamaindex: `run_evaluator_optimizer` を実装し（OpenInference 計装、
       verdict cursor フェイク使用）、pass 到達 / max*iterations 打切の単体テストを書く
       \_Boundary:* `patterns/frameworks/llamaindex/src/patterns_llamaindex/evaluator_optimizer.py`, `patterns/frameworks/llamaindex/tests/unit/test_evaluator_optimizer.py`
       _Depends:_ 4.3
       _Requirements:_ 5.1, 5.2, 5.3, 5.4, 7.3, 9.1
 
 ### Implementation Notes
+
+- 7.1: pydantic-ai の `run_evaluator_optimizer` を generator(`output_type=str`)→
+  evaluator(structured `_Evaluation{verdict,feedback}`) の逐次ループで実装。evaluator
+  出力は契約 `Iteration` ではなく**レーン内 private モデル** `_Evaluation`（evaluator は
+  verdict/feedback のみ決定、index/candidate はループが stamp）。その JSON schema が
+  `verdict` プロパティを露出することが Task 4.1 `verdict_sequenced_model` の
+  generator/evaluator dispatch シームになる（prompt_chaining/parallelization の
+  `_agent` ヘルパ流儀を踏襲、instrument は `instrument_model` 注入）。
+- 7.1: **早期 return で stop_reason 二値を構造保証** — verdict=="pass" 時に即 return
+  `stop_reason="passed"`（`final_output`=該当 candidate）、for ループ exhaust で
+  `stop_reason="max_iterations"`（`final_output`=最終 candidate）。Literal 二値以外は
+  到達不能（R5.4）。`max_iterations<1` は `ValueError`（parallelization の `n<1` と対称、
+  空ループ=候補未生成の silent run を封鎖）。
+- 7.1: Req 5.3（feedback の次反復反映）は cursor フェイクでは出力に現れないため、
+  prompt_chaining 5.x の `_recording_model` 流儀をローカル再現 — verdict dispatch +
+  generator prompt 記録を兼ねるテスト境界フェイクで「2回目 generator prompt が1回目
+  evaluator feedback + 前 candidate を含む」をアサート。pass 到達/max_iterations は
+  support `verdict_sequenced_model`（candidate は per-call cursor）で決定論検証。
+  span は parallelization 流儀（`InMemorySpanExporter` + `gen_ai` 属性存在）。検証
+  ゲート: ruff All checks passed / format clean / pyright(strict) 0 errors /
+  pytest 26 passed・2 skipped（無回帰）/ evaluator_optimizer.py coverage 100%・
+  total 98.38%（floor 85%）。`__init__` 再エクスポートは本タスク境界外。
+- 7.2: beeai の `run_evaluator_optimizer` を 7.1 と同型の generator→evaluator 逐次
+  ループ（plain `for`、parallelization が Workflow を強制しなかった判断に倣う）で実装。
+  generator=`llm.create`（plain text）/ evaluator=`llm.create_structure`（lane-private
+  `_Evaluation{verdict,feedback}`）の**メソッド分岐**が Task 4.2 `VerdictSequencedChatModel`
+  の dispatch シーム（4.1 の schema-property 方式と異なり beeai は method 分岐）。routing
+  と同じく `_Evaluation.model_validate(output.object)` で契約再検証し語彙外 verdict を
+  loud-fail（Req 2.3 流儀）。早期 return で `stop_reason` 二値を構造保証、`max_iterations<1`
+  は `ValueError`（7.1 と対称）。
+- 7.2: 観測は手動スパン（pattern 関数に instrumentation 引数を持たせず呼出側が
+  `traced(provider, "pattern.evaluator_optimizer", ...)` でラップ）= prompt-chaining/
+  parallelization と同一レーン方式。Req 5.3（feedback の次反復反映）は cursor フェイクでは
+  出力に現れないため prompt_chaining 5.2 の `_RecordingChatModel` 流儀をローカル再現
+  （method 分岐で generator prompt 記録 + verdict cursor）。検証ゲート: ruff All checks
+  passed / format 16 files clean / pyright(strict,3.13) 0 errors / pytest 27 passed・2
+  skipped（無回帰）/ evaluator_optimizer.py coverage 100%・total 98.74%（floor 85%）。
+  `__init__` 再エクスポートは本タスク境界外（5.1 の out-of-bounds 是正に倣い無改変）。
+- 7.3: llamaindex の `run_evaluator_optimizer` を 7.1/7.2 と同型の generator→evaluator
+  逐次ループで実装。**Workflow を使わず plain `for`** を採用（ループは fan-out 無しの
+  純逐次でイベント機構が契約価値を足さない＝7.2 beeai 判断 + parallelization の
+  「Workflow 非強制」判断に整合。routing/prompt-chaining/parallelization は Workflow
+  だが本パターンは初の非 Workflow llamaindex パターン）。generator=`llm.acomplete`
+  （plain text）/ evaluator=`llm.astructured_predict(_Evaluation, ...)`。後者は routing と
+  同じく Pydantic 検証済みモデルを直接返す（beeai の `create_structure` は raw object で
+  `model_validate` 再検証が必要だったがレーン差分でここは不要）。
+- 7.3: dispatch シームは 4.3 `VerdictSequencedLLM` の**prompt 内容分岐**を踏襲 —
+  `astructured_predict` の prompt は `_Evaluation` schema を埋め込み quoted `"verdict"` を
+  含むので verdict cursor、それ以外（generator の `acomplete`）は candidate cursor。
+  generator instructions の `verdict='pass'`（single-quote）は `'"verdict"'`（double-quote）
+  非該当で誤検知しない。Req 5.3（feedback の次反復反映）は prompt_chaining 5.3 の
+  `_RecordingLLM` 流儀をローカル再現（prompt 内容で verdict/generator を分岐し generator
+  prompt のみ記録）。
+- 7.3: **span 検証の差分**: llamaindex は OpenInference process-global instrumentor。本
+  パターンは Workflow を使わないが、`acomplete`/`astructured_predict` の leaf LLM span が
+  LlamaIndex dispatcher 経由で auto-instrument されるため Workflow 不在でも span≥1 が出る
+  ことを RED→GREEN で実証（span 名 `"llm"`/`"complete"`、prompt_chaining/parallelization
+  流儀）。検証ゲート: ruff All checks passed / format 16 files clean / pyright(strict,3.13)
+  0 errors / pytest 27 passed・2 skipped（無回帰）/ evaluator_optimizer.py coverage 100%・
+  total 98.94%（floor 85%）。`__init__` 再エクスポートは本タスク境界外。これで Major
+  Task 7（evaluator-optimizer 3レーン）の全サブタスク（7.1〜7.3）完了。
 
 ---
 
