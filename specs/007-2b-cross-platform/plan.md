@@ -210,6 +210,7 @@ erDiagram
 | `patterns/rag/tests/integration/test_ollama_e2e.py` | Create | `RUN_INTEGRATION_PATTERNS=1` ゲート・契約レベルアサート・`OLLAMA_*`/embed env（R7.x）。 |
 | `patterns/contracts/src/patterns_contracts/rag.py` | Create | `RetrievedChunk`/`Citation`/`RagAnswer` の単一実体（R5.1）。 |
 | `patterns/contracts/src/patterns_contracts/__init__.py` | Modify | 3型を import + `__all__` 追記（R5.1）。 |
+| `patterns/contracts/tests/unit/test_rag_contracts.py` | Create | RAG 3型の振る舞い契約テスト（再エクスポート・フィールド集合・ネスト coercion・`ValidationError`、R4.1/5.1）。drift（AST parity）を補完。 |
 | `patterns/contracts/tests/unit/test_contract_drift.py` | Modify | `_README_PATHS` に `"rag"` 1行追加（R5.2）。 |
 | `mise.toml` | Modify | `patterns:{setup,lint,format,typecheck,test,audit}` に `(cd patterns/rag && …)` 明示行 + `patterns:test:integration` に rag 行（R12.1）。 |
 | `.github/workflows/patterns-ci.yml` | Modify | `rag` 専用ジョブ（contracts ジョブ複製: `uv sync --locked` → `pytest`、ネット事前取得ステップ無し）+ paths に `patterns/rag/**`（R11.1）。**前提**: 当該ジョブはオフライン解決可能なトークナイザ（`tiktoken` or `uv sync --locked` で同梱される資産）に確定し、HF 事前取得を不要にする（ADR-3 / R6.1 / R-1）。 |

@@ -110,23 +110,41 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.4, 6.1, 6.5
 `RetrievedChunk` / `Citation` / `RagAnswer` を `patterns/contracts/` に単一実体として
 追加し、`patterns_contracts` から再エクスポートする。
 
-_Boundary:_ `patterns/contracts/src/patterns_contracts/rag.py`, `patterns/contracts/src/patterns_contracts/__init__.py`
+_Boundary:_ `patterns/contracts/src/patterns_contracts/rag.py`, `patterns/contracts/src/patterns_contracts/__init__.py`, `patterns/contracts/tests/unit/test_rag_contracts.py`
 _Depends:_ none
 _Requirements:_ 4.1, 5.1
 
-- [ ] 2.1 RAG 契約モデル（`RetrievedChunk{chunk_id,source,locator,text,score}` /
+- [x] 2.1 RAG 契約モデル（`RetrievedChunk{chunk_id,source,locator,text,score}` /
   `Citation{source,locator,chunk_id,score}` / `RagAnswer{answer,citations}`）を
   `rag.py` に定義する。形状を検証する契約テストを先行作成する。
-  _Boundary:_ `patterns/contracts/src/patterns_contracts/rag.py`
+  _Boundary:_ `patterns/contracts/src/patterns_contracts/rag.py`, `patterns/contracts/tests/unit/test_rag_contracts.py`
   _Depends:_ none
   _Requirements:_ 4.1, 5.1
-- [ ] 2.2 3型を `patterns_contracts.__init__` から import し `__all__` に追記して
+- [x] 2.2 3型を `patterns_contracts.__init__` から import し `__all__` に追記して
   再エクスポートする。
   _Boundary:_ `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ 2.1
   _Requirements:_ 5.1
 
 ### Implementation Notes
+
+実装（Task 2, 2026-06-13）:
+
+- **3型定義**: `rag.py` に `RetrievedChunk` / `Citation` / `RagAnswer` を既存契約と同一
+  スタイル（`from __future__ import annotations`, `Field(description=...)`, `__all__`）で定義。
+  `RagAnswer.citations` は plain `list[Citation]`。≥1 不変条件（R4.2）と dangling loud-fail
+  （R4.3）は依存ゼロ契約ではなく RAG パイプライン（`rag.citation`, Task 6/7）の責務として
+  設計の所有境界どおり分離。
+- **再エクスポート**: `__init__.py` の import + `__all__` をアルファベット順維持で更新。
+- **TDD 証跡**: 振る舞いテスト `tests/unit/test_rag_contracts.py` を先行作成（RED:
+  `ImportError`）→ 実装後 8/8 green。drift テスト（AST parity）を補完し、再エクスポート経路・
+  フィールド集合・ネスト coercion・`ValidationError` を検証。
+- **既知の Task 11 結合（RED ウィンドウ）**: contracts へ 3 型を追加・再エクスポートした時点で
+  `test_contract_drift.py` の 3 テストが RED（`Extra items: RetrievedChunk, Citation,
+  RagAnswer` = package のみ存在・README 正本未記載）。README 正本側は **Task 11.1/11.2**
+  （`patterns/rag/README.md` 正本 fenced block + `_README_PATHS["rag"]` 登録）の所有物。
+  DAG Wave1→Wave5 間の計画済み RED であり Task 2 成果物の欠陥ではない。fix-forward せず
+  Task 11 で閉じる。lint/format/pyright/rag.py カバレッジ(100%)は green。
 
 ---
 
