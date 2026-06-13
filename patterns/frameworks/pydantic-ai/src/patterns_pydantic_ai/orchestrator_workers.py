@@ -19,10 +19,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from patterns_contracts import OrchestratedResult, TaskPlan, WorkerResult
 from pydantic_ai import Agent
 from pydantic_ai.models.instrumented import instrument_model
-
-from patterns_pydantic_ai.contracts import OrchestratedResult, TaskPlan, WorkerResult
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model

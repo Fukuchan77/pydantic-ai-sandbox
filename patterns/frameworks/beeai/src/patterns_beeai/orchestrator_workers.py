@@ -18,9 +18,8 @@ from typing import TYPE_CHECKING
 
 from beeai_framework.backend.message import SystemMessage, UserMessage
 from beeai_framework.workflows.workflow import Workflow
+from patterns_contracts import OrchestratedResult, TaskPlan, WorkerResult
 from pydantic import BaseModel
-
-from patterns_beeai.contracts import OrchestratedResult, TaskPlan, WorkerResult
 
 if TYPE_CHECKING:
     from beeai_framework.backend.chat import ChatModel

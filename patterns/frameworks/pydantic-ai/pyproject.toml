@@ -12,6 +12,11 @@ description = "Cross-framework agent patterns — PydanticAI implementations (ro
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    # Shared contract package — the single source of truth for the six
+    # patterns' I/O models, Literal vocabularies, and tool abstraction
+    # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
+    # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
+    "patterns-contracts",
     # Same V2 Beta floor as the root app (Spec 005 NFR-2). The CVE-2026-25580 /
     # CVE-2026-46678 SSRF fixes landed in v1.99.0; the 2.x beta line postdates
     # them (patterns/SECURITY-NOTES.md).
@@ -41,6 +46,13 @@ packages = ["src/patterns_pydantic_ai"]
 
 [tool.uv]
 prerelease = "allow"
+
+# Path dependency to the shared contracts package (plan §lane wiring). Editable
+# so contract edits land without a re-sync; `../../contracts` resolves from
+# patterns/frameworks/pydantic-ai/ to patterns/contracts/. The contracts package
+# floors at >=3.13, so it installs cleanly under this lane's 3.14 interpreter.
+[tool.uv.sources]
+patterns-contracts = { path = "../../contracts", editable = true }
 
 # Ruff/pyright mirror the root ruleset (root pyproject.toml) with only the
 # target version and first-party package adjusted.

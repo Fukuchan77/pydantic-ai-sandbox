@@ -2,9 +2,6 @@ version = 1
 revision = 3
 requires-python = "==3.13.*"
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "aiohappyeyeballs"
 version = "2.6.2"
@@ -931,6 +928,27 @@ wheels = [
 ]
 
 [[package]]
+name = "patterns-contracts"
+version = "0.1.0"
+source = { editable = "../../contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pip-audit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[[package]]
 name = "patterns-llamaindex"
 version = "0.1.0"
 source = { editable = "." }
@@ -940,6 +958,7 @@ dependencies = [
     { name = "openinference-instrumentation-llama-index" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
+    { name = "patterns-contracts" },
     { name = "pydantic" },
 ]
 
@@ -960,6 +979,7 @@ requires-dist = [
     { name = "openinference-instrumentation-llama-index" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
+    { name = "patterns-contracts", editable = "../../contracts" },
     { name = "pydantic", specifier = ">=2" },
 ]
 

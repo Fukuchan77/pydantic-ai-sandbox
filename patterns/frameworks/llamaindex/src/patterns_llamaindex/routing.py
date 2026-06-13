@@ -29,8 +29,7 @@ from llama_index.core.workflow import (
     Workflow,
     step,  # pyright: ignore[reportUnknownVariableType]
 )
-
-from patterns_llamaindex.contracts import Route, RoutedAnswer, RouteDecision
+from patterns_contracts import Route, RoutedAnswer, RouteDecision
 
 if TYPE_CHECKING:
     from llama_index.core.llms import LLM

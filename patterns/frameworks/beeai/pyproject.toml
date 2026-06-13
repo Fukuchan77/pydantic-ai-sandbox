@@ -17,6 +17,11 @@ description = "Cross-framework agent patterns — BeeAI Framework implementation
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    # Shared contract package — the single source of truth for the six
+    # patterns' I/O models, Literal vocabularies, and tool abstraction
+    # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
+    # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
+    "patterns-contracts",
     "beeai-framework==0.1.39",
     "pydantic>=2",
     "opentelemetry-sdk",
@@ -39,6 +44,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/patterns_beeai"]
+
+# Path dependency to the shared contracts package (plan §lane wiring). Editable
+# so contract edits land without a re-sync; `../../contracts` resolves from
+# patterns/frameworks/beeai/ to patterns/contracts/. The contracts package
+# floors at >=3.13, so it installs cleanly under this lane's 3.13 interpreter.
+[tool.uv.sources]
+patterns-contracts = { path = "../../contracts", editable = true }
 
 [tool.ruff]
 target-version = "py313"

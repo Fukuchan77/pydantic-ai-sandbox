@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from patterns_contracts import RouteDecision
 from pydantic import ValidationError
 
-from patterns_beeai.contracts import RouteDecision
 from patterns_beeai.routing import ROUTE_INSTRUCTIONS, run_routing
 from tests.support.fake_chat_model import ScriptedChatModel
 

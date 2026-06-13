@@ -1,6 +1,6 @@
 """BeeAI Framework lane of the cross-framework pattern collection (Spec 005)."""
 
-from patterns_beeai.contracts import (
+from patterns_contracts import (
     OrchestratedResult,
     Route,
     RoutedAnswer,
@@ -9,6 +9,7 @@ from patterns_beeai.contracts import (
     TaskPlan,
     WorkerResult,
 )
+
 from patterns_beeai.observability import configure_tracing, traced
 from patterns_beeai.orchestrator_workers import run_orchestrator
 from patterns_beeai.routing import run_routing

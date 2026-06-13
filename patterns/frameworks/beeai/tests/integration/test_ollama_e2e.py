@@ -10,8 +10,8 @@ import os
 from typing import get_args
 
 import pytest
+from patterns_contracts import Route
 
-from patterns_beeai.contracts import Route
 from patterns_beeai.orchestrator_workers import run_orchestrator
 from patterns_beeai.routing import run_routing
 

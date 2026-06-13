@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from patterns_contracts import RouteDecision
 from pydantic import ValidationError
 
-from patterns_pydantic_ai.contracts import RouteDecision
 from patterns_pydantic_ai.routing import ROUTE_INSTRUCTIONS, run_routing
 from tests.support.model_fakes import scripted_model
 
