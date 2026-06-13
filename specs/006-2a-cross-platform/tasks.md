@@ -487,18 +487,18 @@ _Boundary:_ `patterns/frameworks/*/src/patterns_*/parallelization.py`, `patterns
 _Depends:_ 4
 _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
 
-- [ ] 6.1 (P) pydantic-ai: `run_parallelization` を `asyncio.gather` fan-out で
+- [x] 6.1 (P) pydantic-ai: `run_parallelization` を `asyncio.gather` fan-out で
       実装し（instrument 適用）、sectioning / voting（割れた票 + タイブレーク）+
       順序復元の単体テストを書く
       _Boundary:_ `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/parallelization.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_parallelization.py`
       _Depends:_ 4.1
       _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1, NFR-2
-- [ ] 6.2 (P) beeai: `run_parallelization` を `asyncio.gather` fan-out で実装し
+- [x] 6.2 (P) beeai: `run_parallelization` を `asyncio.gather` fan-out で実装し
       （手動スパン）、sectioning / voting + 順序復元の単体テストを書く
       _Boundary:_ `patterns/frameworks/beeai/src/patterns_beeai/parallelization.py`, `patterns/frameworks/beeai/tests/unit/test_parallelization.py`
       _Depends:_ 4.2
       _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
-- [ ] 6.3 (P) llamaindex: `run_parallelization` を `send_event` + `collect_events`
+- [x] 6.3 (P) llamaindex: `run_parallelization` を `send_event` + `collect_events`
       → index ソート復元で実装し（OpenInference 計装）、sectioning / voting +
       順序復元の単体テストを書く
       _Boundary:_ `patterns/frameworks/llamaindex/src/patterns_llamaindex/parallelization.py`, `patterns/frameworks/llamaindex/tests/unit/test_parallelization.py`
@@ -506,6 +506,68 @@ _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
       _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
 
 ### Implementation Notes
+
+- 6.1: pydantic-ai の `run_parallelization` を単一契約 + `variant` 切替で実装。
+  両 variant とも `asyncio.gather` で fan-out（Req 4.4）、aggregate は sectioning=
+  index 昇順 join、voting=`Counter` 多数決（strict `>` で同数は first-seen=最小 index
+  を保持＝index 昇順タイブレーク、Req 4.3）。`n<1` は `ValueError`（空 fan-out の封鎖）。
+- 6.1: **決定論の根本設計（RED で顕在化した実機挙動）**: `Branch.index` を spawn 順
+  （`range(n)`）に固定すると、`gather` のモデル到達順がスケジューラ依存の非恒等置換
+  （n=4 で実測 `0,2,1,3`）になり、共有カーソルの `voting_model` が branch にシャッフル
+  した出力を配る → タイブレーク非決定。対策として **index を「モデル応答が返った瞬間に
+  共有カウンタから取得」**（完了順）。同期 `FunctionModel` は応答〜`agent.run` 完了間に
+  reorder yield を挟まないため**完了順 = カーソル消費順**となり、`index k ↔ cursor[k]`
+  が置換に依らず決定論化（probe 実測 + 5連続実行で安定確認）。voting prompt は同一を
+  維持（Req 4.3 忠実）。
+- 6.1: `voting_model`（Task 4.1 support）を split-vote/tie-break/order 全テストで使用。
+  `n=0` テストは当初 `coroutine(...).close()` で組んだが body 未実行 = DID NOT RAISE。
+  検証は await 必須のため `async def` + `await ... pytest.raises` へ修正（RED が教えた
+  test-authoring バグ）。span テストは prompt-chaining 流儀（`InMemorySpanExporter` +
+  `gen_ai` 属性存在）を踏襲。検証ゲート: ruff All checks passed / format clean /
+  pyright(strict) 0 errors / pytest 21 passed・2 skipped（無回帰）/ parallelization.py
+  coverage 100%・total 97.95%（floor 85%）。`__init__` 再エクスポートは本タスク境界外。
+- 6.2: beeai の `run_parallelization` を 6.1 と同一の単一契約 + `variant` 切替で実装。
+  両 variant とも `asyncio.gather` で fan-out（Req 4.4）、aggregate は sectioning=
+  index 昇順 join、voting=`Counter` 多数決（strict `>` で同数は first-seen=最小 index
+  保持＝index 昇順タイブレーク、Req 4.3）。`n<1` は `ValueError`。観測は手動スパン方式
+  （prompt-chaining/routing と同様パターン関数に instrumentation 引数を持たせず、
+  呼出側が `traced(provider, "pattern.parallelization", ...)` でラップ。pydantic-ai 6.1 の
+  `instrument_model` 注入とは異なるレーン固有方式）。
+- 6.2: **決定論の根本検証（実機 probe）**: 6.1 の「完了順に共有カウンタから index 取得」
+  設計は beeai に自明には転写できない — beeai の `ChatModel.create` は `_create`（cursor
+  消費）と return の間に emitter `emit`／`cache.set`／`Retryable` 等の複数 `await` を挟む
+  ため、cursor 消費順と完了順が割れる可能性があった。憲法（仮定でなく実機確認）に従い
+  500試行 × 2ケース（n=5 順序復元 / n=4 タイブレーク）を probe → 全試行で単一の正出力に
+  収束。根本理由は `VotingChatModel` フェイクに真の suspension point が無く、`gather` 下で
+  各 coroutine が spawn 順に走り切る（cursor 消費順＝完了順＝spawn 順）こと。完了順
+  index-claiming を確信して採用、voting prompt は同一維持（Req 4.3 忠実）。
+- 6.2: `VotingChatModel`（Task 4.2 support）を split-vote/tie-break/order 全テストで使用。
+  span テストは prompt-chaining 流儀（`InMemorySpanExporter` + `traced` ラップ + span 名
+  `pattern.parallelization` 存在）を踏襲。検証ゲート: ruff All checks passed / format 14
+  files clean / pyright(strict,3.13) 0 errors / pytest 22 passed・2 skipped（無回帰）/
+  parallelization.py coverage 100%・total 98.54%（floor 85%）。`__init__` 再エクスポートは
+  本タスク境界外。
+- 6.3: llamaindex は **LlamaIndex Workflows ネイティブの fan-out** で実装（6.1/6.2 の
+  bare `asyncio.gather` とは異なるレーン差分）— `dispatch(StartEvent)` が `ctx.send_event`
+  で n 件の `_BranchEvent` を発行、`run_branch`（`@step(num_workers=8)`）が並行消費、
+  `collect` が `ctx.collect_events(ev, [_BranchDoneEvent]*n)` で全 n をバリア収集。aggregate
+  は 6.1/6.2 と同型（sectioning=index 昇順 join / voting=`Counter` strict `>` 多数決で
+  同数 first-seen=最小 index タイブレーク, Req 4.3）、`n<1`→`ValueError`。
+- 6.3: **決定論の根本検証（実機 probe, 6.2 と同手法）**: 6.1/6.2 の「acomplete 応答直後に
+  共有カウンタから index を claim（間に await を挟まない）」を踏襲。worker pool の到達順は
+  スケジューラ依存だが、`VotingLLM.complete` が同期（真の suspension 無し）かつ cursor 消費〜
+  index claim 間に await が無いため **cursor 消費順 = 完了 index claim 順**。500試行 × 2ケース
+  （n=5 順序復元 / n=4 タイブレーク 2:2）で単一の正出力に収束を確認。`collect_events` は完了順
+  返却 → `index` で明示ソートし復元を pin（Req 4.4）。
+- 6.3: **境界内 pyright 修正2件（根本対応）**: ① `@step(num_workers=...)`（factory 形）は
+  bare `@step` と異なり `reportUntypedFunctionDecorator` を発火 → 当該行に inline ignore
+  （fake_llm の `@llm_completion_callback()` と同方式）。② `self._variant = variant` は
+  pyright が未注釈 mutable 属性へ格納された Literal を `str` へ widen → `collect` の
+  `ParallelResult(variant=self._variant)` が Literal 不一致。`self._variant: Literal[...]`
+  と明示注釈して解消（ルール緩和でなく型注釈の正で対応）。検証ゲート: ruff All checks passed /
+  format 14 files clean / pyright(strict,3.13) 0 errors / pytest 22 passed・2 skipped（無回帰）/
+  parallelization.py coverage 100%・total 98.81%（floor 85%）。`__init__` 再エクスポートは
+  本タスク境界外。これで Major Task 6（parallelization 3レーン）の全サブタスク（6.1〜6.3）完了。
 
 ---
 
