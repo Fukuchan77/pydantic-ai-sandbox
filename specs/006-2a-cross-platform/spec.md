@@ -47,6 +47,22 @@ autonomous-agent）を 3 フレームワーク（PydanticAI / BeeAI / LlamaIndex
   環境フィードバック→最終回答」のターン列を返し、ツールは決定論的な
   インメモリスタブ。各反復で同一の停止経路を再現する。
 
+### Session 2026-06-12 — SDD レビュー反映
+
+- Q: R6.4 許可リスト違反後のループ挙動と `stop_reason` は?（レビュー指摘1）→
+  A: ツール非実行・試行を `AgentStep` に記録し、**`stop_reason="disallowed_tool"`
+  （語彙に追加）で停止**。承認拒否の `denied` と判別可能にする。
+- Q: `AgentStep` と `total_budget_spent` の会計不変条件は?（レビュー指摘2）→
+  A: total は**全モデル呼び出し**（最終回答ターン含む）の合計、`steps` は
+  ツール試行反復のみ（`total >= sum(steps)`)。超過判定は各呼び出しの**後**
+  （budget は事前認可ではなく停止条件）。
+- Q: `ChainResult.gate` 単数の意味は?（レビュー指摘3）→ A: **最後に評価された
+  ゲートの判定**（不合格位置は `len(steps)` から判別）。
+- Q: README 正本ブロックの `model/llm` 疑似構文が `ast.parse` 不能（レビュー
+  指摘4）→ A: **契約ブロックと signature ブロックを分離**。契約ブロックは
+  先頭行 `# [contract]` マーカー付きの純 Python のみ、parser はマーカー付き
+  ブロックだけを読む。既存 routing / orchestrator-workers README も再整形。
+
 ## Overview
 
 005 で確立した patterns/ パターン集（同一契約を 3 フレームワークで実装比較）に、
@@ -168,6 +184,9 @@ import し、レーン内に契約モデルの複製（旧 `contracts.py` のク
 `GateOutcome{passed: bool, detail: str}` を持つ
 `ChainResult{steps, gate, final_output: str | None}`、エントリポイント
 `async def run_prompt_chain(input_text: str, *, model/llm) -> ChainResult`。
+`gate` は SHALL **最後に評価されたゲートの判定**とする（全ゲート合格時は
+最終ゲート、不合格時は当該不合格ゲート。何番目のステップ後のゲートかは
+`len(steps)` から判別可能）。
 
 3.2 各レーン SHALL ステップを逐次連結し、各ステップ出力を次ステップの入力と
 する: PydanticAI = 複数 `agent.run` の逐次連結、LlamaIndex = `@step` の直列連鎖、
@@ -239,23 +258,34 @@ stop_reason, total_budget_spent: int}`、
 非負整数（`int`）とする（コスト換算は将来イテレーションに委ねる。OWASP
 「無制限消費」はトークン主戦場であり、3フレームワークとも usage/token を
 露出するため移植性と決定論性が高い）。
+会計の不変条件: `total_budget_spent` は SHALL 実行中の**全モデル呼び出し**
+（ツール呼び出しを伴わない最終回答ターンを含む）のトークン合計とする。
+`steps` はツール呼び出し試行を伴う反復のみを記録するため、
+`total_budget_spent >= sum(AgentStep.budget_spent)` が成立し、差分は
+最終回答ターン等のツール無しターンの消費である。
 
 6.2 THE `stop_reason` SHALL `Literal["completed","max_iterations",
-"budget_exceeded","denied"]` で語彙固定とする。
+"budget_exceeded","denied","disallowed_tool"]` で語彙固定とする。
 
 6.3 WHEN ツールループの反復数が `max_iterations` に到達した場合、THE 実装
 SHALL ループを停止し `stop_reason` を `max_iterations` とする。
 
 6.4 IF エージェントが `allowed_tools` に含まれないツールを呼び出そうとした
-場合、THEN THE 実装 SHALL そのツールを実行せず拒否すること。
+場合、THEN THE 実装 SHALL そのツールを実行せずループを停止し、`stop_reason` を
+`disallowed_tool` とし、拒否した試行を `AgentStep`（`observation` に拒否理由）
+として記録すること（承認拒否の `denied` とは判別可能であること）。
 
 6.5 WHEN 危険操作に分類されたツール呼び出しが発生した場合、THE 実装 SHALL
 `approval_hook` を介して承認を求め、承認が得られない場合はループを停止し
-`stop_reason` を `denied` とする。
+`stop_reason` を `denied` とする。拒否された試行も SHALL `AgentStep`
+（`observation` に拒否理由）として記録すること。
 
 6.6 THE 実装 SHALL 各反復のループ予算消費（トークン数）を
 `AgentStep.budget_spent` に記録し、累積（`total_budget_spent`）が `budget`
 を超過した場合はループを停止して `stop_reason` を `budget_exceeded` とする。
+超過判定は SHALL 各モデル呼び出しの**後**に行うこと（トークン数は呼び出し後に
+のみ確定するため、超過を発生させた反復も記録された上で停止する。`budget` は
+事前認可ではなく停止条件である）。
 
 ### Requirement 7: オフラインテスト
 

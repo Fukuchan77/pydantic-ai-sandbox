@@ -81,11 +81,14 @@ flowchart TD
 - **比較範囲（明示）**: Pydantic モデルの **クラス集合 / フィールド集合 / `Literal`
   語彙**（`stop_reason` / `verdict` / `variant` 等）に限定する（R2.3 が要求するのは
   この3集合）。`Tool`（Protocol、`model_fields` 非保持）・`ApprovalHook`（Callable
-  エイリアス）・エントリ signature は **型システムの責務**として比較対象外とし、
-  README の当該ブロックはドリフトテストの parser がスキップする（混入時に誤検知
-  しないよう明示除外）。Protocol/alias の正本一致は pyright strict が担保する。
-- **Owns**: README パース（`ast`、Pydantic クラスブロックのみ抽出）・パッケージ
-  introspect（`model_fields` / `get_args`）・差分アサート。
+  エイリアス）・エントリ signature は **型システムの責務**として比較対象外とする。
+  signature は `model/llm` 疑似構文を含み `ast.parse` 不能のため、**同一ブロック内
+  スキップは不可能** — README 側で契約ブロック（先頭行 `# [contract]` マーカー）と
+  signature ブロックを**分離**し、parser はマーカー付きブロックのみを読む。
+  Protocol/alias の正本一致は pyright strict が担保する。
+- **Owns**: README パース（`ast`、`# [contract]` マーカー付きブロックのみ抽出。
+  `Route = Literal[...]` は plain `Assign` のため `AnnAssign` に加え `Assign` も
+  抽出する）・パッケージ introspect（`model_fields` / `get_args`）・差分アサート。
 - **Does NOT own**: レーン間 AST 相互比較（廃止）、Protocol/alias/signature の比較
   （型システムの責務）、実行時の契約強制。
 - **Requirements**: 2.1, 2.2, 2.3
@@ -142,8 +145,10 @@ flowchart TD
 - **Responsibility**: chat プリミティブ上の手動ツールループで自律実行し、4ガードレールと
   `stop_reason` を全レーン同一に確定する。
 - **Public interface**: `async def run_autonomous_agent(goal: str, *, model/llm, max_iterations: int, allowed_tools: Sequence[Tool], approval_hook: ApprovalHook, budget: int) -> AgentRunResult`。
-- **Owns**: 手動ループ駆動、許可リスト検査（R6.4）、危険操作の `approval_hook`
-  呼出（R6.5）、各反復の `budget_spent`（モデル usage トークン）記録と累積超過判定
+- **Owns**: 手動ループ駆動、許可リスト検査（違反時はツール非実行・試行を
+  `AgentStep` に記録し `stop_reason="disallowed_tool"` で停止、R6.4）、危険操作の
+  `approval_hook` 呼出（拒否時も試行を `AgentStep` に記録、R6.5）、各反復の
+  `budget_spent`（モデル usage トークン）記録と累積超過判定
   （R6.6）、`max_iterations` 停止（R6.3）、`stop_reason` 語彙確定（R6.2）。
 - **Budget 会計シーム（決定論性の核心）**: ループは usage を直接 fw API から読まず、
   レーン毎の小関数 `_budget_spent(response) -> int` を1点に閉じ込めて読む
@@ -151,7 +156,9 @@ flowchart TD
   llamaindex=`CompletionResponse.raw` の usage、いずれも欠落時は `0` ではなく
   フェイクが台本供給する明示値を採る）。これによりオフラインでは「turn-sequenced
   fakes」がターン毎に確定トークン数を供給し、`budget` 超過反復を決定論的に発火できる
-  （R7.3 の予算超過ケースを hermetic に再現）。
+  （R7.3 の予算超過ケースを hermetic に再現）。会計不変条件（spec 6.1）:
+  `total_budget_spent` は最終回答ターンを含む全モデル呼び出しの合計で
+  `>= sum(AgentStep.budget_spent)`、超過判定は各呼び出しの**後**（spec 6.6）。
 - **Does NOT own**: 契約モデル/Protocol 定義（contracts が所有）、ツールの危険分類
   （`Tool.dangerous` が保持）、コスト換算（将来イテレーション）。
 - **Requirements**: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 10.3
@@ -237,7 +244,7 @@ erDiagram
 | GateOutcome | passed | `bool` | ゲート合否 |
 | GateOutcome | detail | `str` | 判定理由 |
 | ChainResult | steps | `list[ChainStep]` | 実行済みステップ列 |
-| ChainResult | gate | `GateOutcome` | ゲート判定 |
+| ChainResult | gate | `GateOutcome` | **最後に評価された**ゲート判定（位置は `len(steps)` で判別、spec 3.1） |
 | ChainResult | final_output | `str \| None` | ゲート不合格時 `None`（R3.3） |
 | Branch | index | `int` | 決定論順序キー |
 | Branch | output | `str` | ブランチ出力 |
@@ -253,12 +260,12 @@ erDiagram
 | OptimizationResult | stop_reason | `Literal["passed","max_iterations"]` | 打切理由（R5.4） |
 | AgentStep | index | `int` | 反復番号 |
 | AgentStep | tool | `str` | 呼出ツール名 |
-| AgentStep | observation | `str` | 環境フィードバック |
+| AgentStep | observation | `str` | 環境フィードバック（拒否時は拒否理由、spec 6.4/6.5） |
 | AgentStep | budget_spent | `int` | 当該反復のトークン消費（非負）。本番は `_budget_spent(response)` シームが fw usage から取得、オフラインは fakes が台本供給 |
-| AgentRunResult | steps | `list[AgentStep]` | ループ記録 |
+| AgentRunResult | steps | `list[AgentStep]` | ループ記録（ツール呼出試行を伴う反復のみ。拒否された試行も含む） |
 | AgentRunResult | final_output | `str \| None` | 未完了時 `None` |
-| AgentRunResult | stop_reason | `Literal["completed","max_iterations","budget_exceeded","denied"]` | 語彙固定（R6.2） |
-| AgentRunResult | total_budget_spent | `int` | 累積トークン（非負） |
+| AgentRunResult | stop_reason | `Literal["completed","max_iterations","budget_exceeded","denied","disallowed_tool"]` | 語彙固定（R6.2） |
+| AgentRunResult | total_budget_spent | `int` | 累積トークン（非負）。最終回答ターン含む全モデル呼出の合計、`>= sum(steps.budget_spent)`（spec 6.1） |
 | Tool (Protocol) | name / dangerous / run | `str` / `bool` / `(str)->str` | ツール抽象（ADR-7） |
 | ApprovalHook (alias) | — | `Callable[[str, str], bool]` | (tool, args)→承認可否 |
 
@@ -288,11 +295,16 @@ async def run_autonomous_agent(
 - 各レーンは `model`（PydanticAI）/ `llm`（LlamaIndex）/ `llm`（BeeAI ChatModel）の
   DI seam で同一契約を満たす（005 と同パターン）。
 - パス依存配線: `[tool.uv.sources] patterns-contracts = { path = "../../contracts", editable = true }`。
-- ドリフトテスト入力フォーマット: README の ```python fenced block に
-  Pydantic クラス定義（フィールドのみ）と `Literal` エイリアスを記載する。これらが
-  ドリフト parser の比較対象。エントリ signature・`Tool` Protocol・`ApprovalHook`
-  エイリアスも README に記すが、これらは**ドキュメント目的のみ**で parser はスキップ
-  し（比較対象外）、正本一致は pyright strict が担保する。
+- ドリフトテスト入力フォーマット: 各 README は**契約ブロックと signature
+  ブロックを分離**する。契約ブロックは先頭行が `# [contract]` の ```python
+  fenced block で、Pydantic クラス定義（フィールドのみ）と `Literal` エイリアス
+  のみを含む **`ast.parse` 可能な純 Python** とする。エントリ signature
+  （`model/llm` 疑似構文を含むため `ast.parse` 不能）・`Tool` Protocol・
+  `ApprovalHook` エイリアスは**マーカーの無い別の** fenced block に記載し
+  （ドキュメント目的のみ）、parser は `# [contract]` マーカー付きブロックだけを
+  パースする。既存 routing / orchestrator-workers README の正本ブロックも
+  同形式へ再整形する（現行は signature が同一ブロック内に混在）。
+  Protocol/alias/signature の正本一致は pyright strict が担保する。
 
 ## File Structure Plan
 
@@ -306,6 +318,7 @@ async def run_autonomous_agent(
 | `patterns/contracts/uv.lock` | Create | 契約パッケージの lockfile |
 | `patterns/contracts/README.md` | Create | パッケージ概要・import 面・正本との関係説明 |
 | `patterns/contracts/src/patterns_contracts/__init__.py` | Create | 全モデル・型のフラット再エクスポート |
+| `patterns/contracts/src/patterns_contracts/py.typed` | Create | PEP 561 マーカー（レーン pyright strict が型情報を解決するために必須） |
 | `patterns/contracts/src/patterns_contracts/routing.py` | Create | routing 契約（005 から移行） |
 | `patterns/contracts/src/patterns_contracts/orchestrator_workers.py` | Create | orchestrator-workers 契約（005 から移行） |
 | `patterns/contracts/src/patterns_contracts/prompt_chaining.py` | Create | `ChainStep/GateOutcome/ChainResult` 定義 |
@@ -334,7 +347,7 @@ async def run_autonomous_agent(
 | `patterns/parallelization/README.md` | Create | 同上 |
 | `patterns/evaluator-optimizer/README.md` | Create | 同上 |
 | `patterns/autonomous-agent/README.md` | Create | 同上（4ガードレール・OWASP 言及） |
-| `patterns/routing/README.md` | Modify | 契約所在記述を「パッケージ実体 + README 正本」へ更新 |
+| `patterns/routing/README.md` | Modify | 契約所在記述を「パッケージ実体 + README 正本」へ更新 + 正本ブロックを `# [contract]` 形式へ再整形（signature を別ブロックへ分離） |
 | `patterns/orchestrator-workers/README.md` | Modify | 同上 |
 | `patterns/README.md` | Modify | タクソノミー4行を「✅実装済み」＋リンク、contracts パッケージ注記 |
 | `patterns/SECURITY-NOTES.md` | Modify | autonomous-agent 4ガードレール → OWASP Agentic AI マッピング追記 |
@@ -351,8 +364,10 @@ async def run_autonomous_agent(
   `branches` を決定論復元（R4.4）。
 - evaluator-optimizer が `max_iterations` 到達 → ループ停止・
   `stop_reason="max_iterations"`（R5.4）。
-- autonomous-agent が `allowed_tools` 外を呼出 → ツール非実行で拒否（R6.4）。
-- autonomous-agent の危険操作で承認得られず → ループ停止・`stop_reason="denied"`（R6.5）。
+- autonomous-agent が `allowed_tools` 外を呼出 → ツール非実行・試行を
+  `AgentStep` に記録し、ループ停止・`stop_reason="disallowed_tool"`（R6.4）。
+- autonomous-agent の危険操作で承認得られず → 試行を `AgentStep` に記録し、
+  ループ停止・`stop_reason="denied"`（R6.5）。
 - autonomous-agent の累積トークンが `budget` 超過 → ループ停止・
   `stop_reason="budget_exceeded"`（R6.6）。
 - autonomous-agent が `max_iterations` 到達 → 停止・`stop_reason="max_iterations"`（R6.3）。
