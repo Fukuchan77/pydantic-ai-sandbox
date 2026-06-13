@@ -109,3 +109,60 @@ git status            → patterns/rag/** のみ（root 無変更）
 - root の `extend-exclude=["patterns"]`（ruff）/ `exclude=["patterns"]`（pyright）により、
   レーン追加は root `mise run check` を構造的に汚さない。R1.4/12.2 は「root ファイル
   無変更 + 除外設定」で機械的に担保でき、毎回 root 全チェックを回す必要はない。
+
+---
+
+## Task 2 — shared-contracts への RAG 契約追加（2026-06-13）
+
+### 実施（Red→Green→Refactor）
+
+- **2.1** RED: `patterns/contracts/tests/unit/test_rag_contracts.py` を先行作成し、
+  `ImportError: cannot import name 'Citation' from 'patterns_contracts'` を確認。
+  drift テスト（AST/introspection parity）を補完する**振る舞いテスト**として、
+  再エクスポート経路・フィールド集合（R4.1）・`RagAnswer`→`Citation` ネスト coercion・
+  欠損 `chunk_id`/非数値 `score` の `ValidationError` を検証。GREEN:
+  `src/patterns_contracts/rag.py` に `RetrievedChunk{chunk_id,source,locator,text,score}` /
+  `Citation{source,locator,chunk_id,score}` / `RagAnswer{answer,citations:list[Citation]}` を
+  既存契約と同一スタイル（`from __future__`, `Field(description=...)`, `__all__`）で定義。
+- **2.2** `__init__.py` に 3 型 import + `__all__` をアルファベット順維持で追記
+  （`Citation`/`RagAnswer`/`RetrievedChunk`）。振る舞いテスト 8/8 green で再エクスポート確認。
+- **契約レベル方針**: `RagAnswer.citations` は plain `list[Citation]`。≥1 不変条件（R4.2）・
+  dangling loud-fail（R4.3）は依存ゼロ契約ではなく RAG パイプライン（`rag.citation`,
+  Task 6/7）の責務として設計どおり分離（plan Components の所有境界に準拠）。
+
+### エラーと根本原因
+
+- **ruff format**: `Field(description=...)` の長文が 100 桁超過 → format が
+  `locator`/`chunk_id`/`citations` を複数行へ折返し。`ruff format` 適用で解消（symptom 無視せず）。
+
+### VERIFY（検証ゲート証跡）
+
+```
+ruff check .          → All checks passed!
+ruff format --check . → 10 files already formatted
+pyright               → 0 errors, 0 warnings, 0 informations
+pytest tests/unit/test_rag_contracts.py → 8 passed
+pytest --cov (lane 全体) → 3 failed, 9 passed / rag.py 100% (17/17) /
+                          Required 85.0% reached (Total 100.00%)
+```
+
+**3 failed の根本原因（既知の Task 11 結合・修正forward しない）**: `test_contract_drift.py`
+は「README 正本 == `patterns_contracts` 実体」の単一点パリティを検証する。RAG 3 型を
+パッケージへ追加・再エクスポートした時点で package 側に出現するが、README 正本側
+（`patterns/rag/README.md` の正本 fenced block + `_README_PATHS["rag"]` 登録）は **Task 11.1/
+11.2**（depends: 2, 7）の所有物。失敗メッセージは `Extra items in the right set:
+RetrievedChunk, Citation, RagAnswer` で、package にのみ存在＝README 未記載を正確に示す。
+これは DAG の Wave1→Wave5 間に構造的に存在する計画済み RED ウィンドウであり、Task 2 の
+成果物欠陥ではない。Task 11 が README 正本を記載・登録した時点で 3 テストは green に閉じる。
+Task 2 のスコープ（`rag.py` + `__init__.py`）を越えて README を先行作成すること
+（fix-forward）は行わない。
+
+### 学び（Act 候補）
+
+- 契約パッケージへのモデル追加は drift テストを必ず一時 RED にする（README 正本は別タスク
+  所有）。タスク順序上、contracts 追加（Wave1）とパターン README/drift 登録（Wave5）の間は
+  lane suite が RED であることを前提に、タスク単位ゲートは「当該タスク固有テスト green +
+  lint/format/typecheck green + 既知結合の明示」で評価する。
+- drift テストの `test_each_package_model_is_documented_in_exactly_one_readme` は
+  package→README 方向の網羅を検出するため、再エクスポートを追加した瞬間に発火する。
+  これは設計意図どおりの早期検出であり、Task 11 完了で解消する。

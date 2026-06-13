@@ -29,6 +29,7 @@ from patterns_contracts.orchestrator_workers import (
 )
 from patterns_contracts.parallelization import Branch, ParallelResult
 from patterns_contracts.prompt_chaining import ChainResult, ChainStep, GateOutcome
+from patterns_contracts.rag import Citation, RagAnswer, RetrievedChunk
 from patterns_contracts.routing import Route, RoutedAnswer, RouteDecision
 
 __all__ = [
@@ -38,11 +39,14 @@ __all__ = [
     "Branch",
     "ChainResult",
     "ChainStep",
+    "Citation",
     "GateOutcome",
     "Iteration",
     "OptimizationResult",
     "OrchestratedResult",
     "ParallelResult",
+    "RagAnswer",
+    "RetrievedChunk",
     "Route",
     "RouteDecision",
     "RoutedAnswer",
