@@ -10,7 +10,12 @@
 #
 # Single job (not a matrix): `mise run patterns:test:integration` runs the
 # three lanes sequentially against one daemon, so the model is pulled and
-# warmed exactly once (plan §6).
+# warmed exactly once (plan §6). The mise task is pattern-agnostic — it runs
+# each lane's whole tests/integration/ suite — so the four patterns added in
+# Spec 006-2a (prompt-chaining, parallelization, evaluator-optimizer,
+# autonomous-agent) are exercised alongside routing + orchestrator-workers
+# with no per-pattern step here (Req 12.2 / plan file-table). That is six
+# contract-level e2e cases per lane, eighteen total.
 
 name: patterns-integration-ollama
 
@@ -28,6 +33,11 @@ on:
       - 'patterns/frameworks/*/src/**'
       - 'patterns/frameworks/*/tests/integration/**'
       - 'patterns/frameworks/*/pyproject.toml'
+      # The patterns import their contracts from the shared package, and the
+      # e2e cases assert contract-level behaviour — a contract change must
+      # re-trigger the live gate (parallel to patterns-ci.yml; the push
+      # trigger already covers it via 'patterns/**'). Spec 006-2a Req 12.2.
+      - 'patterns/contracts/**'
       - '.github/workflows/patterns-integration-ollama.yml'
   workflow_dispatch: {}
 
@@ -44,7 +54,7 @@ env:
 
 jobs:
   e2e:
-    name: patterns integration (3 lanes, one daemon)
+    name: patterns integration (6 patterns × 3 lanes, one daemon)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:

@@ -1013,24 +1013,24 @@ _Boundary:_ `mise.toml`, `.github/workflows/patterns-ci.yml`, `.github/workflows
 _Depends:_ 1, 2, 3, 5, 6, 7, 8, 10, 11
 _Requirements:_ 10.2, 10.4, 12.1, 12.2, 12.3, 13.1, 13.2, 13.3, 7.4, 7.5, NFR-4
 
-- [ ] 12.1 `mise.toml` の `patterns:*` 各タスク（setup / lint / format / typecheck /
+- [x] 12.1 `mise.toml` の `patterns:*` 各タスク（setup / lint / format / typecheck /
       test / audit）に contracts パッケージ手順を lane ループ前に追加し、`patterns:audit`
       に contracts の `pip-audit` を含める
       _Boundary:_ `mise.toml`
       _Depends:_ 1, 2, 3
       _Requirements:_ 10.2, 13.1
-- [ ] 12.2 `patterns-ci.yml` の paths に `patterns/contracts/**` を追加し、contracts
+- [x] 12.2 `patterns-ci.yml` の paths に `patterns/contracts/**` を追加し、contracts
       検証ジョブ（lint / typecheck / test + ドリフト）を追加する。pre-commit / CI の
       除外設定が `patterns/contracts/` を含む patterns/ 全域を除外しないことを検証する
       _Boundary:_ `.github/workflows/patterns-ci.yml`
       _Depends:_ 1, 2, 3
       _Requirements:_ 12.1, 10.4
-- [ ] 12.3 `patterns-integration-ollama.yml` が新4パターン結合を
+- [x] 12.3 `patterns-integration-ollama.yml` が新4パターン結合を
       `mise run patterns:test:integration` 経由で実行するよう反映する
       _Boundary:_ `.github/workflows/patterns-integration-ollama.yml`
       _Depends:_ 10
       _Requirements:_ 12.2
-- [ ] 12.4 各レーン README に新4パターンの実行方法・バージョン・ベータ注意事項を
+- [x] 12.4 各レーン README に新4パターンの実行方法・バージョン・ベータ注意事項を
       追記し、レーン毎カバレッジ `fail_under` のフロアを満たす（必要に応じ ratchet
       引上げ）。ルート `mise run check` 無変更グリーンと既存ルートワークフロー無変更を
       検証する
@@ -1039,3 +1039,25 @@ _Requirements:_ 10.2, 10.4, 12.1, 12.2, 12.3, 13.1, 13.2, 13.3, 7.4, 7.5, NFR-4
       _Requirements:_ 13.3, 13.2, 12.3, 7.4, 7.5, NFR-4
 
 ### Implementation Notes
+
+- 12.1–12.3: 共有 `patterns/contracts` を mise の `patterns:*` 各タスク（setup/lint/
+  format/typecheck/test/audit）でレーンループ前に処理（`set -e` で contracts 失敗が
+  レーン到達前に停止）。`patterns-ci.yml` は paths に `patterns/contracts/**` を明示
+  追加＋専用 contracts ジョブ（lint/format/typecheck/pytest+drift/pip-audit, Python
+  3.13）。`patterns-integration-ollama.yml` は pattern-agnostic な
+  `patterns:test:integration`（レーン毎 `tests/integration/` 全体実行）が Task 10 の
+  新4 e2e を追加ステップ無しで既に網羅するため、差分はトリガ面（contracts paths）と
+  ジョブ名（6パターン×3レーン）の反映のみ。Req 12.3 不変条件は ci.yml /
+  integration-ollama.yml / security.yml の untouched を `git diff` で実証。
+- 12.4: 3レーン pyproject の `fail_under` を `85→98` へ ratchet（実測 pydantic-ai
+  98.85 / beeai 98.99 / llamaindex 99.20%、ルートアプリ水準にロックイン、Req 7.4/
+  NFR-4）。contracts は floor 85 据置（レーン外パッケージ）。各レーン README を新4
+  パターン（`run_<pattern>` エントリ + 注入引数 model=/llm=）へ更新し、削除済み
+  `contracts.py` 行を共有 `patterns_contracts` パス依存記述へ是正。検証: `mise run
+  patterns:test` exit 0（4プロジェクト floor 達成）/ ルート `mise run check` 無変更
+  グリーン（277 passed, 4 skipped, Req 13.2）/ 境界外修正ゼロ。
+- 12.4(post-review): adversarial-review が pydantic-ai/llamaindex README の prompt-
+  chaining 記述「outline→check→document」を実体（`ChainStep` name=outline/draft/
+  finalize、beeai README は正）との不一致として検出 → 両レーン README を
+  「outline→draft→finalize」へ是正。`patterns:test` description の stale な
+  「coverage floor 85」も「contracts floor 85, lanes 98」へ更新。
