@@ -1,0 +1,241 @@
+{
+  "schema_name": "DoclingDocument",
+  "version": "1.10.0",
+  "name": "rag-overview",
+  "furniture": {
+    "self_ref": "#/furniture",
+    "children": [],
+    "content_layer": "furniture",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "body": {
+    "self_ref": "#/body",
+    "children": [
+      {
+        "$ref": "#/texts/0"
+      },
+      {
+        "$ref": "#/texts/1"
+      },
+      {
+        "$ref": "#/texts/2"
+      },
+      {
+        "$ref": "#/texts/3"
+      },
+      {
+        "$ref": "#/texts/4"
+      },
+      {
+        "$ref": "#/texts/5"
+      },
+      {
+        "$ref": "#/texts/6"
+      }
+    ],
+    "content_layer": "body",
+    "name": "_root_",
+    "label": "unspecified"
+  },
+  "groups": [],
+  "texts": [
+    {
+      "self_ref": "#/texts/0",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            30
+          ]
+        }
+      ],
+      "orig": "Retrieval-Augmented Generation",
+      "text": "Retrieval-Augmented Generation",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/1",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            31,
+            123
+          ]
+        }
+      ],
+      "orig": "RAG grounds a language model answer in retrieved source chunks rather than parametric memory.",
+      "text": "RAG grounds a language model answer in retrieved source chunks rather than parametric memory."
+    },
+    {
+      "self_ref": "#/texts/2",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 1,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            124,
+            211
+          ]
+        }
+      ],
+      "orig": "Each returned chunk carries a stable identifier so that a citation can point back to it.",
+      "text": "Each returned chunk carries a stable identifier so that a citation can point back to it."
+    },
+    {
+      "self_ref": "#/texts/3",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            22
+          ]
+        }
+      ],
+      "orig": "Deterministic Chunking",
+      "text": "Deterministic Chunking",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/4",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 2,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            23,
+            116
+          ]
+        }
+      ],
+      "orig": "The chunker merges peer passages under a shared heading while respecting a fixed token budget.",
+      "text": "The chunker merges peer passages under a shared heading while respecting a fixed token budget."
+    },
+    {
+      "self_ref": "#/texts/5",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "section_header",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            0,
+            12
+          ]
+        }
+      ],
+      "orig": "Token Budget",
+      "text": "Token Budget",
+      "level": 1
+    },
+    {
+      "self_ref": "#/texts/6",
+      "parent": {
+        "$ref": "#/body"
+      },
+      "children": [],
+      "content_layer": "body",
+      "label": "text",
+      "prov": [
+        {
+          "page_no": 3,
+          "bbox": {
+            "l": 72.0,
+            "t": 72.0,
+            "r": 540.0,
+            "b": 720.0,
+            "coord_origin": "TOPLEFT"
+          },
+          "charspan": [
+            13,
+            342
+          ]
+        }
+      ],
+      "orig": "Because the token budget is fixed in advance the same document always yields the same chunk boundaries on every run which means a golden snapshot can detect any regression in the chunking behaviour whenever a dependency version changes underneath the lane and shifts how passages are grouped or split apart into separate records.",
+      "text": "Because the token budget is fixed in advance the same document always yields the same chunk boundaries on every run which means a golden snapshot can detect any regression in the chunking behaviour whenever a dependency version changes underneath the lane and shifts how passages are grouped or split apart into separate records."
+    }
+  ],
+  "pictures": [],
+  "tables": [],
+  "key_value_items": [],
+  "form_items": [],
+  "pages": {}
+}
