@@ -34,6 +34,7 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
       > 注: `py.typed`（PEP 561 マーカー）は骨組みの正当な構成要素だが当初列挙漏れ。
       > Task 3.1 の consumer 配線で pyright `reportMissingTypeStubs` として顕在化し
       > 根本原因修正で新設（do.md §3.1）。境界宣言を実体へ追従させるため遡及追記。
+
 - [x] 1.2 (P) 既存 routing / orchestrator-workers 契約をサブモジュールへ移行する
       （`Route` / `RouteDecision` / `RoutedAnswer` / `SubTask` / `TaskPlan` /
       `WorkerResult` / `OrchestratedResult` を無変更で移植）
@@ -177,13 +178,11 @@ _Boundary:_`patterns/prompt-chaining/README.md`, `patterns/parallelization/READM
   （drift-mirror で class/field/Literal が ALL MATCH を維持）。
 - 2.3: Task 2.1/2.2 の drift-mirror アドホック検証を正規テストへ昇格。6 README の
   `## パターン契約` 見出し直下 ```python fence を heading anchor で抽出（Task 11 の
-  追加セクション混入に頑健）。fence 全体は entry signature の `model/llm` で
-  `ast.parse` 不可のため、col-0 で top-level 構文へ分割し**構文単位**でパース。
-  比較は3集合: クラス集合 / フィールド集合 / Literal 語彙（inline `variant`/`verdict`/
-  `stop_reason` + module-level alias `Route`）。`Route` のような named alias は
-  README 側で2パス（alias 収集→field 解決）し、パッケージ側 `route: Route` の
-  field-level Literal と対称化。`Tool` Protocol（base `Protocol`）/`ApprovalHook`
-  （Callable, `get_origin` 非 Literal）/`async def` は両側で型ベースにスキップ。
+追加セクション混入に頑健）。fence 全体は entry signature の `model/llm`で`ast.parse`不可のため、col-0 で top-level 構文へ分割し**構文単位**でパース。
+比較は3集合: クラス集合 / フィールド集合 / Literal 語彙（inline`variant`/`verdict`/
+`stop_reason`+ module-level alias`Route`）。`Route`のような named alias は
+README 側で2パス（alias 収集→field 解決）し、パッケージ側`route: Route` の
+field-level Literal と対称化。`Tool`Protocol（base`Protocol`）/`ApprovalHook`（Callable,`get_origin` 非 Literal）/`async def` は両側で型ベースにスキップ。
   4テスト = 3集合 + one-class-one-README 不変条件（merge が二重定義を隠す穴を封鎖）。
 - 2.4: 旧 root `tests/unit/test_patterns_contract_sync.py`（レーン間 AST 相互比較 +
   Route 語彙チェック）を `git rm` で削除。検知喪失でなく単一点へ**置換**である証左を
@@ -248,14 +247,14 @@ _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
   「契約複製の不在」を直接実証する順序を採用 — 先に5 import 面を
   `patterns_contracts` へ差替 + `contracts.py` を `git rm` し、依存未配線のまま
   `uv run --no-sync pytest` → 全 collection が `ModuleNotFoundError: No module
-  named 'patterns_contracts'`（RED, 5 errors）。次に `dependencies += "patterns-
-  contracts"` + `[tool.uv.sources] patterns-contracts = { path="../../contracts",
-  editable=true }` を追加 → `uv lock`（72 packages, patterns-contracts 追加）+
+named 'patterns_contracts'`（RED, 5 errors）。次に `dependencies += "patterns-
+contracts"` + `[tool.uv.sources] patterns-contracts = { path="../../contracts",
+editable=true }` を追加 → `uv lock`（72 packages, patterns-contracts 追加）+
   `uv sync` → pytest 11 passed/2 skipped（baseline と同一, GREEN）。
 - 3.1: import 整列は `patterns_contracts` が known-first-party 非該当 = third-party
   扱いになる点に注意。`patterns_contracts` < `pydantic*` でソートされ third-party
   群先頭へ、`patterns_pydantic_ai.*`（first-party）は空白行で分離。`ruff check
-  --fix` で test_ollama_e2e.py の1件を正規化。
+--fix` で test_ollama_e2e.py の1件を正規化。
 - 3.1: **境界外修正1件（py.typed）** — pyright strict が consumer 側で
   `reportMissingTypeStubs`（patterns_contracts に PEP 561 マーカー無し）を5件報告。
   根本原因は Task 1.1 のパッケージ骨組みが `py.typed` を欠いていたこと（contracts
@@ -307,7 +306,7 @@ _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
   pyproject と乖離した stale メタ。`uv lock` が `allow` vs `if-necessary-or-explicit` の差を
   検知し pyproject 整合の正へ補正。パッケージ版 churn は patterns-contracts 追加のみで
   NFR-1 充足。検証ゲート: `uv lock --check`（103 packages, exit 0）/ `uv sync --all-groups
-  --locked`（Checked 103, exit 0）/ pyright(strict,3.13) 0 errors / ruff All checks passed /
+--locked`（Checked 103, exit 0）/ pyright(strict,3.13) 0 errors / ruff All checks passed /
   format 10 files clean / coverage 97.64%（floor 85%）/ pytest 12 passed・2 skipped。
   これで Major Task 3（レーン契約配線とパッケージ移行）の全サブタスク（3.1〜3.3）完了。
 
@@ -403,9 +402,9 @@ _Requirements:_ 7.1, 7.2
   シームは `CompletionResponse.raw["usage"]["total_tokens"]` にターン毎トークンを供給
   （plan「llamaindex=`CompletionResponse.raw` の usage」/ Task 8.3 が読む）。
 - 4.3: **境界内 pyright 修正2件（loose stubs 起因の根本対応）**: ① `Turn = ToolTurn |
-  FinalTurn` を `type Turn = ...`（真の型エイリアス）へ — 値ユニオンだと PrivateAttr
+FinalTurn` を `type Turn = ...`（真の型エイリアス）へ — 値ユニオンだと PrivateAttr
   `list[Turn]` 宣言が partially-unknown。② list PrivateAttr の `default_factory=list`
-  を**型付きファクトリ**（`list[Turn]`/`list[dict[str, object]]`/`list[str]`）へ — 
+  を**型付きファクトリ**（`list[Turn]`/`list[dict[str, object]]`/`list[str]`）へ —
   LlamaIndex の `CustomLLM` が loose stubs を出すため、bare `list` ファクトリが base
   経由で `list[Unknown]` に降格する（venv 実測: bare=error / typed=OK / no-default=OK）。
   verdict 格納は `dict[str, Any]`→`dict[str, object]` とし stored attr から `Any` を排除
@@ -455,7 +454,7 @@ _Requirements:_ 3.1, 3.2, 3.3, 7.3, 9.1
 - 5.3: llamaindex は `run_prompt_chain` を `PromptChainWorkflow`（event-driven
   `@step` 直列連鎖）で実装。routing/orchestrator と同型に **イベントで出力を連結** —
   `outline(StartEvent) → _DraftEvent → draft → _FinalizeEvent | StopEvent →
-  finalize → StopEvent`。早期終了は draft ステップが gate 不合格時に **終端
+finalize → StopEvent`。早期終了は draft ステップが gate 不合格時に **終端
   `StopEvent`（`final_output=None`）を直接 emit** し finalize イベントを発行しない＝
   ステートマシン上で silent 継続を構造封鎖（Req 3.3、beeai の `Workflow.END` 相当を
   union-return で表現）。`steps` はゲート前2件、GATE_MIN_WORDS=3 を3レーン共通維持。
@@ -573,7 +572,6 @@ _Requirements:_ 4.1, 4.2, 4.3, 4.4, 7.3, 9.1
 
 ## 7. evaluator-optimizer パターン実装（3レーン）
 
-
 生成器→評価器のループを `pass` 到達か `max_iterations` まで反復し、`revise`
 フィードバックを次反復に反映する。`stop_reason` を `Literal["passed",
 "max_iterations"]` で語彙固定する。各レーンで `revise→…→pass` 遷移と全 revise
@@ -676,19 +674,19 @@ _Boundary:_ `patterns/frameworks/*/src/patterns_*/autonomous_agent.py`, `pattern
 _Depends:_ 4
 _Requirements:_ 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.3, 9.1, 10.3
 
-- [ ] 8.1 (P) pydantic-ai: `run_autonomous_agent` 手動ループを実装し
+- [x] 8.1 (P) pydantic-ai: `run_autonomous_agent` 手動ループを実装し
       （`_budget_spent` は `ModelResponse.usage` トークン和、instrument 適用、
       ターン列フェイク使用）、正常完了 + 4契約違反系の単体テストを書く
       _Boundary:_ `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/autonomous_agent.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_autonomous_agent.py`
       _Depends:_ 4.1
       _Requirements:_ 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.3, 9.1, 10.3, NFR-2
-- [ ] 8.2 (P) beeai: `run_autonomous_agent` 手動ループを実装し（`_budget_spent` は
+- [x] 8.2 (P) beeai: `run_autonomous_agent` 手動ループを実装し（`_budget_spent` は
       `ChatModelOutput.usage`、手動スパン、ターン列フェイク使用）、正常完了 +
       4契約違反系の単体テストを書く
       _Boundary:_ `patterns/frameworks/beeai/src/patterns_beeai/autonomous_agent.py`, `patterns/frameworks/beeai/tests/unit/test_autonomous_agent.py`
       _Depends:_ 4.2
       _Requirements:_ 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.3, 9.1, 10.3
-- [ ] 8.3 (P) llamaindex: `run_autonomous_agent` 手動ループを実装し
+- [x] 8.3 (P) llamaindex: `run_autonomous_agent` 手動ループを実装し
       （`_budget_spent` は `CompletionResponse.raw` の usage、OpenInference 計装、
       ターン列フェイク使用）、正常完了 + 4契約違反系の単体テストを書く
       _Boundary:_ `patterns/frameworks/llamaindex/src/patterns_llamaindex/autonomous_agent.py`, `patterns/frameworks/llamaindex/tests/unit/test_autonomous_agent.py`
@@ -696,6 +694,92 @@ _Requirements:_ 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.3, 9.1, 10.3
       _Requirements:_ 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.3, 9.1, 10.3
 
 ### Implementation Notes
+
+- 8.1: pydantic-ai の `run_autonomous_agent` を **`Agent` ではなく `Model.request`
+  直叩きの手動ループ**で実装（chat プリミティブ上の手動一様ループ＝本パターンが初の
+  非 Agent レーンコード。routing/eval 等は `Agent` 駆動）。4ガードレールの**境界設計**:
+  `max_iterations`/`approval_hook(denied)`/`budget(budget_exceeded)` は **ループ停止**
+  ガードレール（R6.3/6.5/6.6）だが、`allowed_tools` 違反（R6.4）は **per-call refusal**
+  ＝ツール非実行＋拒否 observation を feedback して**ループ継続**とした。根拠は
+  `stop_reason` 語彙に "forbidden" 系が無い非対称性（6.5/6.6 のみ「ループ停止」と明記、
+  6.4 は「実行せず拒否」のみで stop_reason 未割当）＝契約が per-call 拒否を意図する証左。
+- 8.1: **予算会計シームの単一点化**（plan「決定論性の核心」）— ループは usage を直読
+  せず `_budget_spent(response) -> int = response.usage.total_tokens`（input+output 和）
+  の1関数に閉じ込め、`turn_sequenced_model`（Task 4.1）が `RequestUsage(output_tokens=
+turn.tokens)` で台本供給したトークンを決定論集計。`total_budget_spent` は **AgentStep
+  単位の累積**（最終回答ターンは tool 反復でない＝steps 非計上、契約 R6.6 の「各反復」に
+  忠実）。超過判定は strict `total > budget`（== は上限ちょうど＝継続）。試行は全て steps へ
+  記録（executed/refused/denied 全て）＝監査証跡が silent empty にならない（R10.3 多層防御）。
+- 8.1: RED→GREEN は正規順守 — RED: `ModuleNotFoundError: patterns_pydantic_ai.
+autonomous_agent`（8 tests collection error）→ GREEN: 実装で 8 passed。検証強化で
+  dict/None 引数正規化テストを追加（`_args_text` の dict→sorted-json / None→"" 分岐は
+  fake が str 引数しか渡さず未到達 = pattern.py 95%→100%）。当初 budget_exceeded で
+  fail → 原因: custom `FunctionModel` が usage 未指定だと**入力履歴トークンを自動集計**
+  し budget を踏む（症状でなく根本: 予算シームが実 usage を読む証左）→ 台本フェイク同様
+  `usage=RequestUsage(output_tokens=1)` を明示供給して決定論化。
+- 8.1: テストは plan の4契約違反ケースを各個に網羅 — 正常完了（completed）/ 許可リスト
+  違反（refused→継続→completed, observation に "not in allowed_tools"）/ 承認拒否
+  （denied, final_output=None, canned observation 非出現で非実行を実証）/ 予算超過
+  （3+3 tokens で budget=5 を2反復目に超過, budget_exceeded）/ max_iterations 打切 +
+  `max_iterations<1`・`budget<0` の loud ValueError + span≥1（instrument_model 注入で
+  `gen_ai` 属性確認, eval/parallelization 流儀踏襲）。**`__init__` 再エクスポートは本
+  タスク境界外**（5.1/6.1/7.1 と同じく無改変＝lane `__init__` は 005 契約のみ再export）。
+  検証ゲート: ruff All checks passed / format 19 files clean / pyright(strict) 0 errors /
+  pytest 35 passed・2 skipped（無回帰）/ autonomous_agent.py coverage 100%・total 98.85%
+  （floor 85%）。
+- 8.2: beeai の `run_autonomous_agent` を 8.1 と同型の手動ループで実装。レーン差分は
+  3点。① **chat プリミティブ** = `ChatModel.create(messages=...)` 直叩き（8.1 の
+  `Model.request` 相当）。ツール呼出は `output.get_tool_calls()`（→`MessageToolCallContent`
+  の `tool_name`/`args`/`id`）、最終回答は `output.get_text_content()` で判別。フィードバックは
+  `output.messages` + `ToolMessage(MessageToolResultContent(...))` を履歴 append。② **引数
+  正規化不要** — beeai `MessageToolCallContent.args` は `str` 固定（venv 実測）なので 8.1 の
+  `_args_text`（dict/None→str）が不要 = ループが args をそのまま `Tool.run` へ渡す。③ **観測は
+  手動スパン** = パターン関数に instrumentation 引数を持たせず呼出側が
+  `traced(provider, "pattern.autonomous_agent", ...)` でラップ（eval/parallelization 等
+  beeai 全パターンと同方式。8.1 の `instrument_model` 注入とは異なる）→ 関数 signature は
+  `model`→`llm`、`instrumentation` 引数を持たない。
+- 8.2: **予算シームの単一点化**: `_budget_spent(output) -> int = output.usage.total_tokens
+if output.usage else 0`。beeai `ChatModelOutput.usage` は `Optional`（8.1 の
+  `ModelResponse.usage` は必須）のため None ガードを seam 内へ閉込め。`TurnSequencedChatModel`
+  （Task 4.2）が `ChatModelUsage(total_tokens=turn.tokens)` で台本供給したトークンを決定論集計。
+  ガードレール境界（max_iterations/denied/budget_exceeded=停止、allowed_tools=per-call refusal
+  で継続）と steps 全記録は 8.1 と完全同一。
+- 8.2: RED→GREEN は正規順守 — RED: `ModuleNotFoundError: patterns_beeai.autonomous_agent`
+  （9 tests collection error）→ GREEN: 実装で 9 passed。テストは plan の4契約違反ケースを
+  各個に網羅（completed / refused→継続→completed / denied / budget_exceeded / max_iterations）
+  - loud ValueError 2件 + args 転送（`_RecordingTool`、8.1 の dict/None 正規化テストの beeai 版
+    ＝str 直通の確認）+ span≥1（`traced` ラップで `pattern.autonomous_agent` span 存在）。
+    **`__init__` 再エクスポートは本タスク境界外**（5.2/6.2/7.2 と同じく無改変）。検証ゲート:
+    ruff All checks passed / format 18 files clean / pyright(strict,3.13) 0 errors /
+    pytest 36 passed・2 skipped（無回帰）/ autonomous_agent.py coverage 100%・total 98.99%
+    （floor 85%）。次は Task 8.3（llamaindex autonomous-agent, `_budget_spent`=
+    `CompletionResponse.raw` の usage、JSON テキストの tool-call 規約）。
+- 8.3: llamaindex の `run_autonomous_agent` を 8.1/8.2 と同型の手動ループで実装。レーン差分は
+  3点。① **chat プリミティブ** = `llm.acomplete(transcript)` 直叩き（CustomLLM は completion-only、
+  native tool-call part 無し）。tool-call は **JSON 規約**（Task 4.3 確立）— 完了テキストが
+  `{"tool":...,"args":...}` object に parse できれば tool 呼出、それ以外（非 JSON / scalar /
+  tool キー無し object）は最終回答。`_parse_action(text)->tuple|None` がこの分岐を1点化、`args` は
+  str で `Tool.run` へ直通（8.2 同様 dict/None 正規化不要）。フィードバックは completion-only ゆえ
+  履歴オブジェクトでなく **transcript 文字列**を `Action:/Observation:` で累積（次ターン条件付け、
+  実機 Ollama 用。フェイクは prompt 無視で cursor 進行）。② **予算シーム** = `_budget_spent(response)
+= response.raw["usage"]["total_tokens"]`。`raw: Optional[Any]` は opaque provider payload のため
+  `_as_mapping(value)->dict[str,object]|None` で I/O 境界 narrow（憲法 II: isinstance→`cast` で
+  pyright strict の `reportUnknownMemberType` を**ルール緩和でなく型 narrow で**解消。bare
+  `isinstance(x,dict)` は `dict[Unknown,Unknown]` を生むため cast 必須）。usage 欠落時は 0 寄与。
+  ③ **観測** = OpenInference process-global instrumentor（pattern 関数に instrumentation 引数なし、
+  eval/parallelization/prompt-chaining と同方式。8.1 の `instrument_model` 注入・8.2 の手動 `traced`
+  とは異なる）。span test は install→run→`finally` で uninstrument（process-global ゆえ隔離必須）。
+- 8.3: RED→GREEN は正規順守 — RED: `ModuleNotFoundError: patterns_llamaindex.autonomous_agent`
+  （9 tests collection error）→ GREEN: 実装で 9 passed。`_budget_spent` の防御分岐（raw=None /
+  usage 欠落）と JSON-非tool-object の最終回答分岐は support `TurnSequencedLLM`（raw 固定供給）では
+  到達不能のため、境界内ローカルフェイク `_RawScriptedLLM`（`(text, raw)` ペア台本、prompt_chaining/
+  eval の `_RecordingLLM` 流儀）で1テスト追加し pattern.py を 91%→**100%** へ（8.1 の dict/None
+  正規化テスト追加と対称）。**`__init__` 再エクスポートは本タスク境界外**（8.1/8.2 と同じく無改変）。
+  検証ゲート: ruff All checks passed / format 18 files clean / pyright(strict,3.13) 0 errors /
+  pytest 37 passed・2 skipped（baseline 27 + 新規 10 = 無回帰）/ autonomous_agent.py coverage 100%・
+  total 99.20%（floor 85%）。これで Major Task 8（autonomous-agent 3レーン・ガードレール契約）の
+  全サブタスク（8.1〜8.3）完了 — 3レーンとも4ガードレール + `stop_reason` Literal 同一、
+  `_budget_spent` シーム1点化で予算会計を決定論化。
 
 ---
 
