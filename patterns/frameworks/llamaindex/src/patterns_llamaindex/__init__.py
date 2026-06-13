@@ -1,6 +1,6 @@
 """LlamaIndex Workflows lane of the cross-framework pattern collection (Spec 005)."""
 
-from patterns_llamaindex.contracts import (
+from patterns_contracts import (
     OrchestratedResult,
     Route,
     RoutedAnswer,
@@ -9,6 +9,7 @@ from patterns_llamaindex.contracts import (
     TaskPlan,
     WorkerResult,
 )
+
 from patterns_llamaindex.observability import (
     configure_tracing,
     instrument_llamaindex,

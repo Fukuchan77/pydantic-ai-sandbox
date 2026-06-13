@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from patterns_contracts import RouteDecision
 from pydantic import ValidationError
 
-from patterns_llamaindex.contracts import RouteDecision
 from patterns_llamaindex.routing import ROUTE_INSTRUCTIONS, run_routing
 from tests.support.fake_llm import ScriptedLLM
 

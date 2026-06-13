@@ -12,8 +12,8 @@ import os
 from typing import get_args
 
 import pytest
+from patterns_contracts import Route
 
-from patterns_pydantic_ai.contracts import Route
 from patterns_pydantic_ai.orchestrator_workers import run_orchestrator
 from patterns_pydantic_ai.routing import run_routing
 

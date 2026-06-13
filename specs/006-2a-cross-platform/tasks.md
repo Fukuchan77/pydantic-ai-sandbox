@@ -27,9 +27,13 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
       `requires-python >=3.13`、`.python-version`=3.13 ピン、hatchling build、
       レーンと揃えた ruff/pyright ミラー設定、空の再エクスポート `__init__`、
       パッケージ概要 README）
-      _Boundary:_ `patterns/contracts/pyproject.toml`, `patterns/contracts/.python-version`, `patterns/contracts/README.md`, `patterns/contracts/src/patterns_contracts/__init__.py`
+      _Boundary:_ `patterns/contracts/pyproject.toml`, `patterns/contracts/.python-version`, `patterns/contracts/README.md`, `patterns/contracts/src/patterns_contracts/__init__.py`, `patterns/contracts/src/patterns_contracts/py.typed`
       _Depends:_ none
       _Requirements:_ 1.1, 1.2
+
+      > 注: `py.typed`（PEP 561 マーカー）は骨組みの正当な構成要素だが当初列挙漏れ。
+      > Task 3.1 の consumer 配線で pyright `reportMissingTypeStubs` として顕在化し
+      > 根本原因修正で新設（do.md §3.1）。境界宣言を実体へ追従させるため遡及追記。
 - [x] 1.2 (P) 既存 routing / orchestrator-workers 契約をサブモジュールへ移行する
       （`Route` / `RouteDecision` / `RoutedAnswer` / `SubTask` / `TaskPlan` /
       `WorkerResult` / `OrchestratedResult` を無変更で移植）
@@ -204,7 +208,7 @@ _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
 > テストが緑にならない。`test_ollama_e2e.py` は Task 10 でも編集するが依存順
 > （3→…→10）で逐次実行されるため、本タスクは import 行の再ポイントのみを担う。
 
-- [ ] 3.1 (P) pydantic-ai レーンを配線する（`[tool.uv.sources]` パス依存
+- [x] 3.1 (P) pydantic-ai レーンを配線する（`[tool.uv.sources]` パス依存
       `../../contracts` editable 追加 + dependencies 追加、`contracts.py` 削除、
       `__init__.py` 再エクスポート・routing・orchestrator-workers・`test_routing.py`・
       `test_ollama_e2e.py` の import を `patterns_contracts` へ差替、uv.lock 再生成、
@@ -212,18 +216,85 @@ _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
       _Boundary:_ `patterns/frameworks/pydantic-ai/pyproject.toml`, `patterns/frameworks/pydantic-ai/uv.lock`, `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/contracts.py`, `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/__init__.py`, `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/routing.py`, `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/orchestrator_workers.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_routing.py`, `patterns/frameworks/pydantic-ai/tests/integration/test_ollama_e2e.py`
       _Depends:_ 1
       _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
-- [ ] 3.2 (P) beeai レーンを配線する（同上の手順を beeai に適用。`__init__.py` /
+- [x] 3.2 (P) beeai レーンを配線する（同上の手順を beeai に適用。`__init__.py` /
       `test_routing.py` / `test_ollama_e2e.py` の import 再ポイントを含む）
       _Boundary:_ `patterns/frameworks/beeai/pyproject.toml`, `patterns/frameworks/beeai/uv.lock`, `patterns/frameworks/beeai/src/patterns_beeai/contracts.py`, `patterns/frameworks/beeai/src/patterns_beeai/__init__.py`, `patterns/frameworks/beeai/src/patterns_beeai/routing.py`, `patterns/frameworks/beeai/src/patterns_beeai/orchestrator_workers.py`, `patterns/frameworks/beeai/tests/unit/test_routing.py`, `patterns/frameworks/beeai/tests/integration/test_ollama_e2e.py`
       _Depends:_ 1
       _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
-- [ ] 3.3 (P) llamaindex レーンを配線する（同上の手順を llamaindex に適用。
+- [x] 3.3 (P) llamaindex レーンを配線する（同上の手順を llamaindex に適用。
       `__init__.py` / `test_routing.py` / `test_ollama_e2e.py` の import 再ポイントを含む）
       _Boundary:_ `patterns/frameworks/llamaindex/pyproject.toml`, `patterns/frameworks/llamaindex/uv.lock`, `patterns/frameworks/llamaindex/src/patterns_llamaindex/contracts.py`, `patterns/frameworks/llamaindex/src/patterns_llamaindex/__init__.py`, `patterns/frameworks/llamaindex/src/patterns_llamaindex/routing.py`, `patterns/frameworks/llamaindex/src/patterns_llamaindex/orchestrator_workers.py`, `patterns/frameworks/llamaindex/tests/unit/test_routing.py`, `patterns/frameworks/llamaindex/tests/integration/test_ollama_e2e.py`
       _Depends:_ 1
       _Requirements:_ 1.4, 1.5, NFR-1, NFR-3
 
 ### Implementation Notes
+
+- 3.1: pydantic-ai レーンを `patterns_contracts` パス依存へ配線。RED→GREEN は
+  「契約複製の不在」を直接実証する順序を採用 — 先に5 import 面を
+  `patterns_contracts` へ差替 + `contracts.py` を `git rm` し、依存未配線のまま
+  `uv run --no-sync pytest` → 全 collection が `ModuleNotFoundError: No module
+  named 'patterns_contracts'`（RED, 5 errors）。次に `dependencies += "patterns-
+  contracts"` + `[tool.uv.sources] patterns-contracts = { path="../../contracts",
+  editable=true }` を追加 → `uv lock`（72 packages, patterns-contracts 追加）+
+  `uv sync` → pytest 11 passed/2 skipped（baseline と同一, GREEN）。
+- 3.1: import 整列は `patterns_contracts` が known-first-party 非該当 = third-party
+  扱いになる点に注意。`patterns_contracts` < `pydantic*` でソートされ third-party
+  群先頭へ、`patterns_pydantic_ai.*`（first-party）は空白行で分離。`ruff check
+  --fix` で test_ollama_e2e.py の1件を正規化。
+- 3.1: **境界外修正1件（py.typed）** — pyright strict が consumer 側で
+  `reportMissingTypeStubs`（patterns_contracts に PEP 561 マーカー無し）を5件報告。
+  根本原因は Task 1.1 のパッケージ骨組みが `py.typed` を欠いていたこと（contracts
+  自身の pyright は src を直接読むため未検出だった潜在欠陥が、初の consumer 配線で
+  顕在化）。lane 側 pyright 設定を緩める（憲法 II 違反）のではなく原因修正として
+  `patterns/contracts/src/patterns_contracts/py.typed` を新設。hatchling
+  `packages=["src/patterns_contracts"]` が wheel へ自動同梱するため空ファイル1点で
+  PEP 561 充足。これは Task 1 境界だが 3.2/3.3 も同一でブロックされるため逐次修正。
+  検証ゲート: pyright 0 errors / ruff All checks passed / format 11 files clean /
+  coverage 95.77%（floor 85%）/ pytest 11 passed・2 skipped。
+- 3.2: beeai レーンを 3.1 と同一手順で配線。RED→GREEN は 3.1 同様「契約複製の不在」
+  を直接実証 — 先に5 import 面（routing / orchestrator-workers / `__init__` 再エクスポート
+  / `test_routing` / `test_ollama_e2e`）を `patterns_contracts` へ差替 + `contracts.py` を
+  `git rm` し、依存未配線で `uv run --no-sync pytest` → 全 collection が
+  `ModuleNotFoundError: No module named 'patterns_contracts'`（RED, 5 errors）。次に
+  `dependencies += "patterns-contracts"` + `[tool.uv.sources]`（editable path `../../contracts`）
+  を追加 → `uv lock`（99 packages, patterns-contracts 追加）+ `uv sync` → pytest 12
+  passed・2 skipped（baseline 同一, GREEN）。3.1 の py.typed 修正が consumer 側 pyright を
+  既に充足するため、本レーンでは境界外修正は不要だった。
+- 3.2: import 整列は 3.1 と同型 — `patterns_contracts` は known-first-party 非該当 =
+  third-party 扱いで `beeai_framework` < `patterns_contracts` < `pydantic` にソートされ、
+  `patterns_beeai.*`（first-party）は空白行で分離。ruff check / format とも追加修正なしで
+  クリーン（手置きで正順に配置済み）。
+- 3.2: **uv.lock の `[options] prerelease-mode = "allow"` が再生成で除去**。beeai の
+  pyproject は（pydantic-ai と異なり）`prerelease = "allow"` を宣言しないため、旧 lock の
+  当該オプションは pyproject と乖離した stale メタデータ。根本原因は過去の生成文脈の差
+  （prerelease 許可下で生成）であり、再生成で pyproject と整合する正へ補正された。
+  パッケージ版の churn はゼロ（patterns-contracts 追加のみ）で NFR-1 充足。
+  検証ゲート: `uv lock --check`（99 packages, exit 0）/ `uv sync --all-groups --locked`
+  （Checked 98, exit 0）/ pyright(strict,3.13) 0 errors / ruff All checks passed /
+  format 10 files clean / coverage 97.32%（floor 85%）/ pytest 12 passed・2 skipped。
+- 3.3: llamaindex レーンを 3.1/3.2 と同一手順で配線。RED→GREEN は「契約複製の不在」を
+  直接実証 — 先に5 import 面（routing / orchestrator-workers / `__init__` 再エクスポート /
+  `test_routing` / `test_ollama_e2e`）を `patterns_contracts` へ差替 + `contracts.py` を
+  `git rm` し、依存未配線で `uv run --no-sync pytest` → 全 collection が
+  `ModuleNotFoundError: No module named 'patterns_contracts'`（RED, 5 errors）。次に
+  `dependencies += "patterns-contracts"` + `[tool.uv.sources]`（editable path `../../contracts`、
+  llamaindex も beeai 同様 `[tool.uv]` 無し → sources セクションを新規挿入）→ `uv lock`
+  （103 packages, patterns-contracts 追加）+ `uv sync` → pytest 12 passed・2 skipped
+  （baseline 同一, GREEN）。3.1 の py.typed 修正が consumer 側 pyright を充足するため
+  本レーンでも境界外修正は不要。
+- 3.3: import 整列は llamaindex 固有の並びに注意 — `patterns_contracts` は
+  known-first-party（`patterns_llamaindex`）非該当 = third-party 扱いで、src では
+  `llama_index.*` < `patterns_contracts` にソートされ workflow import 直後へ（first-party
+  `patterns_llamaindex.*` は空白行で分離）、test では `import pytest` < `patterns_contracts`
+  < `pydantic` の順。手置きで正順配置 → `ruff check` 追加 fix 不要。
+- 3.3: **lock の `[options] prerelease-mode = "allow"` が再生成で除去**（beeai 3.2 と同根）。
+  llamaindex pyproject も `prerelease = "allow"` 未宣言のため旧 lock の当該オプションは
+  pyproject と乖離した stale メタ。`uv lock` が `allow` vs `if-necessary-or-explicit` の差を
+  検知し pyproject 整合の正へ補正。パッケージ版 churn は patterns-contracts 追加のみで
+  NFR-1 充足。検証ゲート: `uv lock --check`（103 packages, exit 0）/ `uv sync --all-groups
+  --locked`（Checked 103, exit 0）/ pyright(strict,3.13) 0 errors / ruff All checks passed /
+  format 10 files clean / coverage 97.64%（floor 85%）/ pytest 12 passed・2 skipped。
+  これで Major Task 3（レーン契約配線とパッケージ移行）の全サブタスク（3.1〜3.3）完了。
 
 ---
 

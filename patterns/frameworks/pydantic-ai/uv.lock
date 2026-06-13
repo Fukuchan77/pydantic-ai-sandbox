@@ -545,12 +545,34 @@ wheels = [
 ]
 
 [[package]]
+name = "patterns-contracts"
+version = "0.1.0"
+source = { editable = "../../contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pip-audit" },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[[package]]
 name = "patterns-pydantic-ai"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
+    { name = "patterns-contracts" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
 ]
@@ -569,6 +591,7 @@ dev = [
 requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
+    { name = "patterns-contracts", editable = "../../contracts" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.0.0b6" },
 ]
