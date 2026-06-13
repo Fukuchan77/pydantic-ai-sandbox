@@ -1,0 +1,53 @@
+"""Dependency-zero shared contracts for the cross-framework agent patterns.
+
+This package is the single source of truth for the six patterns' input/output
+Pydantic models, ``Literal`` vocabularies, and the autonomous-agent tool
+abstraction (Spec 006-2a Req 1.3). Each framework lane imports it via a
+``tool.uv.sources`` path dependency rather than duplicating the contracts
+(NFR-3); the normative copy of every model also lives in the matching
+``patterns/<pattern>/README.md`` fenced block, asserted equal by the
+single-point drift test.
+
+The flat re-export surface (``from patterns_contracts import ...``) is
+established here (Task 1.4): every model and type alias defined in the
+per-pattern submodules is re-exported from the package root so consumers
+depend on a stable, submodule-agnostic import path.
+"""
+
+from patterns_contracts.autonomous_agent import (
+    AgentRunResult,
+    AgentStep,
+    ApprovalHook,
+    Tool,
+)
+from patterns_contracts.evaluator_optimizer import Iteration, OptimizationResult
+from patterns_contracts.orchestrator_workers import (
+    OrchestratedResult,
+    SubTask,
+    TaskPlan,
+    WorkerResult,
+)
+from patterns_contracts.parallelization import Branch, ParallelResult
+from patterns_contracts.prompt_chaining import ChainResult, ChainStep, GateOutcome
+from patterns_contracts.routing import Route, RoutedAnswer, RouteDecision
+
+__all__ = [
+    "AgentRunResult",
+    "AgentStep",
+    "ApprovalHook",
+    "Branch",
+    "ChainResult",
+    "ChainStep",
+    "GateOutcome",
+    "Iteration",
+    "OptimizationResult",
+    "OrchestratedResult",
+    "ParallelResult",
+    "Route",
+    "RouteDecision",
+    "RoutedAnswer",
+    "SubTask",
+    "TaskPlan",
+    "Tool",
+    "WorkerResult",
+]

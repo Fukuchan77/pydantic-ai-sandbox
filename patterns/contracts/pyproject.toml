@@ -1,0 +1,92 @@
+# patterns/contracts — shared pattern-contract package (Spec 006-2a Req 1.1/1.2).
+#
+# Dependency-zero, framework-agnostic home for the six patterns' input/output
+# Pydantic models, Literal vocabularies, and the autonomous-agent tool
+# abstraction. This package is the SINGLE source of truth for contract types
+# (the normative copy of each model also lives in the matching
+# patterns/<pattern>/README.md fenced block, asserted equal by the single-point
+# drift test). Each lane imports it via a `tool.uv.sources` path dependency —
+# lanes never import across lane boundaries (NFR-3).
+#
+# requires-python is pinned to >=3.13 (the floor across all three lanes:
+# beeai/llamaindex run 3.13, pydantic-ai runs 3.14) so the contract package
+# installs unchanged into every lane interpreter (NFR-5). pyright targets 3.13
+# accordingly — 3.14-only syntax is rejected here.
+
+[project]
+name = "patterns-contracts"
+version = "0.1.0"
+description = "Dependency-zero shared contracts for the cross-framework agent patterns (six patterns: routing, orchestrator-workers, prompt-chaining, parallelization, evaluator-optimizer, autonomous-agent)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    # The ONLY runtime dependency (Principle III / NFR-5): contracts are pure
+    # Pydantic models plus typing primitives.
+    "pydantic>=2",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_contracts"]
+
+# Ruff/pyright mirror the lane rulesets (patterns/frameworks/*/pyproject.toml)
+# with only the target version (3.13, the package floor) and first-party
+# package adjusted.
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_contracts"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/patterns_contracts"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+# Lane-aligned floor (Spec 006-2a NFR-4); ratchet upward as contracts accrete.
+fail_under = 85
+show_missing = true
+skip_covered = false

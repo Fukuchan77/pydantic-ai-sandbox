@@ -22,20 +22,20 @@ _Boundary:_ `patterns/contracts/`
 _Depends:_ none
 _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
 
-- [ ] 1.1 契約パッケージの骨組みを作成する（`pydantic` のみ runtime 依存、
+- [x] 1.1 契約パッケージの骨組みを作成する（`pydantic` のみ runtime 依存、
   `requires-python >=3.13`、`.python-version`=3.13 ピン、hatchling build、
   レーンと揃えた ruff/pyright ミラー設定、空の再エクスポート `__init__`、
   パッケージ概要 README）
   _Boundary:_ `patterns/contracts/pyproject.toml`, `patterns/contracts/.python-version`, `patterns/contracts/README.md`, `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ none
   _Requirements:_ 1.1, 1.2
-- [ ] 1.2 (P) 既存 routing / orchestrator-workers 契約をサブモジュールへ移行する
+- [x] 1.2 (P) 既存 routing / orchestrator-workers 契約をサブモジュールへ移行する
   （`Route` / `RouteDecision` / `RoutedAnswer` / `SubTask` / `TaskPlan` /
   `WorkerResult` / `OrchestratedResult` を無変更で移植）
   _Boundary:_ `patterns/contracts/src/patterns_contracts/routing.py`, `patterns/contracts/src/patterns_contracts/orchestrator_workers.py`
   _Depends:_ 1.1
   _Requirements:_ 1.3, 1.5
-- [ ] 1.3 (P) 新4パターンの契約モデルとツール抽象を定義する（prompt-chaining =
+- [x] 1.3 (P) 新4パターンの契約モデルとツール抽象を定義する（prompt-chaining =
   `ChainStep` / `GateOutcome` / `ChainResult`、parallelization = `Branch` /
   `ParallelResult` + `variant` Literal、evaluator-optimizer = `Iteration` /
   `OptimizationResult` + `verdict` / `stop_reason` Literal、autonomous-agent =
@@ -44,12 +44,12 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
   _Boundary:_ `patterns/contracts/src/patterns_contracts/prompt_chaining.py`, `patterns/contracts/src/patterns_contracts/parallelization.py`, `patterns/contracts/src/patterns_contracts/evaluator_optimizer.py`, `patterns/contracts/src/patterns_contracts/autonomous_agent.py`
   _Depends:_ 1.1
   _Requirements:_ 1.3
-- [ ] 1.4 全モデル・型エイリアスを `__init__` でフラット再エクスポートし、
+- [x] 1.4 全モデル・型エイリアスを `__init__` でフラット再エクスポートし、
   `from patterns_contracts import ...` の安定した import 面を確立する
   _Boundary:_ `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ 1.2, 1.3
   _Requirements:_ 1.3, 1.5
-- [ ] 1.5 契約パッケージの uv.lock を生成し、再現性を担保する
+- [x] 1.5 契約パッケージの uv.lock を生成し、再現性を担保する
   _Boundary:_ `patterns/contracts/uv.lock`
   _Depends:_ 1.4
   _Requirements:_ 1.2, NFR-1
@@ -58,6 +58,42 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, NFR-5
 
 <!-- Empty at generation. Implementer appends 1-3 bullet learnings after
 completing this major task. -->
+
+- 1.1: スケルトン検証は test ファイル不在（drift test は Task 2.3 が所有）のため
+  `import patterns_contracts` の RED→GREEN + ruff/format/pyright ミラー + `uv build`
+  をゲートとした。pyright strict・全 ruff ルールが空 `__init__`（docstring + 空
+  `__all__: list[str]`）で 0 errors。
+- 1.1: `uv sync` の副産物として `patterns/contracts/uv.lock` が生成済み（Task 1.5
+  の正式成果物）。`dist/` は root `.gitignore` の `dist/` で無視されるため無害。
+- 1.2: 3レーンの `contracts.py` はモデル定義が完全一致（差分は docstring/コメント
+  文言のみ）と diff で確認。7モデルを `routing.py`（Route/RouteDecision/RoutedAnswer）
+  と `orchestrator_workers.py`（SubTask/TaskPlan/WorkerResult/OrchestratedResult）へ
+  フィールド無変更で移植。module docstring のみ「単一実体 + README 正本 + drift test」
+  の新文脈へ更新。
+- 1.2: 境界に test 不在のため `from patterns_contracts.<sub> import ...` を RED→GREEN
+  ゲートに採用（GREEN は import + 全モデル instantiate + `truncated` 既定 False 検証）。
+  ruff/format/pyright(strict,3.13) いずれも 0 errors。`__init__` 再エクスポート(1.4)・
+  uv.lock(1.5) は据え置き。
+- 1.3: 新4パターンの契約を4サブモジュールへ定義（11シンボル）。`variant`/`verdict`/
+  `stop_reason` の各 Literal は単独モデルのフィールド annotation 内に inline 配置
+  （README import 面・plan 再エクスポート一覧に named export が無いため。共有される
+  `Route` のみ named alias という 1.2 の判断と整合）。`Tool` は属性 docstring 付き
+  Protocol、`ApprovalHook` は `Callable[[str,str],bool]` の runtime エイリアス。
+  `budget_spent`/`total_budget_spent` に `ge=0`、`ChainResult`/`AgentRunResult` の
+  `final_output` 既定 `None` を付与し早期終了の判別性を契約で保証（R3.3/R6.2）。
+- 1.4: 6サブモジュールの18シンボル（=README import 面と一致）を `__init__` から
+  フラット再エクスポート。`__all__` は RUF022 がコメント区切りを尊重せず全体を
+  isort 順（case-insensitive）に整列するため、グループ化コメントは廃しフラット
+  ソート1本に統一（論理グルーピングは README import 面が担う）。境界に test 無し
+  のため `from patterns_contracts import RouteDecision...`（18シンボル）の RED→GREEN
+  をゲートに採用。ruff/format/pyright(strict,3.13) いずれも 0 errors。
+- 1.5: 1.1 の `uv sync` 副産物として既存していた lock を正式成果物へ昇格。境界に
+  test 無しのため再現性ゲート自体を RED→GREEN に採用 — RED: lock を退避し
+  `uv lock --check` → exit 2（`Unable to find lockfile`、ゲートが欠如を検知する証左）。
+  GREEN: `uv lock` 再生成 → sha256 が退避版と**バイト一致**（決定論的=再現可能）。
+  consistency は `uv lock --check`（44 packages resolved, exit 0）、厳密インストールは
+  `uv sync --all-groups --locked`（exit 0, Checked 43 packages）で二重検証。lock 内容は
+  無変更（git `A` のまま、NFR-1 充足）。`requires-python >=3.13` floor で 44 依存解決。
 
 ---
 
