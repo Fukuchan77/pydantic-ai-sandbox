@@ -575,7 +575,7 @@ _Requirements:_ 2.2, 8.3, 9.1, 9.3
 
 ---
 
-## 12. (P) mise タスクと CI への新レーン反映
+## 12. (P) mise タスクと CI への新レーン反映 ✅
 
 `patterns:*` タスクと patterns 系 CI に SSE レーンを明示配線し、ルートワークフローを
 無変更に保つ。
@@ -584,20 +584,20 @@ _Boundary:_ `mise.toml`, `.github/workflows/patterns-ci.yml`, `.github/workflows
 _Depends:_ 1, 9, 10
 _Requirements:_ 1.4, 8.2, 10.1, 10.2, 10.3, 11.1, 11.2
 
-- [ ] 12.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に
+- [x] 12.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に
   `(cd patterns/sse && …)` 明示行を（rag 行の後）、`patterns:test:integration` に
   `(cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 …)` 行を追加し、ルート `mise run check` が
   無変更グリーンであることを確認する。
   _Boundary:_ `mise.toml`
   _Depends:_ 1, 9, 10
   _Requirements:_ 8.2, 10.3, 11.1, 11.2
-- [ ] 12.2 `patterns-ci.yml` に `rag` と同型の専用 `sse` ジョブ（`uv sync --all-groups
+- [x] 12.2 `patterns-ci.yml` に `rag` と同型の専用 `sse` ジョブ（`uv sync --all-groups
   --locked` → ruff / pyright / `pytest --cov` / pip-audit）と `paths` に `patterns/sse/**`
   （push/pull_request 双方）を追加する。
   _Boundary:_ `.github/workflows/patterns-ci.yml`
   _Depends:_ 12.1
   _Requirements:_ 8.2, 10.1, 1.4
-- [ ] 12.3 `patterns-integration-ollama.yml` の `pull_request.paths` に `patterns/sse/**` を
+- [x] 12.3 `patterns-integration-ollama.yml` の `pull_request.paths` に `patterns/sse/**` を
   追記する（push は `patterns/**` で既被覆、SSE 結合は既存 daemon に相乗り）。
   _Boundary:_ `.github/workflows/patterns-integration-ollama.yml`
   _Depends:_ 12.1
@@ -605,7 +605,34 @@ _Requirements:_ 1.4, 8.2, 10.1, 10.2, 10.3, 11.1, 11.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **rag と同形の明示配線（depth-1 sibling）**: SSE レーンは `patterns/sse/`（Python 3.14、
+  Task 0 spike: runtime 11 pkg・ML wheel ゼロ）で frameworks/・rag/ の兄弟。`patterns/frameworks/*/`
+  glob には載らないため、`mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit,
+  test:integration}` 7 タスクへ rag 行の直後に `(cd patterns/sse && …)` を追加。`patterns:test`
+  は `--cov`（lane `fail_under=98`）、`patterns:test:integration` は `RUN_INTEGRATION_PATTERNS=1
+  uv run pytest tests/integration`。
+- **12.1 GREEN 実測**: 配線前 `grep -c patterns/sse mise.toml` = 0（gap=RED）→ 配線後 9
+  （7 タスク行 + ヘッダコメント 2）。`mise run patterns:lint` で `== lint patterns/sse` →
+  `All checks passed!`、`mise run patterns:test` で `== test patterns/sse` →
+  `Total coverage: 99.01% / 36 passed, 1 skipped`（全 6 レーン green）。`mise.toml` は
+  `tomllib` で構文検証済み。
+- **12.2 専用 `sse` ジョブ**: `patterns-ci.yml` に rag ジョブ複製の `sse` ジョブ
+  （`working-directory: patterns/sse`・`setup-uv` cache=`patterns/sse/uv.lock`・
+  `uv sync --all-groups --locked` → ruff check / ruff format --check / pyright / `pytest --cov`
+  / pip-audit）を追加。`rag` のような HF オフライン step は不要（block_network + ASGITransport で
+  net-zero、R5.1）。`paths` は push/pull_request 双方へ `patterns/sse/**` を明示追加。matrix
+  3 レーン（pydantic-ai/beeai/llamaindex）は不変。`yaml.safe_load` で jobs=`[lane,contracts,
+  rag,sse]`・両 paths に sse・matrix 不変を assert。
+- **12.3 結合トリガ**: `patterns-integration-ollama.yml` の `pull_request.paths` に
+  `patterns/sse/**` を rag と並列で追記（SSE 結合 e2e は既存 daemon に相乗り、`mise run
+  patterns:test:integration` が新 sse 行で実行）。push は `patterns/**` で既被覆のため追記不要。
+- **ルート不変（R1.4/11.2/10.3）**: root の `lint/format/typecheck/test/check` タスクと
+  `ci.yml`/`integration-ollama.yml`/`security.yml` は無改変。`mise run check` = format（61
+  files formatted）/ lint（All passed）/ typecheck（0 errors）/ test（277 passed, 4 skipped）
+  で無変更グリーン実測。patterns/ は root pyproject の extend-exclude で隔離。
+- **テスト戦略**: 本タスクは設定配線（mise/CI）のため src ユニットを持たず、load-bearing は
+  (1) RED=配線前 sse 不在 → GREEN=`mise run patterns:*` で実際に sse レーンが exercise され
+  pass、(2) YAML/TOML の構文 + 構造 assertion。実行証跡は do.md に保全。
 
 ---
 

@@ -39,6 +39,12 @@ on:
       # re-trigger the live gate, parallel to the frameworks paths above. The
       # push trigger already covers it via 'patterns/**'.
       - 'patterns/rag/**'
+      # The SSE delivery lane (Spec 008-2c Req 10.2) is an independent lane at
+      # patterns/sse/; its gated Ollama e2e (run_stream_events → SseEvent adapter)
+      # rides this same daemon via mise patterns:test:integration. A change to the
+      # lane must re-trigger the live gate, parallel to rag above. The push trigger
+      # already covers it via 'patterns/**'.
+      - 'patterns/sse/**'
       # The patterns import their contracts from the shared package, and the
       # e2e cases assert contract-level behaviour — a contract change must
       # re-trigger the live gate (parallel to patterns-ci.yml; the push

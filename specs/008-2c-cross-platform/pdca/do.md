@@ -689,3 +689,63 @@ $ uv run pytest --cov          → 36 passed, 1 skipped（結合 offline skip）
 - **`[project].readme` 宣言は Task 11 境界外**（`pyproject.toml` 所掌）。README 欠損は解消したが
   long-description 宣言は未変更 — 境界厳守。hatchling build は引き続き既存挙動。
 - 回帰なし。残 Wave 6: Task 12（mise/CI）/ Task 13（docs/security 索引・SECURITY-NOTES）。
+
+---
+
+## Task 12 — mise タスクと CI への新レーン反映（2026-06-14）
+
+Wave 6。SSE レーンを `patterns:*` mise タスクと patterns 系 CI へ明示配線し、ルート
+ワークフローを無変更に保つ。設定配線タスクのため src ユニットは無し（load-bearing は
+RED=配線前 sse 不在 → GREEN=mise 経由で sse が実 exercise + YAML/TOML 構造 assertion）。
+
+### 12.1 mise.toml（rag 行後に `(cd patterns/sse && …)`）
+
+```
+# RED: 配線前
+$ grep -c 'patterns/sse' mise.toml  → 0   # gap（sse は frameworks/*/ glob に非該当）
+
+# 7 タスク（setup/lint/format/typecheck/test/audit/test:integration）へ追加 + ヘッダコメント
+$ grep -c 'patterns/sse' mise.toml  → 9   # 7 task 行 + comment 2
+$ uv run python -c 'import tomllib; tomllib.load(open("mise.toml","rb"))'  → OK
+
+# GREEN: mise 経由で sse レーンが実際に exercise される
+$ mise run patterns:lint   → == lint patterns/sse  / All checks passed!
+$ mise run patterns:test   → == test patterns/sse  / Total coverage: 99.01%
+                              36 passed, 1 skipped（全 6 レーン green）
+```
+
+### 12.2 patterns-ci.yml（rag 同型の専用 `sse` ジョブ + paths）
+
+- `working-directory: patterns/sse`、`setup-uv` cache=`patterns/sse/uv.lock`、
+  `uv sync --all-groups --locked` → ruff check / ruff format --check / pyright /
+  `pytest --cov`（floor 98）/ pip-audit。HF オフライン step は不要（net-zero）。
+- push/pull_request 双方の `paths` へ `patterns/sse/**` を明示追加。matrix 3 レーン不変。
+
+### 12.3 patterns-integration-ollama.yml（pull_request.paths）
+
+- `pull_request.paths` に `patterns/sse/**` を rag と並列追記。push は `patterns/**` で既被覆。
+
+### 検証ゲート
+
+```
+# YAML 構造 assertion（yaml.safe_load）
+  patterns-ci.yml jobs = [lane, contracts, rag, sse]
+  sse job steps に sync/ruff/pyright/pip-audit、push+pr paths に patterns/sse/**、matrix 不変
+  integration-ollama.yml pr.paths に patterns/sse/**（push は patterns/** 既被覆）
+
+# ルート不変（R1.4/11.2/10.3）
+$ mise run check
+  [format] 61 files already formatted
+  [lint] All checks passed!
+  [typecheck] 0 errors, 0 warnings, 0 informations
+  [test] 277 passed, 4 skipped
+```
+
+### 学び / 申し送り
+
+- **depth-1 sibling は loop に載らない**: `patterns/sse/` は `patterns/frameworks/*/` glob 外。
+  rag と同じく明示 `(cd patterns/sse && …)` 行が必須（contracts/rag の既存 idiom を踏襲）。
+- **ルート隔離が R1.4/11.2 を構造的に担保**: root の lint/format/typecheck/test と 3 ルート
+  ワークフローは無改変。patterns/ は root pyproject の extend-exclude で隔離されるため、
+  mise/CI 配線追加は root `mise run check` の挙動に波及しない（実測でも無変更グリーン）。
+- 残 Wave 6: Task 13（patterns/README.md 索引 + SECURITY-NOTES.md）。
