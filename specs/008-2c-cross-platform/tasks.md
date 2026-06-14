@@ -336,13 +336,13 @@ _Boundary:_ `patterns/sse/tests/support/asgi_driver.py`, `patterns/sse/tests/uni
 _Depends:_ 4
 _Requirements:_ 6.1, 6.2, 6.3
 
-- [ ] 7.1 `asgi_driver.py` を作成する。同一 ASGI アプリを `app(scope, receive, send)` で直接
+- [x] 7.1 `asgi_driver.py` を作成する。同一 ASGI アプリを `app(scope, receive, send)` で直接
   駆動し、カスタム `receive()` が初回 `http.request` の後、所定の send 件数（K 件の `data:`
   捕捉）時点で `{"type": "http.disconnect"}` を注入するヘルパ（実ソケットを開かない、ADR-4）。
   _Boundary:_ `patterns/sse/tests/support/asgi_driver.py`
   _Depends:_ 4
   _Requirements:_ 6.2
-- [ ] 7.2 scope 注入切断が sse-starlette の `_listen_for_disconnect` を発火させ本体
+- [x] 7.2 scope 注入切断が sse-starlette の `_listen_for_disconnect` を発火させ本体
   ジェネレータが `CancelledError` を受けて停止し、`finally`/`except` のクリーンアップが走る
   ことを検証する。補完として `agen.aclose()`（`GeneratorExit`）でのリソース解放と、例外を
   握り潰さないことを別ケースで立証する。
@@ -352,7 +352,25 @@ _Requirements:_ 6.1, 6.2, 6.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **`block_after` で生成器を park → 切断が確実に CancelledError を届ける**:
+  `ScriptedEventSource(block_after=K)` が K 件 yield 後に未 set の gate で停止するため、
+  ドライバが K 件目の `data:` を捕捉して `http.disconnect` を arm した時点で本体タスクは
+  source の `gate.wait()` で suspend 済み。anyio task group の cancel が最内 await
+  （= `gate.wait()`）へ CancelledError を届け、source の `except CancelledError`
+  （`cancelled=True`）と `finally`（`released=True`）が決定論的に発火する（race なし）。
+- **2 層検証（research.md I-4 / ADR-4）**: (1) `asgi_driver` 経由の scope 注入切断で
+  `cancelled`/`released`・prefix のみ配信（`completed`/`error` 非到達）を立証（R6.2/6.3）。
+  (2) `_event_stream` を直接駆動し `aclose()`（GeneratorExit）と協調的 `is_disconnected`
+  break の双方で `finally` が producer を解放することを立証（R6.1）。
+- **ドライバの receive 二役**: 初回 pull は FastAPI のボディパース用 `http.request`、
+  以降は `_listen_for_disconnect` が消費する切断インジェクタ（arm まで `armed.wait()` で
+  ブロック）。`is_disconnected()` の極小 timeout pull は arm 前なら timeout→False を返すため
+  協調 break と干渉しない。hang guard（`wait_for` timeout→AssertionError）で cancel 経路の
+  wedge を顕在化。
+- **lint/type 申し送り**: `_event_stream` は `AsyncIterator` 注釈だが実体は async generator
+  のため、`aclose` 到達には test 側で `AsyncGenerator[...]` へ `cast`（src 非改変、boundary 厳守）。
+  private import は `# pyright: ignore[reportPrivateUsage]`。`asyncio.TimeoutError` は UP041 で
+  builtin `TimeoutError` に統一。
 
 ---
 
