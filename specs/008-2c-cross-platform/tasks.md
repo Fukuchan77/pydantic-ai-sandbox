@@ -159,7 +159,7 @@ _Boundary:_ `patterns/sse/src/patterns_sse/events.py`, `patterns/sse/tests/unit/
 _Depends:_ 2
 _Requirements:_ 2.3, 4.2
 
-- [ ] 3.1 `events.py` に `EventSource` Protocol（`async def stream(query: str) ->
+- [x] 3.1 `events.py` に `EventSource` Protocol（`async def stream(query: str) ->
   AsyncIterator[SseEvent]`）・`to_sse(event) -> {"event": event.type, "data":
   event.model_dump_json()}`（ADR-3）・`parse_sse_events(body) -> list[SseEvent]`
   （`TypeAdapter(SseEvent).validate_json` で逆写像、R4.2）を実装する。`event:` = 判別子 /
@@ -170,7 +170,23 @@ _Requirements:_ 2.3, 4.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **ADR-3 双方向を 1 モジュールに集約**: `to_sse(event) -> {"event": event.type,
+  "data": event.model_dump_json()}`（sse-starlette `ServerSentEvent` の kwargs
+  形）と `parse_sse_events(body)`（`text/event-stream` 本文の `data:` 行のみを
+  抽出し `TypeAdapter(SseEvent).validate_json` で判別子逆写像、R4.2）。受信側は
+  `event:` で分岐せず `data:` JSON が正本（ADR-3）。`event:`/`id:`/`retry:` 行と
+  keepalive `:` コメント・空行は無視。`TypeAdapter` は import 時 1 回だけ構築し
+  module 定数で共有（コンパイル費の償却）。
+- **EventSource Protocol は非 `async def` 宣言**: メンバを `def stream(self, query)
+  -> AsyncIterator[SseEvent]: ...` とする。`async def` 宣言にすると「`AsyncIterator`
+  を返す coroutine」型になり、`async def`+`yield` の async-generator 実装が
+  構造的にマッチしなくなるため（pyright strict で確認）。`@runtime_checkable` を
+  付与し、適合フェイクの `isinstance` を unit で立証。
+- **drift パーサ非該当**: `events.py` は fw 非結合の src だが純粋ヘルパで、契約
+  モデルは `patterns_contracts` から import するのみ（NFR-3、兄弟レーン非 import）。
+- **lint 申し送り**: docstring 内の `\n` リテラル例示は D301 を誘発するため散文へ
+  言い換え。`patterns_contracts` は path-dep の third-party 扱いで `pydantic` より
+  前にソート（isort `known-first-party=["patterns_sse"]`）。
 
 ---
 

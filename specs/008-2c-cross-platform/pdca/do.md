@@ -197,3 +197,67 @@ $ uv run --no-sync pytest --no-cov
 
 > 完全な `mise run patterns:test`（lane coverage）green 化は Task 11（SSE README 作成 +
 > `_README_PATHS` 登録）完了時。Task 2 の deliverable 自体は上記の通り green。
+
+---
+
+## Task 3 — SSE 直列化ヘルパと EventSource seam ✅
+
+`patterns/sse/src/patterns_sse/events.py` を新設（3.1）。`/sdd-impl` の TDD
+（Red→Green→Refactor）で進行。
+
+### Do（実施内容）
+
+- **Red 先行**: `tests/unit/test_event_serialization.py` を先に作成し
+  `ModuleNotFoundError: No module named 'patterns_sse.events'` で赤を確認。7 ケース:
+  `to_sse` の `event:`=判別子 / `data:`=`model_dump_json()` / キー集合、
+  `parse_sse_events` の判別子ディスパッチ・非 `data:` 行（keepalive `:` / `event:`）無視・
+  ラウンドトリップ、`EventSource` Protocol の async-generator 構造適合。
+- **Green 最小実装**: ADR-3 を 1 モジュールへ集約。`to_sse(event) -> {"event":
+  event.type, "data": event.model_dump_json()}`、`parse_sse_events(body) ->
+  list[SseEvent]`（`data:` 行のみ抽出 → `TypeAdapter(SseEvent).validate_json` で逆写像、
+  R4.2）。`TypeAdapter` は import 時 1 回構築し module 定数で共有。`EventSource` は
+  `@runtime_checkable` Protocol、メンバは非 `async def`（async-generator 実装の構造適合のため）。
+- **Refactor**: docstring/Google 規約・`__all__` 整備。lint 指摘 2 件を是正
+  （下記 根本原因）。
+
+### エラーと根本原因（blind retry 禁止に従い記録）
+
+- **D301（docstring 内バックスラッシュ）**: 「`event: …\ndata: …` を手書きしない」を
+  例示するため docstring に `\n` リテラルを書いたところ ruff D301 が発火。
+  **根本原因**: `r"""` でない docstring に `\` を含めた。**対応**: `r"""` 付与ではなく
+  散文（"newline-delimited `event:` / `data:`"）へ言い換え、意図（手書き整形回避＝ADR-3）を
+  保ったまま `\` を除去。
+- **I001（import 未ソート）**: `pydantic` を `patterns_contracts` より前に置いた。
+  **根本原因**: `patterns_contracts` は path-dep だが third-party 扱いで、`p-a-t` <
+  `p-y-d` のため `patterns_contracts` が先。isort `known-first-party=["patterns_sse"]` の
+  自レーンのみが first-party。**対応**: third-party 内で正順へ並べ替え。
+
+### 学び（Act へ）
+
+1. **Protocol で async-generator を型付けるときは非 `async def` で宣言する**。
+   `async def stream(...) -> AsyncIterator[...]: ...` と書くと「`AsyncIterator` を返す
+   coroutine」型になり、`async def`+`yield` の実装が構造的に非適合になる（pyright strict）。
+   返り値注釈は `AsyncIterator[SseEvent]` のまま、宣言を `def` にするのが正。
+2. **ADR-3 の逆写像は `event:` 非依存**。受信は `data:` JSON を `TypeAdapter` で判別子
+   ディスパッチするのが正本で、`event:` は人間可読の冗長情報。パーサを `data:` 限定に
+   することで keepalive コメント・framing 行に頑健（SSE 仕様準拠）。
+
+### 検証ゲート（証跡）
+
+```
+# 3.1 Red（実装前）
+$ uv run pytest --no-cov tests/unit/test_event_serialization.py -q
+E  ModuleNotFoundError: No module named 'patterns_sse.events'
+   1 error in 0.64s
+
+# 3.1 Green（実装後）→ ヘルパ単体
+$ uv run pytest --no-cov tests/unit/test_event_serialization.py -q   → 7 passed in 0.07s
+
+# レーン全体ゲート（Refactor 後）
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 4 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 9 passed in 0.09s
+   src/patterns_sse/events.py   19  0  4  0  100%
+   TOTAL                        20  0  4  0  100%   (fail_under=85 達成 / 100.00%)
+```
