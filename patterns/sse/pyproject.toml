@@ -129,9 +129,16 @@ branch = true
 relative_files = true
 
 [tool.coverage.report]
-# Initial floor at the 005/006 sibling-lane entry value (NFR-4); Task 9.2
-# ratchets this toward the 98 parity of the pydantic-ai / rag lanes once the
-# delivery pipeline is covered.
-fail_under = 85
+# Ratcheted to the 98 sibling-lane parity (pydantic-ai / rag lanes, 005/006
+# target; NFR-4 / R5.4 / research.md R-4). Task 9.1's hermetic one-pass and
+# runaway-backstop cases lifted the lane to 99.01%, so 98 holds with a 1-point
+# buffer. The single residual uncovered branch is `app.py:113->exit` — the
+# `aclose is None` arm of the producer-release `finally`, which is unreachable
+# in practice: every injected `EventSource` (scripted fake and the gated
+# pydantic-ai adapter alike) is an async generator that *has* `aclose`. Covering
+# it would require a contrived non-generator iterator that exists only to take
+# that branch, so per R-4 it is left as the documented hard-to-cover glue rather
+# than ratcheted to a brittle 100.
+fail_under = 98
 show_missing = true
 skip_covered = false

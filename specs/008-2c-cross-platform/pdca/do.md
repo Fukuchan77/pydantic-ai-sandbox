@@ -513,3 +513,64 @@ $ uv run pytest --cov          → 33 passed（28→+5）/ TOTAL 97.03%（fail_u
 - span 分岐が exercise され lane coverage 93.98%→97.03%。`observability.py` 100%。app.py 残未被覆は
   L106（max-events backstop）/ L113→exit（aclose 無し分岐）のみで Task 9.2 の 98 ratchet 対象。
   回帰なし（既存 28 件全 green）。
+
+---
+
+## Task 9 — オフライン hermetic 保証とカバレッジゲート ✅
+
+実施日: 2026-06-14 / 状態: **完了（9.1 / 9.2 green）**
+
+**スコープ**: R5.1（hermetic ガードで台本フェイク一巡が実ソケット非到達・到達時 loud-fail）/
+R5.4（`fail_under` を兄弟レーン parity へ ratchet）。9.1 は `test_smoke.py` のみ、9.2 は
+`pyproject.toml` のみの厳格境界。
+
+### Do（実施内容）
+
+- **9.1 hermetic ガード + fake one-pass（`test_smoke.py`）**: RAG レーン idiom を複製した
+  `block_network` フィクスチャ（monkeypatch で `socket.socket.connect`/`connect_ex` +
+  `socket.getaddrinfo` を差し替え、AF_INET/AF_INET6 のみ `NetworkReachError` で loud-fail、
+  AF_UNIX 等は実体委譲）を追加。3 ケース新設:
+  - `test_block_network_guard_loud_fails_on_internet_connect` — 実 AF_INET connect が I/O 前に
+    遮断される（ガード非空虚性の load-bearing 証跡）。
+  - `test_fake_one_pass_runs_hermetically` — `create_app(ScriptedEventSource())` を ASGITransport
+    で駆動し、ガード下で終端 `completed` 到達（offline 完走、R5.1）。
+  - `test_runaway_producer_is_bounded_by_the_backstop` — `tokens=_MAX_EVENTS+1` の非終端的台本で
+    R-2 backstop（`app.py:106`）を exercise。terminal marker を出さない producer でも cap で完走し
+    ASGITransport を wedge しないことを立証。
+- **9.2 ratchet（`pyproject.toml`）**: `fail_under` 85→**98**（pydantic-ai/rag parity）。実測
+  99.01%（1pt バッファ）。残る唯一の未被覆分岐 `app.py:113->exit` の rationale を coverage
+  コメントに恒久記録。
+
+### 学び
+
+- **新規テストファイル増設なしで L106 を被覆**: Task 9 境界は `test_smoke.py` + `pyproject.toml`
+  のみ。dedicated な max-events テストファイルは作れないため、「非終端 producer でも offline run が
+  *完走*する」という hermetic-completion の射程に backstop 検証を載せ、既存 `ScriptedEventSource`
+  の `tokens` 長で `completed` を cap の外側へ押し出すことで新規 src/support なしに L106 を exercise。
+- **L113->exit は被覆困難グルーとして残置（R-4）**: `aclose is None` アームは注入される
+  `EventSource` が全て async generator（`aclose` 保持）であるため実務到達不能。当該分岐専用の
+  非 generator イテレータは作為的で、100 への brittle ratchet より R-4 の「rationale 明記の上で
+  残置」を選択。98 parity は actual 99.01% で充足。
+- **mise 配線は Task 12.1 へ委譲**: 9.2 が指す `mise run patterns:test` への sse 行追加は
+  `mise.toml`（Task 12.1 境界）の所掌。本タスクはレーンローカル gate（mise が per-lane に呼ぶ
+  `uv run pytest --cov` と同一実体）で `fail_under=98` 充足を検証した。
+
+### 検証ゲート（証跡）
+
+```
+# load-bearing RED 9.1（app.py backstop break を一時 neuter: `and False`）
+$ uv run pytest --no-cov tests/unit/test_smoke.py::test_runaway_producer_is_bounded_by_the_backstop
+   → 1 failed（AssertionError: assert 1004 == 1000）
+# → app.py revert（git diff --stat = empty、net-zero 境界保全）
+
+# GREEN 9.1 + レーン全体ゲート（9.2 ratchet 後）
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 13 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 36 passed（33→+3）
+   → app.py 98%（残 113->exit）/ observability・events・__init__ 100%
+   → Required test coverage of 98.0% reached. Total coverage: 99.01%
+```
+
+- lane coverage 97.03%→**99.01%**、`fail_under` 85→98 で gate green。回帰なし（既存 33 件継続 green、
+  新規 3 件追加で 36）。Wave 5（Task 9）完了 → 残 Wave 6（Task 10/11/12/13）。
