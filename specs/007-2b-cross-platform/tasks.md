@@ -673,13 +673,13 @@ _Boundary:_ `patterns/README.md`, `patterns/SECURITY-NOTES.md`
 _Depends:_ 1, 11
 _Requirements:_ 9.1, 9.4, 10.2
 
-- [ ] 13.1 `patterns/README.md` に「応用レイヤー」節を新設し RAG を索引する（Anthropic
+- [x] 13.1 `patterns/README.md` に「応用レイヤー」節を新設し RAG を索引する（Anthropic
   ワークフロー6パターンの表とは別セクション。RAG はワークフローパターンではなく
   LlamaIndex 役割分担の応用である旨を明記）。
   _Boundary:_ `patterns/README.md`
   _Depends:_ 1, 11
   _Requirements:_ 10.2
-- [ ] 13.2 `patterns/SECURITY-NOTES.md` を更新する（CVE-2025-1793 行を in-memory 既定の
+- [x] 13.2 `patterns/SECURITY-NOTES.md` を更新する（CVE-2025-1793 行を in-memory 既定の
   みへ、RAG 固有リスク〔インデックス汚染/引用なりすまし/PII チャンク露出〕→OWASP LLM
   Top 10〔過度の依存/データ漏洩〕マッピング行を追加。gitleaks/forbid-hardcoded-model-ids
   が patterns/ 全域を除外しない不変条件を明記）。
@@ -688,6 +688,37 @@ _Requirements:_ 9.1, 9.4, 10.2
   _Requirements:_ 9.1, 9.4
 
 ### Implementation Notes
+
+実装（Task 13, 2026-06-14 / docs-only, boundary 2ファイル）:
+
+- **docs-only boundary の TDD 適応**: 本タスクの `_Boundary:_` は `patterns/README.md` /
+  `patterns/SECURITY-NOTES.md` の2点のみ（テストファイル非含）。Task 11 と異なりドリフトテスト
+  等の自動テストはこの境界に属さないため、新規テストファイルは**追加しない**（境界規律優先）。
+  TDD は「必須コンテンツの不在＝RED → 追記＝GREEN → 存在 grep + 全スイート無回帰＝VERIFY」で
+  適応。RED を grep で実測（応用レイヤ節/rag リンク 0、CVE 行 旧文言、RAG リスク語 0、
+  forbid-hardcoded-model-ids 0）してから着手。
+- **13.1 応用レイヤー節（R10.2）**: 二軸タクソノミー直後・フレームワーク比較の前に
+  `## 応用レイヤー（RAG）` を新設。**RAG はワークフローパターンではなく LlamaIndex 役割分担の
+  応用**である旨を明記し、ワークフロー6表とは別表（RAG 1 行 + `patterns/rag/` 独立レーン・
+  Python 3.13・ADR-1 配置根拠）として索引。契約は同一 contracts 集約・同一ドリフトテストで正本
+  一致を検知する旨も併記。`レーン構成` 節は framework 固有の独立理由（beeai `<3.14`）を持つため
+  未改変＝最小スコープ（応用レイヤ節が rag レーン参照を単独所有）。
+- **13.2a CVE-2025-1793 行更新（実態同期）**: 旧「ベクトルストア不使用」を **「in-memory
+  `SimpleVectorStore` 既定のみを能動的に明示構築し脆弱な外部統合8種を混入させない（`indexing.py`
+  で isinstance 固定）」** へ更新。外部ストア採用時の `>=0.12.28` フロアゲートも明記。
+- **13.2b RAG→OWASP マッピング（R9.1）**: autonomous-agent サブセクションに倣い
+  `### RAG 応用レイヤ → OWASP LLM Top 10 マッピング（Spec 007 Req 9.1）` を新設。3 固有リスクを
+  契約面と対応づけ — インデックス汚染→LLM08/過度の依存（golden 回帰 + 固定資産）、引用なりすまし
+  →過度の依存（`validate_citations`/`DanglingCitationError` loud-fail = R4.3/R9.3）、PII チャンク
+  露出→LLM02 データ漏洩（in-memory 既定 + gitleaks 全域走査）。
+- **13.2c pre-commit 不変条件（R9.4）**: `gitleaks` / `forbid-hardcoded-model-ids` の2フックは
+  `exclude: ^patterns/` を**持たず** RAG レーンを含む patterns/ 全域を走査する不変条件を明記
+  （実フック名・exclude 有無を `.pre-commit-config.yaml` で実測確認）。レーン品質3フックは
+  exclude を持つが秘匿/モデル ID 禁止はリポジトリ全域、という非対称を対比して記述。
+- **VERIFY**: `mise run patterns:check`（lint+format+typecheck+test）全グリーン — rag レーン
+  58 passed / 1 skipped・coverage 100%（≥98 フロア）、typecheck 0 errors、lint All checks passed、
+  format already formatted。`test_contract_drift.py` 4 passed（README 索引非破壊）。boundary
+  2ファイルのみ、ルート・他レーン・RAG ソース無変更。**Spec 007 全 13 タスク完了。**
 
 ---
 
