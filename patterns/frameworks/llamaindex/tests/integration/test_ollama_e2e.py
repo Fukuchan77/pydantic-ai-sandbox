@@ -37,10 +37,16 @@ def _ollama_llm() -> object:
     # an OpenAI-style base ending in /v1, so strip it when present.
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     base_url = base_url.removesuffix("/v1")
+    # The parallelization lane fans out concurrent generations that contend for
+    # the CPU-only CI runner. Mirror the beeai lane's safeguards: a request
+    # timeout well above the contended latency, and a bounded num_predict (the
+    # Ollama generation cap) so each branch returns promptly. Contract-level
+    # assertions only require non-empty output, so the cap is safe.
     return Ollama(
         model=os.environ["OLLAMA_MODEL_NAME"],
         base_url=base_url,
-        request_timeout=180.0,
+        request_timeout=1200.0,
+        additional_kwargs={"num_predict": 512},
     )
 
 
