@@ -357,24 +357,50 @@ _Boundary:_ `patterns/rag/src/patterns_rag/rag.py`, `patterns/rag/src/patterns_r
 _Depends:_ 2, 4, 5, 6
 _Requirements:_ 4.1, 4.2, 4.3, 6.3
 
-- [ ] 7.1 `ScriptedLLM(CustomLLM)` フェイクを作成する（引用入りの台本回答を決定論で返す）。
+- [x] 7.1 `ScriptedLLM(CustomLLM)` フェイクを作成する（引用入りの台本回答を決定論で返す）。
   _Boundary:_ `patterns/rag/tests/support/fake_llm.py`
   _Depends:_ 2
   _Requirements:_ 6.3
-- [ ] 7.2 `async def run_rag(query, *, llm, retriever, top_k=4) -> RagAnswer` を実装する。
+- [x] 7.2 `async def run_rag(query, *, llm, retriever, top_k=4) -> RagAnswer` を実装する。
   検索→各チャンクへ `chunk_id` ラベル付与のプロンプト構築→LLM 呼出→`RagAnswer` パース→
   `validate_citations` 呼出の制御フロー。空インデックスは `EmptyCitationError` と整合。
   `RagAnswer` ≥1 citation・契約形状テストを先行作成（Red）。
   _Boundary:_ `patterns/rag/src/patterns_rag/rag.py`, `patterns/rag/tests/unit/test_rag_answer_contract.py`
   _Depends:_ 7.1, 4, 5, 6
   _Requirements:_ 4.1, 4.2, 4.3
-- [ ] 7.3 `__init__` を `run_rag`・契約型・例外・tracing シンボルのフラット再エクスポートに
+- [x] 7.3 `__init__` を `run_rag`・契約型・例外・tracing シンボルのフラット再エクスポートに
   更新する（スモークの import 健全性を維持）。
   _Boundary:_ `patterns/rag/src/patterns_rag/__init__.py`
   _Depends:_ 7.2
   _Requirements:_ 4.1
 
 ### Implementation Notes
+
+実装（Task 7, 2026-06-14 / llama-index-core 0.14.22, CPython 3.13.7）:
+
+- **`run_rag` 制御フロー（R4.1/4.2/4.3）**: `retrieve` → `_format_context`（各チャンクを
+  `chunk_id=… | source=… | locator=… | score=…` ラベル行 + 字下げ本文に整形）→
+  `llm.astructured_predict(RagAnswer, _RAG_TEMPLATE, context=, query=)` → `validate_citations`
+  → 返却。`top_k<1` は `retrieve` から `ValueError` を継承（重複防御を置かない）。**空インデックス
+  は分岐レス**: retrieved=[] → context="" → モデルは引用ゼロ → `validate_citations` が
+  `EmptyCitationError`（plan §Error Handling と一致、特別扱い回避）。
+- **構造化出力の seam（兄弟 parity）**: 005/006 の `llamaindex` レーンと同じ `astructured_predict`
+  慣用句。非 function-calling フェイクは text-completion program の JSON パーサ経路、実 Ollama は
+  tool-call 経路 — 同一 `RagAnswer` 契約に着地。事前 spike で `list[Citation]` ネスト解析・空 context
+  ・ゼロネットワークを実証してから TDD。
+- **`ScriptedLLM`（R6.3, Task 7.1）**: `CustomLLM` 派生・オフライン決定論。プロンプト内のチャンク
+  ラベルを正規表現で解析し**接地した**引用のみ生成（捏造しない）。`dangling_chunk_id` seam で
+  未検索 id を1件付与でき、`run_rag` の `validate_citations` が**実効的**（飾りでない）ことを
+  `DanglingCitationError` で立証。空 context → 引用ゼロ → `EmptyCitationError` 経路も同フェイクで被覆。
+  出力スキーマの `"chunk_id":`（引用符付きキー）は `chunk_id=`（等号）と一致しないため誤マッチ皆無。
+- **`__init__` フラット再エクスポート（Task 7.3, R4.1）**: `run_rag` + 契約型（`RagAnswer`/
+  `Citation`/`RetrievedChunk`）+ 例外（`CitationError`/`EmptyCitationError`/`DanglingCitationError`）。
+  **tracing シンボルは意図的に未配線** — `observability` モジュールは Task 8 の所有物で未着地のため、
+  DAG 順に従い Task 8 着地時に合流（Task 2 の README ドリフト窓と同型の計画済みギャップ）。smoke は不変。
+- **TDD/検証**: RED（`ModuleNotFoundError: patterns_rag.rag`）→ 7 新規テスト green。lane **50 passed**
+  ・ruff/format/pyright strict グリーン、coverage **97.54%**（rag.py 100% / __init__.py 100%, gate 85）。
+  `HF_HUB_OFFLINE=1` 下・ネットワークゼロ。boundary 4ファイルのみ、ルート・他レーン無変更。mise
+  `patterns:*` への rag レーン配線は Task 12.1 の所有物（本タスクは per-lane 直接起動で検証）。
 
 ---
 
