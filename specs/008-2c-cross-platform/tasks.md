@@ -474,7 +474,7 @@ _Requirements:_ 5.1, 5.4
 
 ---
 
-## 10. (P) Ollama 結合テスト（pydantic-ai run_stream_events アダプタ）
+## 10. (P) Ollama 結合テスト（pydantic-ai run_stream_events アダプタ）✅
 
 `RUN_INTEGRATION_PATTERNS=1` でゲートし、pydantic-ai のストリーミングを `SseEvent` に写す
 結合アダプタで「実モデル × 実ストリーミング」を契約レベルで検証する。
@@ -483,7 +483,7 @@ _Boundary:_ `patterns/sse/tests/integration/test_ollama_e2e.py`
 _Depends:_ 4
 _Requirements:_ 3.3, 7.1
 
-- [ ] 10.1 結合テストを作成する（未設定時 skip、`OLLAMA_BASE_URL`/`OLLAMA_MODEL_NAME` を env
+- [x] 10.1 結合テストを作成する（未設定時 skip、`OLLAMA_BASE_URL`/`OLLAMA_MODEL_NAME` を env
   から読む、`run_stream_events` の `AgentStreamEvent → SseEvent` 写像アダプタ〔I-1〕で routing
   型 Agent を Ollama-backed モデルで駆動、`InstrumentationSettings` 併用で `gen_ai.*` span も
   流す。アサートは契約レベルに限定: イベント列順序〔R4.1〕/ 各 `data` の `model_validate` /
@@ -494,7 +494,36 @@ _Requirements:_ 3.3, 7.1
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **アダプタは結合テスト内に閉じる（NFR-3）**: `_agent_event_to_sse`（純写像）と
+  `_PydanticAIEventSource`（`EventSource` 適合アダプタ）を `test_ollama_e2e.py` に定義。
+  pydantic-ai は dev/結合専用依存で、fw 非結合の lane src（`app.py`/`events.py`）へは一切
+  漏らさない。`patterns_pydantic_ai` レーンは import せず（NFR-3）、ルーティング形の `Agent`
+  （str 出力・ツールなし・分類/専門応答の最小プロンプト）を pydantic-ai から直接構築。
+- **I-1 写像（実測 2.0.0b7）**: `run_stream_events(query)` は `AbstractAsyncContextManager
+  [AsyncIterator[AgentStreamEvent | AgentRunResultEvent]]` のため `async with ... as events`
+  で駆動（早期停止時の背景タスク決定論クリーンアップ）。`PartStartEvent`(TextPart)→
+  `step_started` / `PartDeltaEvent`(`TextPartDelta.content_delta`)→`token` /
+  `FunctionToolCallEvent`(`part.tool_name`/`args_as_json_str()`)→`tool_called` /
+  `AgentRunResultEvent`(`result.output`)→`completed`。契約外イベント（part 終端・tool 結果・
+  thinking・非テキスト delta）は `None` で破棄し R4.1 順序を保つ。
+- **span 二系統を 1 provider に集約**: `configure_tracing(InMemorySpanExporter())` の
+  `TracerProvider` を `create_app(tracer_provider=...)`（app の `sse.stream` span）と
+  `InstrumentationSettings(tracer_provider=...)`（`instrument_model` 経由の `gen_ai.*` span）
+  の双方へ注入。アサートは存在のみ（span≥1、R7.1/R7.3、属性集計はしない）。
+- **アサートは契約レベル限定（実テキスト禁止）**: ASGITransport で全文バッファ（ADR-4a）→
+  `parse_sse_events` で逆写像し、(a) 先頭 `step_started`・末尾が唯一の終端マーカー
+  （`completed`/`error`）で後続なし〔R4.1〕、(b) `token` を 1 件以上配信、(c) 各 `data` の
+  `model_validate` ラウンドトリップ〔R4.2/5.2〕、(d) span≥1〔R7.1〕。テキスト一致は非決定的な
+  実モデルゆえ禁止（決定論は台本フェイク＝Task 5 の所掌、NFR-2/R5.3）。
+- **load-bearing RED→GREEN（オフライン FunctionModel ハーネス）**: 結合テストはゲート下で
+  実 Ollama を要すため CI 専用。アダプタ正当性は**同一パイプライン**（adapter→`create_app`→
+  ASGITransport→`parse_sse_events`→span）を network-zero の `FunctionModel`（固定チャンク列を
+  stream）で実証する throwaway ハーネスで検証。`AgentRunResultEvent→CompletedEvent` 分岐を一時
+  neuter → `assert types[-1] in terminal` が `last not terminal: token` で RED を確認後 revert
+  （`['step_started','token','token','completed']` + span 3 本で GREEN）。Task 5/6/8/9 と同 idiom。
+  ハーネスは Task 10 境界外のため非コミット（Task 0 spike と同様、証跡は do.md に保全）。
+- **被覆**: テスト追加のみ（アダプタは test 内）で src 被覆は不変（99.01%、`fail_under=98`
+  充足）。オフラインゲートでは `pytestmark` の skipif によりスキップ（36 passed / 1 skipped）。
 
 ---
 

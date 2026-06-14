@@ -574,3 +574,67 @@ $ uv run pytest --cov          → 36 passed（33→+3）
 
 - lane coverage 97.03%→**99.01%**、`fail_under` 85→98 で gate green。回帰なし（既存 33 件継続 green、
   新規 3 件追加で 36）。Wave 5（Task 9）完了 → 残 Wave 6（Task 10/11/12/13）。
+
+---
+
+## Task 10 — Ollama 結合テスト（run_stream_events アダプタ）
+
+実施日: 2026-06-14 / 状態: **完了（10.1 green）**
+
+**スコープ**: R3.3（実モデル × 実ストリーミングを契約レベルで検証）/ R7.1（instrumented run で
+span≥1）。境界は `patterns/sse/tests/integration/test_ollama_e2e.py` のみ。`RUN_INTEGRATION_PATTERNS=1`
+ゲート（未設定時 skip）。
+
+### Do（実施内容）
+
+- **結合テスト + アダプタを 1 ファイルに**（NFR-3 厳守）: `_agent_event_to_sse`（pydantic-ai
+  `AgentStreamEvent`/`AgentRunResultEvent` → `SseEvent` 純写像、I-1）と `_PydanticAIEventSource`
+  （`EventSource` 適合の async-generator アダプタ。`run_stream_events` を `async with` 駆動）を
+  test 内に定義。lane src（fw 非結合）へは漏らさず、`patterns_pydantic_ai` も import しない。
+  ルーティング形の `Agent[None, str]`（ツールなし最小プロンプト）を pydantic-ai から直接構築。
+- **span 二系統を単一 provider へ集約**: `configure_tracing(InMemorySpanExporter())` を
+  `create_app(tracer_provider=...)`（`sse.stream`）と `InstrumentationSettings(tracer_provider=...)`
+  （`instrument_model` 経由の `gen_ai.*`）の双方へ注入。
+- **契約レベルアサート**: ASGITransport 全文バッファ → `parse_sse_events` 逆写像で
+  (a) 先頭 `step_started` / 末尾が唯一終端マーカー・後続なし（R4.1）、(b) `token`≥1、
+  (c) 各 `data` の `model_validate` ラウンドトリップ（R4.2/5.2）、(d) span≥1（R7.1）。
+  実テキスト一致は禁止（実モデル非決定、決定論は Task 5 台本フェイクの所掌）。
+
+### 学び
+
+- **`run_stream_events` は async context manager（2.0.0b7 実測）**: 戻り値は
+  `AbstractAsyncContextManager[AsyncIterator[AgentStreamEvent | AgentRunResultEvent]]`。
+  `async with agent.run_stream_events(q) as events: async for e in events:` で駆動し、
+  早期停止時に背景 run タスクを決定論クリーンアップ。I-1 の「async iterator」記述を実 API で確定。
+- **ゲート結合テストの load-bearing 検証は同一パイプライン × FunctionModel で代替**: 実 Ollama は
+  オフライン/サンドボックス不可。adapter→`create_app`→ASGITransport→`parse_sse_events`→span の
+  **実コードパス**を network-zero の `FunctionModel`（固定チャンク stream）で駆動する throwaway
+  ハーネスで実証。`AgentRunResultEvent→CompletedEvent` を一時 neuter → `assert types[-1] in
+  terminal` が `last not terminal: token` で RED 確認後 revert（GREEN: `['step_started','token',
+  'token','completed']` + span 3 本 `chat function::_stream`/`invoke_agent agent`/`sse.stream`）。
+  ハーネスは境界外のため非コミット（Task 0 spike 同様、証跡は本ログに保全）。
+- **アダプタは test 内に閉じて被覆不変**: 写像ロジックを test に置くため src 被覆は 99.01% で不変、
+  `fail_under=98` を維持。オフラインゲートでは skipif で 1 skipped。
+
+### 検証ゲート（証跡）
+
+```
+# load-bearing RED（offline FunctionModel ハーネス、completed 分岐 neuter）
+$ uv run python /tmp/sse_adapter_harness.py
+   → AssertionError: last not terminal: token   # 終端マーカー欠落をアサートが検知
+# → adapter revert（GREEN）
+$ uv run python /tmp/sse_adapter_harness.py
+   → TYPES: ['step_started', 'token', 'token', 'completed']
+   → SPANS: ['chat function::_stream', 'invoke_agent agent', 'sse.stream']
+   → HARNESS GREEN    （ハーネスは rm で破棄）
+
+# レーン全体ゲート（オフライン）
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 14 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 36 passed, 1 skipped
+   → tests/integration/test_ollama_e2e.py s   （RUN_INTEGRATION_PATTERNS 未設定で skip）
+   → Required test coverage of 98.0% reached. Total coverage: 99.01%
+```
+
+- 回帰なし（既存 36 件継続、結合 1 件は offline skip）。Task 10 完了 → 残 Wave 6（Task 11/12/13）。
