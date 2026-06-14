@@ -601,3 +601,42 @@ collection/lint/typecheck 健全」。live-green は実 Ollama daemon + granite/
   するため、正本とパッケージの**フィールド集合の完全一致**が GREEN の必要十分条件。
 - Task 9 が記録した `mise run patterns:test` の contracts 停止窓は本タスクで解消（rag レーンの
   mise/CI 配線自体は Task 12 の所有として残置）。
+
+---
+
+## Task 12: mise タスクと CI への新レーン反映 (2026-06-14)
+
+### 実装
+
+- **12.1 mise.toml**: `patterns/rag/`（depth 1 / `frameworks/` 兄弟）は
+  `patterns/frameworks/*/` グロブ外のため、各 `patterns:{setup,lint,format,
+  typecheck,test,audit}` のレーンループ直後に `(cd patterns/rag && …)` 明示行、
+  `patterns:test:integration` に rag 行を追加（独立レーン ADR-1）。
+- **12.2 patterns-ci.yml**: contracts ジョブを範に `rag` 専用ジョブ追加（working-dir
+  `patterns/rag`、`uv sync --all-groups --locked`→ruff/format/pyright/`pytest --cov`
+  フロア98/pip-audit）。HF 事前取得ステップ不要（HF_HUB_OFFLINE=1 + 決定論 word
+  tokenizer）。push/PR paths に `patterns/rag/**` を first-class surface として明示追加。
+- **12.3 patterns-integration-ollama.yml**: PR paths に `patterns/rag/**`、env に
+  `OLLAMA_EMBED_MODEL_NAME: granite-embedding:278m`（生成 LLM とファミリ parity・明示
+  タグピン）、生成 LLM と同形の skip-if-cached 埋め込み pull ステップ、cache key に
+  埋め込みモデル併記。R11.4 隔離は先取りせず daemon ウォームアップ実測へ委譲。
+
+### 実測（VERIFY 証跡）
+
+- RED: 配線前 `mise run patterns:lint` → `== lint` は contracts + frameworks 3 レーンのみ
+  （`patterns/rag` 不在）。
+- GREEN: 配線後 `mise run patterns:lint` → `== lint patterns/rag` 出現・exit 0。
+- `mise run patterns:test` → 全レーン緑。**rag 58 passed, 1 skipped / coverage 100%
+  ≥ 98 フロア**（contracts 12 / beeai 40 / llamaindex 41 / pydantic-ai 39 も緑）。
+- `mise run patterns:typecheck` exit 0、`mise run patterns:format` exit 0。
+- ルート `mise run check` → **277 passed, 4 skipped**（無変更グリーン・ルート ci.yml 不変）。
+- 両ワークフロー YAML を PyYAML で parse し、`rag` ジョブ / `patterns/rag/**` paths /
+  `OLLAMA_EMBED_MODEL_NAME` env / `Pull embedding model` ステップの存在をアサート（全パス）。
+
+### 学び（Act 候補）
+
+- 独立レーン（depth 1）は frameworks ループのグロブ外に落ちるため、mise・CI とも
+  「ループ + 明示行」のハイブリッド配線になる。将来レーン追加時も同パターンで非破壊拡張可。
+- 埋め込みモデルは生成 LLM と別 env（`OLLAMA_EMBED_MODEL_NAME`）+ 別 pull が必要。
+  granite-embedding:278m（563MB）はウォームアップ増分が小さく、現時点で R11.4 隔離は不要。
+  実測で daemon ウォームアップが著増した場合のみ別ジョブ/別ゲートへ（退避策は文書化済み）。

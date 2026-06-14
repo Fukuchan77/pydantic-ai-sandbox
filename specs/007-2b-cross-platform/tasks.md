@@ -618,18 +618,18 @@ _Boundary:_ `mise.toml`, `.github/workflows/patterns-ci.yml`, `.github/workflows
 _Depends:_ 1, 9, 10
 _Requirements:_ 9.2, 9.4, 11.1, 11.2, 11.3, 11.4, 12.1, 12.2
 
-- [ ] 12.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に
+- [x] 12.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に
   `(cd patterns/rag && …)` 明示行を、`patterns:test:integration` に rag 行を追加し、
   ルート `mise run check` が無変更グリーンであることを確認する。
   _Boundary:_ `mise.toml`
   _Depends:_ 1, 9, 10
   _Requirements:_ 9.2, 12.1, 12.2
-- [ ] 12.2 `patterns-ci.yml` に `rag` 専用ジョブ（`uv sync --locked`→`pytest`、HF 事前
+- [x] 12.2 `patterns-ci.yml` に `rag` 専用ジョブ（`uv sync --locked`→`pytest`、HF 事前
   取得不要なオフライントークナイザ前提）と paths `patterns/rag/**` を追加する。
   _Boundary:_ `.github/workflows/patterns-ci.yml`
   _Depends:_ 12.1
   _Requirements:_ 11.1, 11.3
-- [ ] 12.3 `patterns-integration-ollama.yml` に PR paths `patterns/rag/**`・env
+- [x] 12.3 `patterns-integration-ollama.yml` に PR paths `patterns/rag/**`・env
   `OLLAMA_EMBED_MODEL_NAME`・埋め込みモデル pull ステップを追加し、CI 重量が非実用と
   実測された場合は RAG 結合を別ジョブ/別ゲートへ隔離する（R11.4）。
   _Boundary:_ `.github/workflows/patterns-integration-ollama.yml`
@@ -637,6 +637,30 @@ _Requirements:_ 9.2, 9.4, 11.1, 11.2, 11.3, 11.4, 12.1, 12.2
   _Requirements:_ 11.2, 11.3, 11.4, 9.4
 
 ### Implementation Notes
+
+実装（Task 12, 2026-06-14）:
+
+- **12.1 mise 配線**: `patterns/rag/` は depth 1（`frameworks/` の兄弟）で
+  `patterns/frameworks/*/` グロブ外。各 `patterns:{setup,lint,format,typecheck,
+  test,audit}` のレーンループ直後に `(cd patterns/rag && …)` 明示行を、
+  `patterns:test:integration` に rag 行を追加（独立レーン ADR-1）。RED: 配線前は
+  `mise run patterns:lint` が contracts+frameworks 3 レーンのみで rag 不在を実証。
+  GREEN: `== lint patterns/rag` 出現。検証: `mise run patterns:test` で全レーン緑
+  （rag 58 passed / coverage 100% ≥ 98 フロア）、`patterns:typecheck`/`patterns:format`
+  exit 0、ルート `mise run check` 無変更グリーン（277 passed, 4 skipped）。
+- **12.2 patterns-ci.yml**: contracts ジョブを範に取り `rag` 専用ジョブを追加
+  （working-dir `patterns/rag`、`uv sync --all-groups --locked`→ruff/pyright/
+  `pytest --cov`（フロア 98）/pip-audit）。HF_HUB_OFFLINE=1（pyproject env）+
+  決定論的 word tokenizer によりオフライン hermetic、HF モデル事前取得ステップ不要
+  （R6.1/Req 11.3）。push/PR paths に first-class surface として `patterns/rag/**`
+  明示追加（`patterns/**` で既に被覆だが contracts 前例に倣う）。
+- **12.3 patterns-integration-ollama.yml**: PR paths に `patterns/rag/**` 追加、
+  env に `OLLAMA_EMBED_MODEL_NAME: granite-embedding:278m`（granite4.1 生成 LLM と
+  ファミリ parity・明示タグピン＝model-ID 衛生）を追加、生成 LLM と同形の skip-if-cached
+  埋め込み pull ステップを追加。cache key に埋め込みモデルを併記。R11.4 の別ジョブ隔離は
+  先取りせず、daemon ウォームアップ実測に委譲（Task 0 spike で unit は非発動と確定済み）。
+- **検証**: 両 YAML を PyYAML で parse し、rag ジョブ / paths / env / 埋め込み pull
+  ステップの存在をアサート（全パス）。boundary 3 ファイルのみ、ルート ci.yml 無変更。
 
 ---
 

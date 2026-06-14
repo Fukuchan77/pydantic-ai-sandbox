@@ -24,6 +24,10 @@ on:
       # first-class CI surface (the single source of truth the lanes import),
       # so it is listed explicitly per Req 12.1.
       - 'patterns/contracts/**'
+      # The RAG application lane (Spec 007-2b Req 11.1) is an independent lane
+      # at patterns/rag/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/rag/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   pull_request:
@@ -34,6 +38,10 @@ on:
       # first-class CI surface (the single source of truth the lanes import),
       # so it is listed explicitly per Req 12.1.
       - 'patterns/contracts/**'
+      # The RAG application lane (Spec 007-2b Req 11.1) is an independent lane
+      # at patterns/rag/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/rag/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -131,5 +139,54 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 10.2: dependency CVE scan for the shared package too.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # The RAG application lane (Spec 007-2b Req 1.1) is an independent uv project
+  # at patterns/rag/ — depth 1 under patterns/, a sibling of frameworks/, NOT
+  # an entry in the lane matrix above (ADR-1 / Task 0 spike: 119 pkg, no torch /
+  # onnxruntime). Like contracts it gets a dedicated job mirroring the lane gates
+  # (Req 11.1). The unit suite is offline and hermetic: HF_HUB_OFFLINE=1 is forced
+  # in patterns/rag/pyproject.toml and HybridChunker runs against a deterministic
+  # word tokenizer, so NO Hugging Face model pre-fetch step is needed (R6.1 /
+  # Req 11.3). Coverage floor is the sibling-lane parity 98 (NFR-4).
+  rag:
+    name: rag
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/rag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads patterns/rag/.python-version (3.13, capped to dodge 3.14 wheel
+      # gaps in the Docling/LlamaIndex trees) and provisions the matching
+      # interpreter — no mise needed (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/rag/uv.lock
+
+      - name: Sync rag dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Offline + hermetic: HF_HUB_OFFLINE=1 (pyproject env) keeps the real
+      # HybridChunker tokenizer off the Hub; no model pre-fetch needed (Req 11.3).
+      - name: pytest (offline, coverage floor 98)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 005 Req 7.2 / 007-2b Req 11.1: per-lockfile dependency CVE scan.
       - name: pip-audit
         run: uv run pip-audit
