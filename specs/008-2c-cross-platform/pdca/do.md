@@ -368,3 +368,40 @@ $ uv run pyright               → 0 errors, 0 warnings, 0 informations
 
 - 被覆はテスト追加のみのため src 不変（app.py 80% の未被覆分岐は Task 6/7/8 が exercise、
   98 への ratchet は Task 9.2）。回帰なし。
+
+---
+
+## Task 6: エラー終端の検証（test-only、Wave 4）— 2026-06-14
+
+**スコープ**: R4.3（実行中エラーを `error` イベントで配信しストリーム終端、silent 打ち切り禁止）/
+R4.4（終端マーカーで明確終了）を `patterns/sse/tests/unit/test_error_termination.py` に立証。
+検証対象の `app.py` `except Exception -> ErrorEvent` 分岐は Task 4.2 実装済み、Task 6 は純テスト。
+
+**実装**: 5 ケース — `fail_at=2`（部分配信＋error 終端・completed 非到達）/ `fail_at=1` の
+fail_message 到達（`ErrorEvent` 件数==1、swallow でない）/ `fail_at=4`（唯一の終端マーカー・
+後続なし）/ `fail_at=0`（即時失敗でも単一 error 終端）/ message 1 行要約（`\n`/`Traceback` 不在）。
+
+### 学び
+- **silent swallow は StopIteration へ波及**: error 分岐を `pass` 化すると `ErrorEvent` 不配信に
+  加え、generator が yield せず終了 → sse-starlette 経由で `coroutine raised StopIteration` の
+  loop error。5 ケース全 RED。アサートは「error 不在」を確実に bite（vacuous でない）。
+
+### 検証ゲート（証跡）
+
+```
+# RED（app.py error 分岐を一時 silent swallow へ改変し load-bearing を立証）
+$ uv run pytest --no-cov tests/unit/test_error_termination.py  → 5 failed in 0.22s
+   （RuntimeError: coroutine raised StopIteration / error 不配信）
+
+# GREEN（app.py revert 後）
+$ uv run pytest --no-cov tests/unit/test_error_termination.py -v  → 5 passed in 0.19s
+
+# レーン全体ゲート
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 9 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 24 passed（19→+5）/ TOTAL 90.36%（fail_under=85 充足）
+```
+
+- error 変換分岐が exercise され lane coverage 86.75%→90.36%。残る未被覆（span / is_disconnected
+  break / CancelledError 再 raise / max-events）は Task 7・8 が exercise、98 ratchet は Task 9.2。回帰なし。
