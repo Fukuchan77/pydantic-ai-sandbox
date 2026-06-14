@@ -374,7 +374,7 @@ _Requirements:_ 6.1, 6.2, 6.3
 
 ---
 
-## 8. (P) 可観測性の配線と span 検証
+## 8. (P) 可観測性の配線と span 検証 ✅
 
 配信対象 routing に揃えた計装をブートストラップし、リクエスト→実行時に span≥1 が生成される
 ことをオフラインで検証する。
@@ -383,13 +383,13 @@ _Boundary:_ `patterns/sse/src/patterns_sse/observability.py`, `patterns/sse/test
 _Depends:_ 1, 4
 _Requirements:_ 7.1, 7.2, 7.3
 
-- [ ] 8.1 exporter 優先チェーン（注入 > `OTEL_EXPORTER_OTLP_ENDPOINT` > no-op）を検証する
+- [x] 8.1 exporter 優先チェーン（注入 > `OTEL_EXPORTER_OTLP_ENDPOINT` > no-op）を検証する
   テストを先行作成（Red）してから、`configure_tracing(exporter=None) -> TracerProvider` を
   実装する（pydantic-ai レーンから複製、ADR-5）。
   _Boundary:_ `patterns/sse/src/patterns_sse/observability.py`, `patterns/sse/tests/unit/test_observability.py`
   _Depends:_ 1
   _Requirements:_ 7.1
-- [ ] 8.2 `InMemorySpanExporter` 注入で `create_app` 駆動時にアプリ span（例 `sse.stream`）が
+- [x] 8.2 `InMemorySpanExporter` 注入で `create_app` 駆動時にアプリ span（例 `sse.stream`）が
   1 つ以上生成されることを検証するテストを作成する（末端 span の存在のみ確認し、属性集計は
   アサートしない、R7.3）。
   _Boundary:_ `patterns/sse/tests/unit/test_observability.py`
@@ -398,7 +398,27 @@ _Requirements:_ 7.1, 7.2, 7.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **`observability.py` は ADR-5 複製（framework instrumentor なし）**: `configure_tracing(
+  exporter=None) -> TracerProvider` を pydantic-ai/rag レーンと同形で実装。優先チェーンは
+  注入 exporter（`SimpleSpanProcessor` で同期可視化）> `OTEL_EXPORTER_OTLP_ENDPOINT`（OTLP を
+  遅延 import + `BatchSpanProcessor`）> no-op。本レーンは framework instrumentor を持たず、
+  per-request span は `app.py` の `_open_span`（`sse.stream`）が自前で開く（NFR-3 / R7.3）。
+- **8.1 優先チェーンをオフライン検証（4 ケース）**: (a) 注入 exporter が emit span を捕捉、
+  (b) env 設定下でも注入が優先され OTLP 分岐を取らない、(c) env のみ設定時に OTLP exporter を
+  構築（遅延 import した `OTLPSpanExporter` を in-memory 返却の recorder に monkeypatch、
+  collector 不要・ネットワーク 0）、(d) 双方未設定で processor 0 件・emission は無害。env/no-op
+  の判別は public API が無いため `_active_span_processor._span_processors` 件数を読む
+  （`# pyright: ignore[reportPrivateUsage]`、`SLF` は ruff select 外で noqa 不要）。
+- **8.2 は Task 4 の span 配線を exercise する純テスト**: `configure_tracing(InMemorySpanExporter())`
+  を `create_app(tracer_provider=...)` に注入し ASGITransport 駆動 → `sse.stream` span が
+  `get_finished_spans()` に 1 つ以上。`SimpleSpanProcessor` 同期 export によりレスポンス確定
+  時点で span は終端済み（race なし、R7.2/7.3 は存在のみ確認）。
+- **load-bearing RED→GREEN（8.2）**: `app.py` `_open_span` を一時的に常時 `nullcontext()` 返却へ
+  改変 → span test が `assert spans` で RED（`assert ()`）を確認後 revert。アサートが実際に
+  bite することを証跡化（Task 5/6/7 と同 idiom）。
+- **被覆**: span 分岐が exercise され lane coverage 93.98%→97.03%（floor 85 充足）。
+  `observability.py` 100%。残未被覆は `app.py` L106（max-events backstop）/ L113→exit
+  （aclose 無し分岐）のみで Task 9.2 の 98 ratchet 対象。回帰なし（既存 28 件全 green）。
 
 ---
 
