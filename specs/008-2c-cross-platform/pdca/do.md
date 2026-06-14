@@ -328,3 +328,43 @@ $ uv run pytest --cov          → 16 passed in 0.23s
 - **被覆の中間状態**: `app.py` 未被覆分岐（is_disconnected break / CancelledError 再 raise /
   error 変換 / max-events / span 有効化）は Wave 4（Task 6 エラー終端・Task 7 切断・Task 8 span）が
   exercise、98 への ratchet は Task 9.2。floor 85 は充足、回帰なし。
+
+---
+
+## Task 5.1 — token イベントの決定論検証（Wave 4 / R5.3・NFR-2）
+
+**成果物**: `patterns/sse/tests/unit/test_token_determinism.py`（テストのみ、production 無改変）。
+
+### 実装
+
+R5.3 の射程を `token` レーンへ絞った検証テスト 3 本を ASGITransport 経由で追加:
+1. `test_token_increments_match_the_fixed_chunk_list` — 明示チャンク列 `("To","ken"," stream")`
+   への完全一致（fake が固定チャンクを verbatim 供給する＝join/再分割で増分境界が揺れない）。
+2. `test_token_increments_are_byte_identical_across_runs` — 同一 app 3 連続駆動で増分列が
+   byte 一致（+ `len>=2` で空マッチ防御）。
+3. `test_token_increments_are_stable_across_independent_sources` — 独立構築 source × 異なる
+   query で一致（台本は query 非依存、NFR-2）。
+
+既存 `test_stream_order::test_stream_is_deterministic_across_runs`（全列等価）との差別化:
+本 Task は `TokenEvent.text` の増分列のみを isolate し、語彙でなく増分境界の安定を pin する。
+
+### 検証ゲート（証跡）
+
+```
+# RED（assertion が bite することの立証 / 増分期待値を一時誤設定）
+$ uv run pytest --no-cov tests/unit/test_token_determinism.py -q
+E  AssertionError: assert ['To', 'ken', ' stream'] == ['To', 'ken']
+   1 failed, 2 passed in 0.20s
+
+# GREEN（期待値是正後）
+$ uv run pytest --no-cov tests/unit/test_token_determinism.py -q  → 3 passed in 0.18s
+
+# レーン全体ゲート
+$ uv run pytest --cov          → 19 passed（16→+3）/ TOTAL 86.75%（fail_under=85 充足）
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 8 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+```
+
+- 被覆はテスト追加のみのため src 不変（app.py 80% の未被覆分岐は Task 6/7/8 が exercise、
+  98 への ratchet は Task 9.2）。回帰なし。
