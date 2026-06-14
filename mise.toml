@@ -53,6 +53,93 @@ run = "uv run pre-commit run --all-files --hook-stage manual"
 description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
 run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
 
+# ---------------------------------------------------------------------------
+# patterns/ framework lanes (Spec 005 Req 9.1). Each lane is an independent
+# uv project (plan AD-1); these tasks loop over them with `set -e` so the
+# first failing lane stops the run. CI's patterns-ci.yml matrix runs the
+# same uv commands per-lane instead (one lane's breakage must not mask the
+# others — plan §6).
+#
+# The shared `patterns/contracts` package (Spec 006-2a Req 1.1) is processed
+# FIRST, before the lane loop: it is the single source of truth the lanes
+# import via `tool.uv.sources`, so its gate must pass before any lane that
+# depends on it (Req 10.2 / 13.1). With `set -e`, a contracts failure stops
+# the run before the lanes execute.
+# ---------------------------------------------------------------------------
+
+[tasks."patterns:setup"]
+description = "Sync the contracts package and all pattern lanes (uv resolves each lane's .python-version)."
+run = """
+set -e
+echo "== setup patterns/contracts"; (cd patterns/contracts && uv sync --all-groups)
+for d in patterns/frameworks/*/; do
+  echo "== setup $d"; (cd "$d" && uv sync --all-groups)
+done
+"""
+
+[tasks."patterns:lint"]
+description = "Ruff lint across the contracts package and all pattern lanes."
+run = """
+set -e
+echo "== lint patterns/contracts"; (cd patterns/contracts && uv run ruff check .)
+for d in patterns/frameworks/*/; do
+  echo "== lint $d"; (cd "$d" && uv run ruff check .)
+done
+"""
+
+[tasks."patterns:format"]
+description = "Ruff format verification across the contracts package and all pattern lanes."
+run = """
+set -e
+echo "== format patterns/contracts"; (cd patterns/contracts && uv run ruff format --check .)
+for d in patterns/frameworks/*/; do
+  echo "== format $d"; (cd "$d" && uv run ruff format --check .)
+done
+"""
+
+[tasks."patterns:typecheck"]
+description = "Pyright strict across the contracts package and all pattern lanes (per-lane venv/python)."
+run = """
+set -e
+echo "== typecheck patterns/contracts"; (cd patterns/contracts && uv run pyright)
+for d in patterns/frameworks/*/; do
+  echo "== typecheck $d"; (cd "$d" && uv run pyright)
+done
+"""
+
+[tasks."patterns:test"]
+description = "Offline unit suites across the contracts package and all pattern lanes (contracts floor 85, lanes 98)."
+run = """
+set -e
+echo "== test patterns/contracts"; (cd patterns/contracts && uv run pytest --cov)
+for d in patterns/frameworks/*/; do
+  echo "== test $d"; (cd "$d" && uv run pytest --cov)
+done
+"""
+
+[tasks."patterns:audit"]
+description = "pip-audit for the contracts package and per lane lockfile (Spec 005 Req 7.2 / 006-2a Req 13.1)."
+run = """
+set -e
+echo "== audit patterns/contracts"; (cd patterns/contracts && uv run pip-audit)
+for d in patterns/frameworks/*/; do
+  echo "== audit $d"; (cd "$d" && uv run pip-audit)
+done
+"""
+
+[tasks."patterns:check"]
+description = "Aggregate lane quality gate (lint / format / typecheck / test)."
+depends = ["patterns:lint", "patterns:format", "patterns:typecheck", "patterns:test"]
+
+[tasks."patterns:test:integration"]
+description = "Gated Ollama integration lanes (RUN_INTEGRATION_PATTERNS=1)."
+run = """
+set -e
+for d in patterns/frameworks/*/; do
+  echo "== integration $d"; (cd "$d" && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
+done
+"""
+
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
 run = "uv run uvicorn pydantic_ai_sandbox.main:app --reload --env-file .env"

@@ -71,6 +71,43 @@ updates:
     # "Supply-chain watch operational rule" for the manual review checklist).
 
   # ---------------------------------------------------------------------------
+  # patterns/ framework lanes (Spec 005 Req 7.2 / plan §7). Each lane is an
+  # independent uv project with its own lockfile; `directories` fans the same
+  # weekly policy out to all three. pydantic-ai stays ungrouped for the same
+  # V2-Beta review reason as the root entry; beeai-framework is pinned exact
+  # (plan §8 R-1: the test fake subclasses ChatModel internals), so its bumps
+  # must surface as individual PRs too.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: pip
+    directories:
+      - "/patterns/frameworks/pydantic-ai"
+      - "/patterns/frameworks/beeai"
+      - "/patterns/frameworks/llamaindex"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:33"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "python"
+      - "patterns"
+    commit-message:
+      prefix: "deps(patterns)"
+      include: scope
+    groups:
+      patterns-minor-and-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "pydantic-ai*"
+          - "beeai-framework"
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
   # GitHub Actions pinned in .github/workflows/*.yml.
   # ---------------------------------------------------------------------------
   - package-ecosystem: github-actions

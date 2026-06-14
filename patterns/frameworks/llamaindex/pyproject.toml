@@ -1,0 +1,109 @@
+# patterns/frameworks/llamaindex — LlamaIndex Workflows lane (Spec 005 Req 1.1/1.2).
+#
+# Independent uv project (plan AD-1). Python is capped at 3.13 to dodge 3.14
+# wheel gaps across LlamaIndex's transitive dependency tree (plan AD-5).
+#
+# Security floors (patterns/SECURITY-NOTES.md):
+#   * llama-index-readers-web is NOT a dependency (CVE-2025-1752 recursion DoS
+#     affected <0.3.6); add it only with that floor.
+#   * llama-stack is FORBIDDEN (CVE-2024-50050 pickle RCE).
+#   * Vector-store integrations (CVE-2025-1793 SQLi) are out of scope until
+#     the Docling RAG iteration.
+
+[project]
+name = "patterns-llamaindex"
+version = "0.1.0"
+description = "Cross-framework agent patterns — LlamaIndex Workflows implementations (routing, orchestrator-workers)."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # Shared contract package — the single source of truth for the six
+    # patterns' I/O models, Literal vocabularies, and tool abstraction
+    # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
+    # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
+    "patterns-contracts",
+    "llama-index-core>=0.14",
+    # Ollama backend for the gated integration lane (Req 5).
+    "llama-index-llms-ollama",
+    "pydantic>=2",
+    # Tracing surface (Req 6.1): OpenInference instruments LlamaIndex into
+    # any OTel TracerProvider.
+    "openinference-instrumentation-llama-index",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_llamaindex"]
+
+# Path dependency to the shared contracts package (plan §lane wiring). Editable
+# so contract edits land without a re-sync; `../../contracts` resolves from
+# patterns/frameworks/llamaindex/ to patterns/contracts/. The contracts package
+# floors at >=3.13, so it installs cleanly under this lane's 3.13 interpreter.
+[tool.uv.sources]
+patterns-contracts = { path = "../../contracts", editable = true }
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_llamaindex"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+# LlamaIndex ships partial/loose type stubs; strict mode stays on for
+# first-party code while unknown-member noise from the library is reported
+# (not silenced) — fix sites use targeted ignores with rationale.
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/patterns_llamaindex"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+# Ratcheted 85 -> 98 (Spec 006-2a Req 7.4 / NFR-4): with all six patterns the
+# lane lands at ~99% offline; floor lifted to the root app's level to lock in
+# the gain. Raise further as coverage climbs.
+fail_under = 98
+show_missing = true
+skip_covered = false
