@@ -299,7 +299,7 @@ _Boundary:_ `patterns/sse/tests/unit/test_error_termination.py`
 _Depends:_ 4
 _Requirements:_ 4.3, 4.4
 
-- [ ] 6.1 `ScriptedEventSource` の `fail_at` で実行中エラーを誘発し、ストリームが `error`
+- [x] 6.1 `ScriptedEventSource` の `fail_at` で実行中エラーを誘発し、ストリームが `error`
   イベントで終端すること・silent 打ち切りが起きないこと・終端マーカーで明確に終わることを
   検証する。
   _Boundary:_ `patterns/sse/tests/unit/test_error_termination.py`
@@ -308,7 +308,22 @@ _Requirements:_ 4.3, 4.4
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **テストのみ追加（Task 4 実装を exercise）**: 検証対象の `app.py` の
+  `except Exception -> ErrorEvent` 分岐（R4.3）は Task 4.2 で実装済み。Task 6 は
+  `ScriptedEventSource(fail_at=N)` で実行中エラーを誘発し、ASGITransport 経由の配信
+  ワイヤ列を `parse_sse_events` で逆写像して契約を立証する純テスト成果物。
+- **5 ケース構成**: (a) `fail_at=2` で `step_started→tool_called→error` の部分配信＋終端、
+  `completed` 非到達（R4.3）、(b) `fail_message` が `"RuntimeError: <msg>"` 要約として
+  到達し silent swallow でない（`ErrorEvent` 件数 == 1）、(c) `fail_at=4` でトークン途中
+  失敗 → `error` が唯一の終端マーカー・後続なし（R4.4）、(d) `fail_at=0` の即時失敗でも
+  単一 `error` で明確終端（R4.4 エッジ）、(e) `message` が 1 行要約（`\n`/`Traceback` 不在、
+  R8.3 補強）。
+- **load-bearing RED→GREEN**: `app.py` の error 分岐を一時的に silent swallow
+  （`_ = exc` / yield 削除）へ改変し 5 ケース全 RED を確認後に revert。アサートが
+  実際に bite することを証跡化（Task 5 と同 idiom）。
+- **被覆**: error 変換分岐が exercise され lane coverage 86.75%→90.36%（floor 85 充足）。
+  残る未被覆（span 有効化 / is_disconnected break / CancelledError 再 raise / max-events）は
+  Task 7・8 が exercise、98 への ratchet は Task 9.2。
 
 ---
 
