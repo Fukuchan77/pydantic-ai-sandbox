@@ -422,7 +422,7 @@ _Requirements:_ 7.1, 7.2, 7.3
 
 ---
 
-## 9. オフライン hermetic 保証とカバレッジゲート
+## 9. オフライン hermetic 保証とカバレッジゲート ✅
 
 全 unit がネットワーク I/O ゼロで完走することを保証し、レーンの `fail_under` を ratchet で
 引き上げて充足する。
@@ -431,13 +431,13 @@ _Boundary:_ `patterns/sse/tests/unit/test_smoke.py`, `patterns/sse/pyproject.tom
 _Depends:_ 4, 5, 6, 7, 8
 _Requirements:_ 5.1, 5.4
 
-- [ ] 9.1 スモークに hermetic ガードを追加する（`block_network` フィクスチャで台本フェイク
+- [x] 9.1 スモークに hermetic ガードを追加する（`block_network` フィクスチャで台本フェイク
   一巡が実ソケットへ到達せず完走し、到達時は loud-fail）。ガードが飾りでないことを load-bearing
   テストで立証する。
   _Boundary:_ `patterns/sse/tests/unit/test_smoke.py`
   _Depends:_ 4, 5, 6, 7, 8
   _Requirements:_ 5.1
-- [ ] 9.2 `fail_under` を兄弟レーンの parity（005/006 フロア 85 起点・目標 98、被覆困難な
+- [x] 9.2 `fail_under` を兄弟レーンの parity（005/006 フロア 85 起点・目標 98、被覆困難な
   グルーが残れば ratchet で着地し rationale を Implementation Notes に記録、research.md R-4）まで
   引き上げ、`mise run patterns:test` 経由でレーンカバレッジ充足を確認する。
   _Boundary:_ `patterns/sse/pyproject.toml`
@@ -446,7 +446,31 @@ _Requirements:_ 5.1, 5.4
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **9.1 hermetic ガードは RAG レーン idiom の複製**: `block_network`（monkeypatch で
+  `socket.socket.connect`/`connect_ex` + `socket.getaddrinfo` を差し替え）は AF_INET/AF_INET6 の
+  reach のみ `NetworkReachError` で loud-fail し、AF_UNIX 等（asyncio self-pipe）は実体へ委譲。
+  ASGITransport はインプロセス駆動でインターネットソケットを開かないため一巡はガード下で完走
+  （R5.1）。`test_block_network_guard_loud_fails_on_internet_connect` がガード非空虚性の
+  load-bearing 証跡（実 AF_INET connect が I/O 前に遮断される）。
+- **fake one-pass**: `create_app(event_source=ScriptedEventSource())` を ASGITransport で駆動し
+  `parse_sse_events` で終端 `completed` 到達（offline 完走）を立証。新規テストファイル増設は
+  Task 9 境界外のため、配信パイプライン全体の hermetic 検証はスモークに集約。
+- **runaway-backstop で L106 被覆 → 98 parity 達成**: Task 8 で残った未被覆 `app.py:106`
+  （R-2 max-events backstop）を、`tokens` を `_MAX_EVENTS+1` 件にした台本（`completed` が cap の
+  外側に来る非終端的供給）で exercise。terminal marker を出さない producer でも offline run が
+  *完走*する（ASGITransport を wedge しない）ことを立証。lane coverage 97.03%→**99.01%**。
+- **load-bearing RED→GREEN（境界 net-zero）**: `app.py` の backstop break を一時 neuter
+  （`and False`）→ runaway テストが `assert 1004 == 1000` で RED を確認後 revert（app.py diff 0、
+  Task 5/6/8 と同 idiom）。アサートが backstop に実際 bite することを証跡化。
+- **9.2 ratchet 着地 = 98（actual 99.01%、1pt バッファ）**: 兄弟レーン parity（pydantic-ai/rag）
+  へ `fail_under` を 85→98。残る唯一の未被覆分岐 `app.py:113->exit`（producer-release `finally`
+  の `aclose is None` アーム）は実務上到達不能 — 注入される `EventSource`（台本フェイク・Task 10 の
+  pydantic-ai アダプタ双方）はいずれも `aclose` を持つ async generator。当該分岐を取るためだけの
+  非 generator イテレータは作為的なため、research.md R-4 に従い 100 への brittle な ratchet では
+  なく「被覆困難なグルー」として rationale 明記の上で残置（`pyproject.toml` コメントに恒久記録）。
+- **mise 配線は Task 12.1 へ**: `mise run patterns:test` への sse レーン明示行追加は境界
+  （`mise.toml`）が Task 12.1 の所掌。本タスクはレーンローカル gate（`uv run pytest --cov`、
+  mise が per-lane に呼ぶ実体と同一）で `fail_under=98` 充足を検証。
 
 ---
 
