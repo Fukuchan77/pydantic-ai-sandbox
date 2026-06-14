@@ -525,7 +525,7 @@ _Boundary:_ `patterns/rag/tests/integration/test_ollama_e2e.py`
 _Depends:_ 7
 _Requirements:_ 7.1, 7.2, 7.3
 
-- [ ] 10.1 結合テストを作成する（未設定時 skip、`OLLAMA_BASE_URL`/`OLLAMA_MODEL_NAME`/
+- [x] 10.1 結合テストを作成する（未設定時 skip、`OLLAMA_BASE_URL`/`OLLAMA_MODEL_NAME`/
   `OLLAMA_EMBED_MODEL_NAME` を env から読む、アサートは契約レベルに限定: citations≥1 /
   各 citation が既知ソースを指す / 正確なテキスト一致は禁止）。
   _Boundary:_ `patterns/rag/tests/integration/test_ollama_e2e.py`
@@ -533,6 +533,30 @@ _Requirements:_ 7.1, 7.2, 7.3
   _Requirements:_ 7.1, 7.2, 7.3
 
 ### Implementation Notes
+
+実装（Task 10, 2026-06-14 / llama-index-{embeddings,llms}-ollama, CPython 3.13.7）:
+
+- **ゲートと parity（R7.1）**: `pytestmark = skipif(RUN_INTEGRATION_PATTERNS != "1")` で
+  モジュール全体をゲート。兄弟 `frameworks/llamaindex/tests/integration/test_ollama_e2e.py`
+  と同一の skip 慣用句・`_base_url()`（`/v1` 剥がし）・遅延 import 構造に揃え、`mise run
+  patterns:test:integration` の `RUN_INTEGRATION_PATTERNS=1` 配線（Task 12.1/12.3 所有）に乗る。
+- **実 Ollama 経路 e2e（R7.2/R7.3）**: 単一テストが「実 `HybridChunker`（オフライン
+  `_WordTokenizer`）→ 実 `OllamaEmbedding`（`OLLAMA_EMBED_MODEL_NAME`）→ 実 `as_retriever`
+  → 実 `Ollama` LLM（`OLLAMA_MODEL_NAME`）→ `run_rag`」を貫通。モデル同定は env 専属
+  （`OLLAMA_BASE_URL`/`OLLAMA_MODEL_NAME`/`OLLAMA_EMBED_MODEL_NAME`）でハードコードなし（R7.3）。
+- **契約レベルアサートに限定（R7.2）**: `answer.citations` ≥1 / 各 `citation.source` が注入
+  ソース `"ollama-e2e"` 集合に所属 / 各 `citation.chunk_id` がインデックス済み id 集合に所属 /
+  `answer.answer.strip()` 非空 — **正確なテキスト一致は皆無**（実モデルは非決定論）。`run_rag` 自身が
+  empty/dangling を loud-fail するため、アサート到達時点で接地は立証済みだが、source 既知性は
+  `run_rag`（chunk_id 健全性のみ検証）が見ない契約面なので明示固定して飾りでないことを担保。
+- **チャンク化はプロバイダ非依存・オフライン維持**: 埋め込み/生成のみ Ollama に触れ、チャンク化は
+  smoke と同型の決定論 `_WordTokenizer` を注入（`HF_HUB_OFFLINE=1` は本レーンでも全 run 強制のため
+  tiktoken/HF DL を回避）。固定資産は unit と共有の `sample.docling.json`（ADR-3）。
+- **TDD/検証**: RED（`tests/integration` 不在＝0 collected）→ 実装後、未ゲート時 **1 skipped**
+  でゲートが機能（offline 決定論検証）。lane 全体 **58 passed / 1 skipped**・ruff check / format /
+  pyright strict 全グリーン、coverage gate **98 充足**（skip の結合は unit 被覆に非影響）。live-green は
+  ゲート env + 実 daemon + granite/embed pull を要し CI（Task 12.3）の所有 — 兄弟レーンの gated test
+  検証慣行と同一。boundary 1ファイルのみ、ルート・他レーン無変更。
 
 ---
 
