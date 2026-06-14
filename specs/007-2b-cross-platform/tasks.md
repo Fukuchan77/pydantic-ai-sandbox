@@ -214,12 +214,12 @@ _Boundary:_ `patterns/rag/src/patterns_rag/indexing.py`, `patterns/rag/tests/sup
 _Depends:_ 1, 3
 _Requirements:_ 3.1, 3.2, 6.3
 
-- [ ] 4.1 `HashEmbedding(BaseEmbedding)` フェイクを作成する（内容→ハッシュ→固定次元の
+- [x] 4.1 `HashEmbedding(BaseEmbedding)` フェイクを作成する（内容→ハッシュ→固定次元の
   決定論ベクトル）。
   _Boundary:_ `patterns/rag/tests/support/fake_embedding.py`
   _Depends:_ 1
   _Requirements:_ 3.2, 6.3
-- [ ] 4.2 `build_index(chunks, *, embed_model)` を実装する。`ChunkRecord`→`TextNode`
+- [x] 4.2 `build_index(chunks, *, embed_model)` を実装する。`ChunkRecord`→`TextNode`
   （`id_=chunk_id`, metadata=`{source,locator}`）変換、埋め込み DI seam、in-memory
   `SimpleVectorStore` 既定（CVE-2025-1793 回避）。`HashEmbedding` 注入のテストを先行作成。
   _Boundary:_ `patterns/rag/src/patterns_rag/indexing.py`
@@ -227,6 +227,33 @@ _Requirements:_ 3.1, 3.2, 6.3
   _Requirements:_ 3.1, 3.2
 
 ### Implementation Notes
+
+実装（Task 4, 2026-06-13 / llama-index-core 0.14.22, CPython 3.13.7）:
+
+- **HashEmbedding フェイク（R3.2/R6.3）**: `BaseEmbedding` 派生。`dim`（既定64）を pydantic
+  フィールド化し、`hashlib.sha256(text).digest()` を seed に counter ブロックで `dim` 個の
+  float`[0,1]` へ決定論展開。**builtin `hash()` ではなく sha256** — `PYTHONHASHSEED` 由来の
+  プロセス間揺れを排し index 再現性を担保。抽象3メソッド（`_get_text_embedding` /
+  `_get_query_embedding` / `_aget_query_embedding`）のみ実装（`_aget_text_embedding` は
+  base 既定で十分・build_index は同期経路）。ゼロネットワーク・ゼロ資産。
+- **build_index（R3.1/R3.2）**: `ChunkRecord`→`TextNode`（`id_=chunk_id`,
+  `metadata={source,locator}`, `text`）変換し `VectorStoreIndex` を構築。埋め込みは
+  `embed_model` DI seam で受け、unit は HashEmbedding 注入。
+- **in-memory SimpleVectorStore を能動的に所有（R9.1）**: 上流既定に委ねず
+  `StorageContext.from_defaults(vector_store=SimpleVectorStore())` で明示構築（CVE-2025-1793
+  回避＝外部ベクタ DB 不混入）。`test_build_index_uses_in_memory_simple_vector_store` が
+  isinstance で固定し、上流既定変化を回帰検知。
+- **pyright strict narrowing**: `index.vector_store` の静的型は `BasePydanticVectorStore`
+  （`.data` 無）。`embedding_dict` 検証テストで `assert isinstance(vs, SimpleVectorStore)` に
+  narrow して `.data.embedding_dict`（`dict[str,list[float]]`）へ到達（Task 3 の DocMeta
+  narrow と同型）。
+- **テスト配置の補足**: 主タスク boundary は `indexing.py` / `fake_embedding.py` の2点だが、
+  TDD 必須（4.2「テストを先行作成」）に従い `tests/unit/test_indexing.py` を新設（RED→GREEN）。
+  HashEmbedding 決定論・固定次元・build_index のノード/メタ/埋め込み/空コーパスを被覆。
+- **検証**: RED（`ModuleNotFoundError: patterns_rag.indexing`）→ 9 新規テスト green。
+  ruff/format/pyright strict グリーン、lane 23 passed・coverage 95.59%（indexing.py 100%,
+  gate 85）。HF_HUB_OFFLINE=1 下・ネットワークゼロ。boundary 3ファイル（+ TDD テスト）のみ、
+  ルート・他レーン無変更。
 
 ---
 
