@@ -129,3 +129,71 @@ pydantic 2.13.4 / pydantic-ai-slim 2.0.0b7(dev のみ)。
 
 > レーンの mise/CI 配線は Task 12。本 gate はレーンローカル `uv run`（patterns:* 配線前の
 > 正規検証）で実施。
+
+---
+
+## Task 2 — (P) shared-contracts への SSE 判別共用体追加 ✅
+
+実施日: 2026-06-14 / 状態: **完了（2.1 / 2.2 green）→ Wave 2（Task 3 events.py）着手可**
+
+TDD: 契約テスト先行（Red）→ `sse.py` + `__init__` 再エクスポート（Green）。
+
+### Do（実施内容）
+
+- **2.1 Red 先行**: `patterns/contracts/tests/unit/test_sse_contracts.py`（7 ケース: 再エクスポート /
+  各モデルのフィールド集合〔R8.3 最小設計〕/ 判別子 tag 固定 / 判別共用体ディスパッチ /
+  `model_dump_json` ラウンドトリップ / 未知 tag 棄却 / 判別子欠落棄却）を作成し、
+  `ImportError: cannot import name 'CompletedEvent'` を確認（collection error = Red）。
+- **2.1 Green**: `src/patterns_contracts/sse.py` に 5 モデル + `SseEvent` を定義。各 `type` は
+  既定値付き `Literal`、`args_json` / `message` は機微情報非掲載のサニタイズ済 `str`（R8.3、
+  サニタイズは producer 責務でフィールド制約にはしない）。`SseEvent = Annotated[A | B | ...,
+  Field(discriminator="type")]`。
+- **2.2 Green**: `__init__.py` に 5 モデル + `SseEvent` の import と `__all__` 追記（アルファベット
+  順、既存スタイル踏襲）。新テスト 7 件 green。
+
+### エラーと根本原因（blind retry 禁止に従い記録）
+
+- **症状**: `__all__` への 5 モデル追記後、`test_contract_drift.py` の 4 ケースが赤
+  （class set / field sets / literal vocab / one-README）。
+- **根本原因（defect ではない）**: drift テストは `patterns_contracts.__all__` の全 BaseModel が
+  いずれかの登録済 README 正本ブロックに記載されることを要求する。SSE README
+  （`patterns/sse/README.md`）作成と `_README_PATHS["sse"]` 登録は **Task 11**（Task 4 依存の
+  ため現時点着手不可）。差分は新規 5 モデルのみで既存7パターンは両側不変（回帰なし）。
+- **対応**: ユーザ判断で **Task 2 境界を厳守**（README/登録へ越境しない）。当該赤は I-5 +
+  wave 計画が予定した中間状態として保全し、Task 11 で構造的に解消（R2.4 充足）。symptom
+  （drift 赤）を README スタブで糊塗せず、原因（Task 11 未了）を明示記録。
+
+### 学び（Act へ）
+
+1. **加法的契約追加の固有テンション**: 共有契約パッケージへモデルを足すと、README 登録
+   （別タスク・別境界）が完了するまで単一点 drift テストが赤になる。wave 計画はこれを織り込み
+   済みだが、`/sdd-impl` の per-task 検証ゲートとは緊張する。per-task 完了判定は「当該タスク
+   自身の deliverable が green」で行い、下流結合由来の赤は根本原因 + 解消タスクを明示する。
+2. **判別共用体は drift パーサ無改修で対称スキップ**（I-5 実測整合）。`Annotated[Union, Field]`
+   は両側で `Literal`/モデルクラス判定に掛からずスキップ、判別子 `type` のみ `field_literals`
+   で `event:` 名語彙としてロックされる。
+
+### 検証ゲート（証跡）
+
+```
+# 2.1 Red（実装前）
+$ uv run --no-sync pytest tests/unit/test_sse_contracts.py --no-cov
+E  ImportError: cannot import name 'CompletedEvent' from 'patterns_contracts'
+   1 error in 0.12s
+
+# 2.1/2.2 Green（実装後）
+$ uv run --no-sync pytest tests/unit/test_sse_contracts.py --no-cov   → 7 passed in 0.07s
+$ uv run --no-sync ruff check .          → All checks passed!
+$ uv run --no-sync ruff format --check . → 12 files already formatted
+$ uv run --no-sync pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run --no-sync pytest tests/unit/test_sse_contracts.py --cov=patterns_contracts.sse
+   src/patterns_contracts/sse.py  22  0  0  0  100%   → 7 passed
+
+# 既知の中間状態（Task 11 で解消）
+$ uv run --no-sync pytest --no-cov
+   4 failed, 15 passed   # test_contract_drift の 4 件のみ。差分 = 新規 5 SSE モデル
+                         # （既存7パターンは README==パッケージ両側で不変、回帰なし）
+```
+
+> 完全な `mise run patterns:test`（lane coverage）green 化は Task 11（SSE README 作成 +
+> `_README_PATHS` 登録）完了時。Task 2 の deliverable 自体は上記の通り green。

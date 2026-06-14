@@ -116,7 +116,7 @@ _Boundary:_ `patterns/contracts/src/patterns_contracts/sse.py`, `patterns/contra
 _Depends:_ none
 _Requirements:_ 2.1, 2.2, 2.4, 8.3
 
-- [ ] 2.1 イベント契約モデル（`StepStartedEvent{type,step}` / `ToolCalledEvent{type,tool,
+- [x] 2.1 イベント契約モデル（`StepStartedEvent{type,step}` / `ToolCalledEvent{type,tool,
   args_json}` / `TokenEvent{type,text}` / `CompletedEvent{type,output}` /
   `ErrorEvent{type,message}`）と `SseEvent = Annotated[Union[...], Field(discriminator="type")]`
   を `sse.py` に定義する。機微情報（生プロンプト全文・認証情報）を載せない最小フィールド
@@ -125,7 +125,7 @@ _Requirements:_ 2.1, 2.2, 2.4, 8.3
   _Boundary:_ `patterns/contracts/src/patterns_contracts/sse.py`, `patterns/contracts/tests/unit/test_sse_contracts.py`
   _Depends:_ none
   _Requirements:_ 2.1, 2.4, 8.3
-- [ ] 2.2 5 モデルと `SseEvent` を `patterns_contracts.__init__` から import し `__all__` に
+- [x] 2.2 5 モデルと `SseEvent` を `patterns_contracts.__init__` から import し `__all__` に
   追記して flat 再エクスポートする。
   _Boundary:_ `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ 2.1
@@ -133,7 +133,20 @@ _Requirements:_ 2.1, 2.2, 2.4, 8.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **判別子に既定値**: 各モデルの `type` は `Literal[...] = "<tag>"` の既定付きとし、
+  `StepStartedEvent(step=...)` のように tag 省略構築を許す（`event:` 名導出は Task 3 の
+  `to_sse`）。既定の有無は drift パーサのフィールド名／Literal 語彙比較に影響しない（I-5）。
+- **lint 適合**: `type` フィールドは ruff `A`(builtins) に抵触せず（A003 不発火）、`Union`
+  ではなく PEP 604 `X | Y`（`target-version=py313`、UP 適合）で union を表現。`Annotated` /
+  `Literal` / `Field` / 各モデルは alias 値で実行時参照されるため通常 import（TCH 非該当）。
+- **drift テストは Task 11 まで赤（既知・設計通り）**: `__all__` への 5 モデル追記で
+  `test_contract_drift.py` の 4 ケースが赤化。原因は SSE README 正本ブロック未作成 +
+  `_README_PATHS["sse"]` 未登録（= Task 11、Task 4 依存のため現時点で着手不可）。差分は
+  新規 5 モデルのみで既存7パターンは README==パッケージ両側で不変（回帰なし）。R2.4 は
+  I-5 の通り「README 作成 + 登録」完了時に構造的充足。ユーザ承認の上で Task 2 境界を厳守し
+  当該赤を Task 11 解消の中間状態として保全。
+- **`SseEvent` は drift パーサが対称スキップ**: `Annotated[Union, Field]` はモデルクラスでも
+  `Literal` でもなく、`_value_literal()` None → `ApprovalHook` 同様にスキップ（I-5 実測整合）。
 
 ---
 
