@@ -103,7 +103,10 @@ async def test_stream_is_deterministic_across_runs() -> None:
     assert first == second
 
 
-@pytest.mark.parametrize("payload", [{}, {"query": 1}])
+# Missing key, wrong type, empty string, and whitespace-only must all be rejected with 422
+# *before* any streaming begins (R3.1; plan.md "空クエリ等の不正入力 -> 4xx"). The empty and
+# whitespace cases pin the boundary the bare `str` type would otherwise let through.
+@pytest.mark.parametrize("payload", [{}, {"query": 1}, {"query": ""}, {"query": "   "}])
 async def test_missing_or_invalid_query_is_rejected_before_streaming(
     payload: dict[str, object],
 ) -> None:

@@ -87,7 +87,9 @@ flowchart TD
     終端し例外を silent に打ち切らない（R4.3）。`completed`/`error` で必ず終端（R4.4）。
     リクエストごとに `tracer_provider` から 1 span を開く（R7、ADR-5）。
 - **Owns**: HTTP ルーティング・配信ライフサイクル・切断検知とリソース解放・span ラップ・
-  イベント列の順序保証と終端マーカー。
+  イベント列の順序**保持**（順序の正当性は producer 責務、app は source 順を保持する）と
+  終端マーカー（正常 `completed` / 例外・上限 `error` で必ず終端。早期切断時は client 不在の
+  ため非送出）。
 - **Does NOT own**: イベント生成ロジック（`EventSource` 実装に委譲）／契約定義／直列化規約
   （`events.py`）／トレーサ構成（`observability.py`）／pydantic-ai・Ollama への直接結合
   （src は framework-agnostic、結合は注入されたアダプタ経由）。
