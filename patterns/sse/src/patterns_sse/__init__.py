@@ -11,9 +11,15 @@ scripted fake; the gated Ollama integration injects a pydantic-ai
 ``run_stream_events`` adapter.
 
 The flattened public surface — ``create_app`` / ``EventSource`` / ``to_sse`` /
-``parse_sse_events`` — is wired here in Task 4.3 once ``events.py`` and
-``app.py`` exist. At the scaffold stage (Task 1) the package is import-only so
-the smoke test can assert clean import and sibling-lane isolation.
+``parse_sse_events`` — is re-exported here (Task 4.3): callers import the lane's
+delivery entry point and serialization helpers from the package root, while the
+lane src stays framework-agnostic (it receives its producer only through the
+``EventSource`` DI seam, R1.3 / NFR-3).
 """
 
 from __future__ import annotations
+
+from patterns_sse.app import create_app
+from patterns_sse.events import EventSource, parse_sse_events, to_sse
+
+__all__ = ["EventSource", "create_app", "parse_sse_events", "to_sse"]

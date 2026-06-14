@@ -190,7 +190,7 @@ _Requirements:_ 2.3, 4.2
 
 ---
 
-## 4. FastAPI アプリと SSE 配信（切断・終端・span 対応）
+## 4. FastAPI アプリと SSE 配信（切断・終端・span 対応）✅
 
 `create_app` DI seam・`POST /sse/runs`・`EventSourceResponse` 配信・切断対応ジェネレータ・
 span ラップを実装する。オフライン台本フェイクと公開面再エクスポートを併せて整える。
@@ -199,13 +199,13 @@ _Boundary:_ `patterns/sse/tests/support/scripted_source.py`, `patterns/sse/src/p
 _Depends:_ 3
 _Requirements:_ 1.3, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 6.1, 6.3, 7.1
 
-- [ ] 4.1 `ScriptedEventSource`（`EventSource` 準拠）を作成する。固定 `SseEvent` 列を決定論で
+- [x] 4.1 `ScriptedEventSource`（`EventSource` 準拠）を作成する。固定 `SseEvent` 列を決定論で
   yield し（`token` は固定チャンク列）、`fail_at` / `block_after` 等の seam で実行中エラーと
   早期切断を任意点で誘発できるようにする。
   _Boundary:_ `patterns/sse/tests/support/scripted_source.py`
   _Depends:_ 3
   _Requirements:_ 4.1, 5.3, 6.2
-- [ ] 4.2 `create_app(*, event_source, tracer_provider=None) -> FastAPI` と `POST /sse/runs`
+- [x] 4.2 `create_app(*, event_source, tracer_provider=None) -> FastAPI` と `POST /sse/runs`
   （body `{query: str}`）を実装する。注入 `EventSource` を駆動し各 `SseEvent` を `to_sse` で
   `EventSourceResponse` 配信、`step_started → tool_called* → token* → completed` の順序を保証
   （R4.1）、実行中エラーは `error` イベントで終端し silent に打ち切らない（R4.3）、
@@ -217,7 +217,7 @@ _Requirements:_ 1.3, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 6.1, 6.3, 7.1
   _Boundary:_ `patterns/sse/src/patterns_sse/app.py`, `patterns/sse/tests/unit/test_stream_order.py`
   _Depends:_ 4.1
   _Requirements:_ 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 6.1, 6.3, 7.1
-- [ ] 4.3 `patterns_sse.__init__` を公開面（`create_app` / `EventSource` / `to_sse` /
+- [x] 4.3 `patterns_sse.__init__` を公開面（`create_app` / `EventSource` / `to_sse` /
   `parse_sse_events`）のフラット再エクスポートに更新する（スモークの import 健全性を維持、
   レーン src は fw/レーン非結合 = DI seam のみで配信対象を受ける、R1.3）。
   _Boundary:_ `patterns/sse/src/patterns_sse/__init__.py`
@@ -226,7 +226,37 @@ _Requirements:_ 1.3, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 6.1, 6.3, 7.1
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **切断機構の一次確認（sse-starlette 3.4.4 / starlette 1.3.1 / httpx 0.28.1）**: 配信中の
+  停止は本体ジェネレータへ送出される `asyncio.CancelledError`（sse-starlette の
+  `_listen_for_disconnect` → task-group cancel）が**唯一の load-bearing 経路**。設計が併用を
+  求める `await request.is_disconnected()` は、当該 starlette 実装が**事前キャンセル済み
+  `CancelScope`** 内で `receive()` を呼ぶ非ブロッキング peek（`requests.py:328`）で、ほぼ常に
+  `False` を返し、sse-starlette のリスナと receive チャネルを競合しない（同一 anyio Event の
+  複数 wait は安全、httpx ASGITransport `asgi.py:134` でも確認）。よって poll は協調的二次手段
+  として設計どおり配置（R6.1）、実停止は `except CancelledError: raise` + `finally: aclose` が担う。
+  Task 0 spike(b) の結論と整合。
+- **公開面の span は手動 1 本**: `tracer_provider.get_tracer().start_as_current_span("sse.stream")`
+  をジェネレータ全体に被せ、`None` 注入時は `contextlib.nullcontext`（R7.1 / ADR-5）。Task 8 の
+  `InMemorySpanExporter` 注入で span≥1 を検証予定。
+- **エラー終端**: `except Exception` を `BLE001` の rationale 付き noqa で許容し `ErrorEvent`
+  へ変換（`CancelledError`/`GeneratorExit` は `BaseException` のため非捕捉、silent 打ち切り無し、
+  R4.3/4.4）。`message` は `"<ExcType>: <str(exc)>"` の 1 行要約のみ（traceback 非掲載、R8.3）。
+- **R-2 ガード**: 終端マーカー忘れに備え `_MAX_EVENTS=1000` の安全上限、stalled client に備え
+  `send_timeout=60s`。ASGITransport は有限ストリームを全文バッファ（ADR-4a）。
+- **app-factory の nested route**: `create_app` が `event_source`/`tracer_provider` を closure
+  するため `@app.post` ルートは入れ子。pyright strict の `reportUnusedFunction` は
+  `# pyright: ignore[...]` で抑止（リポジトリ既存 `tests/unit/test_chat_agent_v2_surface.py:79`
+  と同 idiom、構成変更不要）。
+- **`ScriptedEventSource` の seam**: `fail_at`（N 件後に `RuntimeError`）/ `block_after`（N 件後に
+  未 set Event で park）/ 公開属性 `cancelled`・`released`（Task 6/7 のアサート用）。`stream` は
+  非 `async def` Protocol に構造適合する async-generator、`enumerate` index = 既 yield 件数。
+- **公開面再エクスポート（4.3）**: `__init__` が `create_app`/`EventSource`/`to_sse`/
+  `parse_sse_events` を flat 再エクスポート。スモーク（import 健全性 + 兄弟レーン非 import）と
+  既存 7 ユニット全て継続グリーン（NFR-3 維持、`app.py` import は fastapi/sse-starlette のみで
+  兄弟レーン非経由）。
+- **被覆の中間状態（設計どおり）**: lane coverage 86.75%（floor 85 充足）。未被覆の `app.py`
+  分岐（is_disconnected break / CancelledError 再 raise / error 変換 / max-events / span 有効化）は
+  Wave 4 の Task 6・7・8 が exercise、98 への ratchet は Task 9.2。
 
 ---
 
