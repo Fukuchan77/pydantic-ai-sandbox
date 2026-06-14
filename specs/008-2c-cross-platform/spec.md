@@ -200,8 +200,13 @@ Ollama-backed モデル）。
 6.1 WHEN クライアントが早期切断した場合、THE サーバ SHALL イベント生成ジェネ
 レータを確実に停止し、保持リソースを解放すること。
 
-6.2 THE システム SHALL `ASGITransport` 上で切断・キャンセルを再現するテストを
-持ち、ジェネレータ停止（クリーンアップ実行）を検証すること。
+6.2 THE システム SHALL ネットワーク I/O ゼロの**インプロセス ASGI 駆動**上で
+切断・キャンセルを再現するテストを持ち、ジェネレータ停止（クリーンアップ実行）を
+検証すること。ハッピーパス（R5）は `httpx.ASGITransport` を用いるが、httpx の
+`ASGITransport` は応答を完全バッファしクライアント早期切断を `http.disconnect` と
+して伝播しない（research.md I-3 で一次ソース確認）ため、本基準は同一 ASGI アプリを
+`app(scope, receive, send)` で直接駆動し、カスタム `receive()` が `http.disconnect`
+を注入する技法で満たす（research.md ADR-4）。いずれも実ソケットを開かない。
 
 6.3 THE 切断処理 SHALL 例外を握り潰さず、リソース解放を保証すること。
 
@@ -317,3 +322,5 @@ idea2-008 §3 / idea2-006 §2b・§2d・§2e 参照: フロントエンド、Web
 _Initialized (draft): 2026-06-13T10:40:00Z_
 _Clarified (/sdd-init, 5/5 CONFIRMED): 2026-06-13T19:45:00Z_
 _Requirements generated (/sdd-spec): 2026-06-13T20:10:00Z_
+_Requirements validated (/sdd-spec re-run): 2026-06-14T16:10:00Z_
+_R6.2 wording reconciled to research.md I-3/ADR-4 (/sdd-validate-plan): 2026-06-14_
