@@ -405,3 +405,57 @@ $ uv run pytest --cov          → 24 passed（19→+5）/ TOTAL 90.36%（fail_u
 
 - error 変換分岐が exercise され lane coverage 86.75%→90.36%。残る未被覆（span / is_disconnected
   break / CancelledError 再 raise / max-events）は Task 7・8 が exercise、98 ratchet は Task 9.2。回帰なし。
+
+---
+
+## Task 7: 切断・キャンセル経路の hermetic 検証（Wave 4）— 2026-06-14
+
+**スコープ**: R6.1（早期切断でジェネレータ停止・リソース解放）/ R6.2（ネットワーク I/O
+ゼロのインプロセス ASGI 駆動で切断再現）/ R6.3（例外を握り潰さない）を、新規
+`tests/support/asgi_driver.py`（7.1）＋ `tests/unit/test_disconnect_cleanup.py`（7.2）で立証。
+検証対象の `app.py` の `except CancelledError: raise` / `finally: aclose` / 協調的
+`is_disconnected` break は Task 4 実装済み、Task 7 はそれを exercise する純テスト＋駆動基盤。
+
+**実装**:
+- **7.1 asgi_driver**: 同一 ASGI アプリを `await app(scope, receive, send)` で直接駆動
+  （実ソケット非使用、ADR-4）。custom `receive` は初回 `http.request`（ボディパース用）、以降は
+  K 件の `data:` 捕捉まで `armed.wait()` でブロックし `http.disconnect` を注入。`send` 側で
+  `data:` 件数を数え arm。hang guard（`wait_for(timeout)`→AssertionError）付き。
+- **7.2 4 ケース**: (a) `block_after=2`＋`disconnect_after=2` で scope 注入切断→
+  `cancelled`/`released`・prefix のみ（`completed` 非到達）/ (b) `block_after=3` で
+  CancelledError が `error` へ書換えられず伝播（R6.3、`error`/`completed` 非到達）/
+  (c) `_event_stream` 直接駆動＋`aclose()`（GeneratorExit）で producer 解放（R6.1）/
+  (d) `is_disconnected=True` 即時で協調 break・無 yield・解放（R6.1）。
+
+### 学び
+- **park 位置が cancel の決定論性を決める**: source が `gate.wait()` で suspend した状態を
+  作ることで、anyio cancel が最内 await へ CancelledError を届け source の
+  `except CancelledError`（`cancelled=True`）が発火。park させない（yield 直後に cancel）と
+  app の `finally: aclose()` が GeneratorExit で source を閉じる経路になり `cancelled` が
+  立たない可能性 → `block_after` で park を強制し race を排除。
+- **receive の二消費者干渉なし**: `_listen_for_disconnect`（timeout なし）と
+  `is_disconnected()`（極小 timeout）が同一 receive を消費するが、生成器は arm 後に gate で
+  park 済みのため is_disconnected は arm 前の timeout→False しか引かず協調 break と非干渉。
+
+### 検証ゲート（証跡）
+
+```
+# RED（app.py の協調 break＋finally aclose を除去 ＋ driver の armed.set() を除去し
+#      4 ケース全てが bite することを立証）
+$ uv run pytest --no-cov tests/unit/test_disconnect_cleanup.py -v  → 4 failed in 10.42s
+   （(a)(b): disconnect 未注入で hang→wait_for timeout→AssertionError /
+     (c): released False / (d): delivered != [] かつ released False）
+
+# GREEN（app.py・driver を revert 後）
+$ uv run pytest --no-cov tests/unit/test_disconnect_cleanup.py -v  → 4 passed in 0.18s
+
+# レーン全体ゲート
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 11 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 28 passed（24→+4）/ TOTAL 93.98%（fail_under=85 充足）
+```
+
+- 切断・キャンセル・解放経路が exercise され lane coverage 90.36%→93.98%。app.py 残未被覆は
+  L73（span 分岐）/ L106（max-events break）/ L113→exit（aclose 無し分岐）で Task 8 が exercise、
+  98 への ratchet は Task 9.2。回帰なし（既存 24 件全 green）。
