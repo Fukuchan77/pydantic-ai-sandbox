@@ -640,3 +640,49 @@ collection/lint/typecheck 健全」。live-green は実 Ollama daemon + granite/
 - 埋め込みモデルは生成 LLM と別 env（`OLLAMA_EMBED_MODEL_NAME`）+ 別 pull が必要。
   granite-embedding:278m（563MB）はウォームアップ増分が小さく、現時点で R11.4 隔離は不要。
   実測で daemon ウォームアップが著増した場合のみ別ジョブ/別ゲートへ（退避策は文書化済み）。
+
+---
+
+## Task 13: タクソノミー索引とセキュリティノート（2026-06-14）
+
+**Boundary**: `patterns/README.md` / `patterns/SECURITY-NOTES.md`（docs-only, 2ファイル）
+**Requirements**: 9.1, 9.4, 10.2
+
+### RED（必須コンテンツの不在を grep で実測）
+
+- `patterns/README.md`: 「応用レイヤ」節 0 / rag リンク 0。
+- `patterns/SECURITY-NOTES.md`: CVE-2025-1793 行が旧文言「ベクトルストア不使用」、
+  RAG リスク語（インデックス汚染/引用なりすまし/PII）0、`forbid-hardcoded-model-ids` 0。
+- docs-only boundary のため**新規テストファイルは追加しない**（Task 11 と異なり drift テストは
+  本境界に属さない）。TDD は「不在=RED → 追記=GREEN → 存在 grep + 全スイート無回帰=VERIFY」で適応。
+
+### GREEN
+
+- **13.1（R10.2）**: 二軸タクソノミー直後に `## 応用レイヤー（RAG）` を新設。RAG は
+  ワークフローパターンではなく LlamaIndex 役割分担の応用である旨を明記し、ワークフロー6表とは
+  別表で RAG を索引（独立レーン `patterns/rag/`・ADR-1 配置根拠・contracts 集約と同一ドリフト検知）。
+- **13.2a**: CVE-2025-1793 行を「in-memory `SimpleVectorStore` 既定のみ・脆弱な外部統合8種を
+  混入させない（isinstance 固定）」へ実態同期。外部ストア採用時の `>=0.12.28` フロアゲート明記。
+- **13.2b（R9.1）**: `### RAG 応用レイヤ → OWASP LLM Top 10 マッピング` を新設し3固有リスクを
+  契約面と対応づけ（汚染→LLM08/過度の依存、なりすまし→過度の依存 + `DanglingCitationError`
+  loud-fail、PII→LLM02 データ漏洩 + in-memory 既定）。
+- **13.2c（R9.4）**: `gitleaks`/`forbid-hardcoded-model-ids` が `exclude: ^patterns/` を持たず
+  RAG レーンを含む patterns/ 全域を走査する不変条件を明記（フック名・exclude 有無を
+  `.pre-commit-config.yaml` で実測確認）。
+
+### VERIFY（証跡）
+
+- 存在 grep: 応用レイヤ節 1 / rag リンク 2 / in-memory 既定 1 / RAG リスク語 3 / フック名 1。
+- `mise run patterns:check` 全グリーン — rag **58 passed, 1 skipped / coverage 100%（≥98）**、
+  `patterns:typecheck` 0 errors、`patterns:lint` All checks passed、`patterns:format` already formatted。
+- `test_contract_drift.py` **4 passed**（README 索引非破壊を確認）。
+- boundary 2ファイルのみ、ルート・他レーン・RAG ソース無変更。
+
+### 学び（Act 候補）
+
+- docs-only タスクの TDD は「コンテンツ不在の grep 実測 = RED」で代替でき、境界外のテストファイル
+  追加を避けられる。Task 11（drift テストが境界内）との対比が境界規律の好例。
+- SECURITY-NOTES は実装の進行に伴い「予定」記述が陳腐化する（CVE-2025-1793 行の「不使用」→
+  「in-memory 既定」）。応用レイヤ着地時に既存ノートの将来形記述を実態へ同期する運用が要る。
+
+**→ Spec 007-2b-cross-platform 全 13 タスク完了。**

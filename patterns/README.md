@@ -26,6 +26,23 @@ PydanticAI・BeeAI Framework・LlamaIndex Workflows を横断した
 > patterns." — 本パターン集は各フレームワークの**最小プリミティブ**で
 > パターンを組む方針を踏襲する。
 
+## 応用レイヤー（RAG）
+
+上記6パターンは Anthropic「Building Effective Agents」の**ワークフロー分類**
+であるのに対し、**RAG はワークフローパターンではない**。検索→生成→引用検証を
+LlamaIndex の役割分担（チャンク化 / インデックス化 / 検索 / 生成）で組む
+**応用レイヤ**であり、ワークフロー6表とは別軸として索引する（Spec 007 R10.2）。
+
+| 応用パターン | 構成 | レーン | 状態 |
+|---|---|---|---|
+| **RAG（検索拡張生成）** | Docling チャンク化 → in-memory `VectorStoreIndex` → 決定論検索 → 引用付き生成 → 引用検証 | `patterns/rag/`（`frameworks/` 外の独立 uv レーン, Python 3.13） | ✅ [rag/](rag/README.md) |
+
+> RAG は単一フレームワーク（LlamaIndex）内の**役割分担**を主題とするため、
+> 3フレームワーク横断比較の対象ではなく、`frameworks/` 兄弟ではない独立レーン
+> `patterns/rag/` に配置する（specs/007-2b-cross-platform/research.md ADR-1）。
+> 契約（`RetrievedChunk` / `Citation` / `RagAnswer`）は他パターンと同じ
+> [contracts/](contracts/README.md) に集約し、同一ドリフトテストで正本一致を検知する。
+
 ## フレームワーク比較（本イテレーションで実測した差異）
 
 | 比較軸 | PydanticAI (v2 Beta) | BeeAI Framework (0.1.x) | LlamaIndex Workflows (0.14.x) |
