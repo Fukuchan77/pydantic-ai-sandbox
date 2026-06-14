@@ -60,6 +60,12 @@ def retrieve(retriever: BaseRetriever, query: str, *, top_k: int = 4) -> list[Re
         Up to ``top_k`` ``RetrievedChunk`` contracts ordered by ``(-score, chunk_id)``:
         descending score, ties broken by ascending ``chunk_id`` (ADR-5, Req 3.3).
 
+    Note:
+        The deterministic tiebreak orders the set the retriever *returned*; it does not affect
+        which nodes the retriever selected. Operate the retriever with its ``similarity_top_k``
+        >= this ``top_k`` so a score tie at the retriever's own cutoff cannot drop a chunk
+        before the sort sees it (membership is the retriever's concern, ordering is ours).
+
     Raises:
         ValueError: If ``top_k`` is less than 1.
     """

@@ -12,8 +12,9 @@ place (Req 4.1):
   ``DanglingCitationError`` that ``run_rag`` raises on ungrounded answers.
 
 The OpenInference tracing helpers (``configure_tracing`` / ``instrument_llamaindex`` /
-``uninstrument_llamaindex``) join this surface when the ``observability`` module lands
-(Task 8); they are intentionally absent here until then.
+``uninstrument_llamaindex``) are intentionally *not* re-exported here: by the lane's
+boundary discipline they are imported directly from :mod:`patterns_rag.observability`,
+keeping this surface to the entry, contracts, and exceptions a caller composes.
 """
 
 from __future__ import annotations
