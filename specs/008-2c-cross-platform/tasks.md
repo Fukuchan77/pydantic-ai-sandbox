@@ -527,7 +527,7 @@ _Requirements:_ 3.3, 7.1
 
 ---
 
-## 11. (P) パターン契約正本と単一点ドリフト配線
+## 11. (P) パターン契約正本と単一点ドリフト配線 ✅
 
 `patterns/sse/README.md` に契約の正本 fenced block と必須4セクションを記載し、006-2a の
 ドリフトテストへ登録する。
@@ -536,14 +536,14 @@ _Boundary:_ `patterns/sse/README.md`, `patterns/contracts/tests/unit/test_contra
 _Depends:_ 2, 4
 _Requirements:_ 2.2, 8.3, 9.1, 9.3
 
-- [ ] 11.1 パターン README を作成する（契約正本の python fenced block〔注釈のみ、5 モデル +
+- [x] 11.1 パターン README を作成する（契約正本の python fenced block〔注釈のみ、5 モデル +
   `SseEvent`〕、型安全/テスト/可観測性/セキュリティの必須4セクション、FastAPI /
   sse-starlette のバージョンとベータ注意事項・curl / httpx 接続例、機微情報を `data` に
   載せない方針の明記〔R8.3〕）。
   _Boundary:_ `patterns/sse/README.md`
   _Depends:_ 2, 4
   _Requirements:_ 8.3, 9.1, 9.3
-- [ ] 11.2 `test_contract_drift.py` の `_README_PATHS` に `"sse"` 1 行を追加し、README 正本 ==
+- [x] 11.2 `test_contract_drift.py` の `_README_PATHS` に `"sse"` 1 行を追加し、README 正本 ==
   `patterns_contracts` 実体の一致（判別子=`event:` 名の語彙ロック）と既存パターン非破壊を検証する
   （パーサは無改修、I-5）。
   _Boundary:_ `patterns/contracts/tests/unit/test_contract_drift.py`
@@ -552,7 +552,26 @@ _Requirements:_ 2.2, 8.3, 9.1, 9.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **Task 2 申し送りの赤を解消（RED→GREEN の RED は既存）**: Task 2 で `__all__` への 5 モデル
+  追記により `test_contract_drift.py` の 4 ケースが赤化済み（SSE README 正本未作成 +
+  `_README_PATHS["sse"]` 未登録）。Task 11 はこの既存 RED を解く成果物。実装前の RED を再確認
+  （`4 failed`: class/field/literal/one-README 各テストが「package に 5 SSE モデルが居るが README
+  owner に居ない」で bite）。11.1（README 作成）+ 11.2（`"sse"` 登録）後に `4 passed`。
+- **正本ブロックは parser 互換を厳守**: `## パターン契約（正本）` 見出し直下の最初の ```python```
+  fence に 5 モデルを記載。各フィールドは `name: annotation` 形（`ast.AnnAssign`）、`type` は
+  `Literal["<tag>"]` で判別子語彙をロック（`event:` 名 = 判別子、R2.3）。`SseEvent` は
+  `Annotated[... , Field(discriminator="type")]` を**単一行**の代入で記載 — parser の
+  `_collect_named_literals` が `ast.parse` するため改行継続を避け、`_annotation_literal` が
+  `Annotated`（非 `Literal`）→ None で対称スキップ（`ApprovalHook` 先例 / I-5）。後続の接続例
+  python fence は normative block の後段に置き、`_normative_block` は最初の fence のみ抽出。
+- **必須4セクション + R9.3 + R8.3**: 型安全 / テスト / 可観測性 / セキュリティを記載（R9.1）。
+  fastapi 0.136.3 / sse-starlette 3.4.4 / starlette 1.3.1 / httpx 0.28 / pydantic 2.13.4 の版表と
+  ベータ注記（sse-starlette API 流動・pydantic-ai V2 beta の prerelease 封じ込め）、curl / httpx
+  接続例を掲載（R9.3）。「イベントに機微情報を載せない（producer 責務のサニタイズ要約、field 制約に
+  しない）」方針を明記（R8.3）。SSE が応用レイヤである旨は冒頭で宣言（R9.2 索引は Task 13.1）。
+- **被覆不変**: README 追加 + テスト 1 行登録のみで src 被覆は不変（SSE 99.01% / contracts 既存）。
+  `[project].readme` の宣言は Task 11 境界外（`pyproject.toml`）のため未変更 — README 欠損は解消
+  したが long-description 宣言は別タスク所掌。回帰なし（contracts 19 / SSE 36+1skip 全 green）。
 
 ---
 
