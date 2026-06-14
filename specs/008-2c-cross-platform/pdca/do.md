@@ -71,3 +71,61 @@ test_spike_asgi.py::test_scope_drive_disconnect_reaches_cleanup PASSED   [100%]
 > レーンはまだ mise/CI に未配線（Task 12）。本 gate の検証コマンドはスパイク実験自身。
 > `patterns/sse/` の throwaway 成果物（`pyproject.toml`/`uv.lock`/`test_spike_asgi.py`）は
 > Task 1 で本番レーンへ置換される。
+
+---
+
+## Task 1 — (P) SSE レーンの新設と契約パス配線 ✅
+
+実施日: 2026-06-14 / 状態: **完了（1.1 / 1.2 green）→ Wave 2（Task 3）着手可**
+
+TDD: スモークテスト先行（Red）→ レーン scaffold（Green）。
+
+### Do（実施内容）
+
+- **PoC 全置換**: Task 0 throwaway を撤去（`test_spike_asgi.py` は `git rm`、spike
+  `pyproject.toml`/`uv.lock`/`.venv` は本番構成へ置換）。証跡は本 do.md の Task 0 節に保全済み。
+- **1.2 Red 先行**: `tests/unit/test_smoke.py`（import 健全性 + 兄弟レーン非 import〔NFR-3〕）を
+  作成し `uv run --no-sync pytest` で `ModuleNotFoundError: No module named 'patterns_sse'`
+  を確認（2 FAILED）。hermetic ガード/fake one-pass は Task 9 へ委譲し、Task 1 は構造のみ担保。
+- **1.1 Green**: 本番 `pyproject.toml` を作成（runtime: `patterns-contracts`(path dep) /
+  fastapi>=0.136 / sse-starlette>=3.4 / `pydantic>=2,<2.14` / otel sdk+otlp-http、dev: httpx /
+  `pydantic-ai-slim[openai]>=2.0.0b6` / pytest 群 / pyright / ruff / pip-audit、ruff・pyright
+  strict `py314`・coverage `fail_under=85` 初期フロア）。`.python-version=3.14` は維持。
+- **1.2 Green**: `src/patterns_sse/__init__.py`（import 専用、公開面は Task 4.3）を作成し
+  `uv sync --all-groups` で `uv.lock` 生成。スモーク 2 件 green。
+
+### エラーと根本原因（blind retry 禁止に従い記録）
+
+- **症状**: 初回 lock で runtime `pydantic` が `2.14.0a1`(alpha) に解決（Task 0 申し送りの再現）。
+- **根本原因**: dev の pydantic-ai 解決に必須な `[tool.uv] prerelease = "allow"` が無制約だと
+  共有 pydantic を alpha へ巻き込み、fw 非依存 src 閉包が alpha に乗る。
+- **修正**: runtime dep に `pydantic>=2,<2.14` の stable 上限ピンを追加（症状＝alpha 採択では
+  なく原因＝無制約 prerelease を解消）。lock 上で `pydantic==2.13.4 / pydantic-core==2.46.4`
+  (stable) に確定。prerelease は pydantic-graph(`2.0.0b7`) 自身の dev 閉包へ封じ込め。
+- **派生対応**: `[project].readme` は未宣言（README は Task 11。欠損ファイル参照で hatchling
+  build が壊れるため）。
+
+### 学び（Act へ）
+
+1. **prerelease は「全許可 + stable 上限ピン」で封じ込め可能**。per-package prerelease を
+   uv config で直接表現するより、runtime dep の version specifier で stable 上限を切る方が
+   宣言的で堅い（pydantic-ai レーンは runtime に pydantic-ai を持つため全許可で正しい＝差分理由）。
+2. **scaffold の Red は「未生成パッケージの import 失敗」で十分担保**。意味的アサート
+   （兄弟レーン非 import）は Green 後も load-bearing として残す。
+
+### 検証ゲート（証跡）
+
+```
+$ uv run ruff check .         → All checks passed!
+$ uv run ruff format --check . → 2 files already formatted
+$ uv run pyright              → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov         → 2 passed; src/patterns_sse/__init__.py 100%;
+                                 Required coverage 85.0% reached (total 100.00%)
+$ uv sync --all-groups --locked → Resolved 76 / Checked 75（--locked グリーン、NFR-1）
+```
+
+解決バージョン: fastapi 0.136.3 / sse-starlette 3.4.4 / starlette 1.3.1(fastapi 要求 stable) /
+pydantic 2.13.4 / pydantic-ai-slim 2.0.0b7(dev のみ)。
+
+> レーンの mise/CI 配線は Task 12。本 gate はレーンローカル `uv run`（patterns:* 配線前の
+> 正規検証）で実施。

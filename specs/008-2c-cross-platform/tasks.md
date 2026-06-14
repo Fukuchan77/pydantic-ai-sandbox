@@ -72,14 +72,14 @@ _Boundary:_ `patterns/sse/.python-version`, `patterns/sse/pyproject.toml`, `patt
 _Depends:_ 0
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 8.2
 
-- [ ] 1.1 Task 0 で確定した依存閉包に従い、レーンの Python を `3.14` に固定し独立 uv
+- [x] 1.1 Task 0 で確定した依存閉包に従い、レーンの Python を `3.14` に固定し独立 uv
   プロジェクトの `pyproject.toml` を作成する（runtime: fastapi / sse-starlette / pydantic /
   otel、`tool.uv.sources` で `../contracts` パス依存、dev: httpx / pydantic-ai / pytest 群 /
   pip-audit、ruff・pyright strict `py314`・pytest・coverage `fail_under` 初期フロア）。
   _Boundary:_ `patterns/sse/.python-version`, `patterns/sse/pyproject.toml`
   _Depends:_ 0
   _Requirements:_ 1.1, 1.2, 8.2
-- [ ] 1.2 パッケージ初期化と import スモークテストを作成し、`uv.lock` を `--locked`
+- [x] 1.2 パッケージ初期化と import スモークテストを作成し、`uv.lock` を `--locked`
   解決可能に生成する（`patterns_sse` パッケージが import でき、他レーンを import しない
   ことをテストで担保）。
   _Boundary:_ `patterns/sse/src/patterns_sse/__init__.py`, `patterns/sse/tests/unit/test_smoke.py`, `patterns/sse/uv.lock`
@@ -88,7 +88,22 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.4, 8.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **Task 0 申し送り対応（prerelease alpha 漏れ）**: `[tool.uv] prerelease = "allow"`
+  は dev の pydantic-ai/pydantic-graph(`2.0.0b7`) 解決に必須だが、無制約だと runtime の
+  pydantic を `2.14.0a1`(alpha) に巻き込む。runtime dep に `pydantic>=2,<2.14` の stable
+  上限ピンを置き、lock 上で `pydantic==2.13.4 / pydantic-core==2.46.4`(stable) に確定。
+  prerelease は pydantic-graph 自身の pre-release ピンへ封じ込め、fw 非依存 src 閉包を
+  alpha に乗せない（do.md 学び #3 をクローズ）。
+- **解決バージョン**: fastapi 0.136.3 / sse-starlette 3.4.4 / starlette 1.3.1(fastapi 要求の
+  stable、alpha ではない) / pydantic-ai-slim 2.0.0b7(dev のみ)。`uv sync --all-groups
+  --locked` グリーン（76 解決 / 75 検証）。
+- **README 不参照**: `[project].readme` は意図的に未宣言（README は Task 11 で作成。欠損
+  ファイルを指すと hatchling build が壊れるため）。
+- **PoC 全置換**: Task 0 throwaway（spike `pyproject.toml`/`uv.lock`/`test_spike_asgi.py`）を
+  本番レーン構成へ置換（`test_spike_asgi.py` は `git rm`、証跡は do.md に保全済み）。
+- **公開面は最小**: `__init__.py` は import 専用（`create_app`/`EventSource`/`to_sse`/
+  `parse_sse_events` の flat 再エクスポートは Task 4.3 で配線）。スモークは import 健全性 +
+  兄弟レーン非 import（NFR-3）のみを担保し、hermetic ガード/fake one-pass は Task 9 へ委譲。
 
 ---
 
