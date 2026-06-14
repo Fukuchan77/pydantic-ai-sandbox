@@ -43,6 +43,27 @@ LlamaIndex の役割分担（チャンク化 / インデックス化 / 検索 / 
 > 契約（`RetrievedChunk` / `Citation` / `RagAnswer`）は他パターンと同じ
 > [contracts/](contracts/README.md) に集約し、同一ドリフトテストで正本一致を検知する。
 
+## 応用レイヤー（SSE 配信）
+
+RAG と同じく、**SSE 配信もワークフローパターンではない**。エージェント実行の
+進行イベント（ステップ開始 / ツール呼び出し / トークン / 完了 / エラー）を
+FastAPI + sse-starlette `EventSourceResponse` で **Server-Sent Events として
+ストリーム配信**する**配信インフラの応用レイヤ**であり、ワークフロー6表とは
+別軸として索引する（Spec 008 R9.2）。
+
+| 応用パターン | 構成 | レーン | 状態 |
+|---|---|---|---|
+| **SSE 配信（エージェントイベントのストリーミング）** | 型付きイベント判別共用体 `SseEvent` → `to_sse` ワイヤ写像 → `EventSourceResponse` 逐次配信 → 切断/キャンセル時のジェネレータ確実停止・リソース解放 → 受信側 `parse_sse_events` 逆写像 | `patterns/sse/`（`frameworks/` 外の独立 uv レーン, Python 3.14） | ✅ [sse/](sse/README.md) |
+
+> SSE は**配信インフラ**（クライアント↔サーバのストリーミング転送）の応用で
+> あり、エージェントの思考様式を定める Anthropic ワークフロー6パターンとは
+> 直交する。配信対象エージェントは DI seam（関数注入）で受け取り、レーン src は
+> フレームワーク非結合に保つ（NFR-3、specs/008-2c-cross-platform/research.md
+> ADR-2）。イベント契約（`StepStartedEvent` / `ToolCalledEvent` / `TokenEvent` /
+> `CompletedEvent` / `ErrorEvent` と判別共用体 `SseEvent`）は他パターンと同じ
+> [contracts/](contracts/README.md) に集約し、同一ドリフトテストで正本
+> （[sse/README.md](sse/README.md)）== パッケージ実体の一致を検知する（R2.2）。
+
 ## フレームワーク比較（本イテレーションで実測した差異）
 
 | 比較軸 | PydanticAI (v2 Beta) | BeeAI Framework (0.1.x) | LlamaIndex Workflows (0.14.x) |
