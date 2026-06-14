@@ -459,3 +459,57 @@ $ uv run pytest --cov          → 28 passed（24→+4）/ TOTAL 93.98%（fail_u
 - 切断・キャンセル・解放経路が exercise され lane coverage 90.36%→93.98%。app.py 残未被覆は
   L73（span 分岐）/ L106（max-events break）/ L113→exit（aclose 無し分岐）で Task 8 が exercise、
   98 への ratchet は Task 9.2。回帰なし（既存 24 件全 green）。
+
+---
+
+## Task 8: 可観測性の配線と span 検証（8.1 実装 + 8.2 test-only、Wave 4）— 2026-06-14
+
+**スコープ**: R7.1（`configure_tracing` の exporter 優先チェーン）/ R7.2（`InMemorySpanExporter`
+注入で span≥1）/ R7.3（末端 span 存在のみ・属性集計なし）。8.1 は `observability.py` 新規実装
+（ADR-5 複製）、8.2 は Task 4 の `app.py` span 配線を exercise する純テスト。
+
+**実装**:
+- `observability.py` — `configure_tracing(exporter=None) -> TracerProvider`。pydantic-ai/rag
+  レーンと同形だが framework instrumentor は持たない（per-request `sse.stream` span は `app.py`
+  `_open_span` が自前で開く）。優先チェーン: 注入 exporter（`SimpleSpanProcessor`）>
+  `OTEL_EXPORTER_OTLP_ENDPOINT`（OTLP 遅延 import + `BatchSpanProcessor`）> no-op。
+- `test_observability.py` 5 ケース — 8.1: (a) 注入捕捉 / (b) env 下でも注入優先（OTLP 非構築）/
+  (c) env のみで OTLP 構築 / (d) 双方未設定で processor 0・無害。8.2: (e) `create_app` 駆動で
+  `sse.stream` span が `get_finished_spans()` に 1 つ以上。
+
+### 学び
+- **OTLP 分岐をオフラインで bite させる**: 遅延 import される `OTLPSpanExporter` を、in-memory
+  exporter を返す recorder へ monkeypatch することで collector 不要・ネットワーク 0 のまま
+  「env tier は OTLP exporter を構築する」を行動レベルで立証。env/no-op の判別は public API が
+  無いため `_active_span_processor._span_processors` 件数を読む（pyright reportPrivateUsage を
+  ignore、`SLF` は本レーン ruff select 外で noqa 不要 → 付けると unused noqa で fail）。
+- **SimpleSpanProcessor で span 終端の race を排除**: 注入 exporter には同期 export の
+  `SimpleSpanProcessor` を使うため、ASGITransport がレスポンスを確定する時点で `sse.stream`
+  span は終端済み。`get_finished_spans()` は決定論的に span を返す。
+
+### 検証ゲート（証跡）
+
+```
+# RED 8.1（observability モジュール未作成）
+$ uv run pytest --no-cov tests/unit/test_observability.py  → ModuleNotFoundError: patterns_sse.observability
+
+# GREEN 8.1（observability.py 作成後）
+$ uv run pytest --no-cov tests/unit/test_observability.py  → 5 passed
+
+# load-bearing RED 8.2（app.py _open_span を常時 nullcontext() へ改変）
+$ uv run pytest --no-cov tests/unit/test_observability.py::test_create_app_emits_app_span_into_injected_exporter
+   → 1 failed（assert spans / assert ()）
+
+# GREEN 8.2（app.py revert 後）
+$ uv run pytest --no-cov tests/unit/test_observability.py  → 5 passed in 0.25s
+
+# レーン全体ゲート
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 13 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 33 passed（28→+5）/ TOTAL 97.03%（fail_under=85 充足）
+```
+
+- span 分岐が exercise され lane coverage 93.98%→97.03%。`observability.py` 100%。app.py 残未被覆は
+  L106（max-events backstop）/ L113→exit（aclose 無し分岐）のみで Task 9.2 の 98 ratchet 対象。
+  回帰なし（既存 28 件全 green）。
