@@ -33,6 +33,12 @@ on:
       - 'patterns/frameworks/*/src/**'
       - 'patterns/frameworks/*/tests/integration/**'
       - 'patterns/frameworks/*/pyproject.toml'
+      # The RAG application lane (Spec 007-2b Req 11.2) is an independent lane at
+      # patterns/rag/; its gated e2e case rides this same daemon (the mise
+      # patterns:test:integration task now runs it). A change to the lane must
+      # re-trigger the live gate, parallel to the frameworks paths above. The
+      # push trigger already covers it via 'patterns/**'.
+      - 'patterns/rag/**'
       # The patterns import their contracts from the shared package, and the
       # e2e cases assert contract-level behaviour — a contract change must
       # re-trigger the live gate (parallel to patterns-ci.yml; the push
@@ -50,6 +56,12 @@ permissions:
 
 env:
   OLLAMA_MODEL_NAME: granite4.1:8b
+  # RAG lane (Spec 007-2b Req 11.2 / Q-2): the gated e2e builds the index with a
+  # real Ollama embedding model, supplied here as a sibling to the generation
+  # LLM. Pinned to an explicit tag (model-ID hygiene — never `:latest`); the
+  # granite-embedding family keeps parity with the granite4.1 generation model.
+  # 278m is the multilingual variant (563MB). Lanes that do not embed ignore it.
+  OLLAMA_EMBED_MODEL_NAME: granite-embedding:278m
   OLLAMA_BASE_URL: http://localhost:11434/v1
 
 jobs:
@@ -76,7 +88,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ollama
-          key: ollama-model-${{ hashFiles('.github/workflows/patterns-integration-ollama.yml') }}-granite4.1-8b
+          key: ollama-model-${{ hashFiles('.github/workflows/patterns-integration-ollama.yml') }}-granite4.1-8b-granite-embedding-278m
           restore-keys: |
             ollama-model-
 
@@ -111,6 +123,23 @@ jobs:
           else
             echo "pulling ${OLLAMA_MODEL_NAME}..."
             docker exec ollama ollama pull "${OLLAMA_MODEL_NAME}"
+          fi
+
+      # The RAG lane's gated e2e embeds with a real Ollama model (Spec 007-2b
+      # Req 11.2 / Q-2). Pulled with the same skip-if-cached guard as the
+      # generation LLM; 278m is ~563MB so the warm-up cost stays modest. If this
+      # pull is ever measured to inflate daemon warm-up materially, R11.4 permits
+      # splitting the RAG e2e into its own job/gate (Task 12.3 defers that to CI
+      # measurement; not pre-emptively isolated here).
+      - name: Pull embedding model (skip if cached)
+        run: |
+          if docker exec ollama ollama list 2>/dev/null \
+              | awk 'NR>1 {print $1}' \
+              | grep -Fxq "${OLLAMA_EMBED_MODEL_NAME}"; then
+            echo "model already cached: ${OLLAMA_EMBED_MODEL_NAME}"
+          else
+            echo "pulling ${OLLAMA_EMBED_MODEL_NAME}..."
+            docker exec ollama ollama pull "${OLLAMA_EMBED_MODEL_NAME}"
           fi
 
       - name: Run pattern integration lanes
