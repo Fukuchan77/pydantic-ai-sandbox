@@ -27,30 +27,39 @@ Conventions:
 research.md ADR-4 / Risk R-1・R-3 が impl 冒頭へ委ねた最終確定をここで固める決定ゲート。
 **この gate が green になるまで Task 1 以降は着手しない。**
 
-_Boundary:_ `patterns/sse/pyproject.toml`(PoC), `specs/008-2c-cross-platform/research.md`
+_Boundary:_ `patterns/sse/{pyproject.toml,.python-version,uv.lock,test_spike_asgi.py}`(PoC throwaway — Task 1 で全置換), `specs/008-2c-cross-platform/research.md`
 _Depends:_ none
 _Requirements:_ 1.1, 5.1, 6.2
 
-- [ ] 0.1 `patterns/sse/` PoC 雛形（`package=false`・throwaway）で `uv add fastapi
+- [x] 0.1 `patterns/sse/` PoC 雛形（`package=false`・throwaway）で `uv add fastapi
   sse-starlette` + dev `httpx pydantic-ai`（Ollama 用 openai provider extra）を解決し、
   `uv.lock` サイズ・依存ツリー（provider extra の引き込み重量）・cold/warm `uv sync
   --locked` 時間を実測する。Python は 3.14（I-7）で固定する。
-  _Boundary:_ `patterns/sse/pyproject.toml`(PoC)
+  _Boundary:_ `patterns/sse/{pyproject.toml,.python-version,uv.lock}`(PoC throwaway)
   _Depends:_ none
   _Requirements:_ 1.1
-- [ ] 0.2 実装版 httpx に対し (a) 有限ストリームの全文バッファ取得（R5 ハッピーパス）と
+- [x] 0.2 実装版 httpx に対し (a) 有限ストリームの全文バッファ取得（R5 ハッピーパス）と
   (b) ASGI scope 直接駆動の `http.disconnect` 注入 → 本体ジェネレータ cancel 到達（R6）を
   最小スパイクで実測し、ADR-4 を確定して research.md Risk R-1 / R-3 のスパイクブロックに
   実測値と判断を追記する（万一 ASGITransport が逐次配信/切断伝播へ変わっても scope 直接駆動が
   上位互換である旨も確認）。
-  _Boundary:_ `specs/008-2c-cross-platform/research.md`
+  _Boundary:_ `patterns/sse/test_spike_asgi.py`(PoC throwaway), `specs/008-2c-cross-platform/research.md`
   _Depends:_ 0.1
   _Requirements:_ 5.1, 6.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- **ADR-4 確定（gate green）**: 実装版 httpx 0.28.1 / sse-starlette 3.4.4 / fastapi
+  0.136.3 / Python 3.14.5 に対し `patterns/sse/test_spike_asgi.py` 2 ケースが PASS。
+  (a) 有限 `EventSourceResponse` は ASGITransport で全文バッファ取得でき、(b) `app(scope,
+  receive, send)` 直接駆動で K=3 フレーム後に `http.disconnect` を注入すると本体ジェネレータが
+  `CancelledError` を受け `except`(再 raise)+`finally` 解放が走り早期停止。R-1 クローズ。
+- **依存重量は軽量（R-3 クローズ）**: all-groups `uv.lock` = 42 pkg / 73.3 KiB、runtime-only
+  閉包 = 11 pkg（ML wheel ゼロ、torch/onnxruntime/numpy 無し）。cold sync 0.79s / warm
+  `--locked` 0.01–0.02s。CI 影響軽微。
+- **Task 1 申し送り**: `[tool.uv] prerelease = "allow"`（pydantic-ai beta 解決に必須）が
+  runtime 閉包へ波及し pydantic 2.14.0a1(alpha)/starlette 1.3.1 を引く。本番レーンでは
+  prerelease 許可を pydantic-graph/pydantic-ai へ限定するか pydantic を stable に上限ピン。
 
 ---
 

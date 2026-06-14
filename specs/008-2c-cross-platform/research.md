@@ -316,6 +316,20 @@ pydantic-ai と httpx は**テスト専用**（src は framework-agnostic、ADR-
   (b) ASGI scope 直接駆動での `http.disconnect` 注入 → cancel 到達（R6）を実測確認する。
   万一 ASGITransport が将来逐次配信/切断伝播へ変わっても、ADR-4 の scope 直接駆動は
   上位互換（より低層で安定）。
+  - **Spike 実測（Task 0.2, 2026-06-14 / 確定）**: 実装版 httpx 0.28.1 / sse-starlette
+    3.4.4 / fastapi 0.136.3 / Python 3.14.5 に対し `patterns/sse/test_spike_asgi.py`
+    （2 ケース）が両方 **PASS**。
+    - (a) **有限ストリーム全文バッファ取得 = 確認**: `EventSourceResponse` の有限ストリーム
+      （`token×3 → completed`）を `ASGITransport` 経由で取得すると、終端 `completed` を含む
+      全文が 1 ボディとして返り、`event:`/`data:` 列にパースできた（逐次配信なしで R5 を満たす）。
+    - (b) **scope 直接駆動 `http.disconnect` → cancel 到達 = 確認**: 同一 ASGI アプリを
+      `app(scope, receive, send)` で駆動し、K=3 件の `data:` フレーム送出後にカスタム
+      `receive()` が `{"type":"http.disconnect"}` を注入したところ、sse-starlette が本体
+      ジェネレータを cancel し、`except asyncio.CancelledError`（再 raise）+ `finally` の
+      解放 sentinel が実行され、ジェネレータは安全上限（1000）より前で早期停止した。
+    - **判断**: **ADR-4 を確定**。httpx 通常クライアントの早期 close が切断を伝播しない件
+      （I-3）は、本技法が `http.disconnect` の唯一の存在層（ASGI receive）を直接用いる
+      *理由*そのものであり、構造的に成立（scope 直接駆動が上位互換）。R-1 クローズ。
 - ⚠️ **R-2 sse-starlette の有限ストリームと ASGITransport バッファの相互作用**（R5）—
   本体ジェネレータが `completed`/`error` で必ず return することに依存（無限ストリームは
   ASGITransport でハングする）。mitigation: 終端マーカー（R4.4）を契約・テストで強制し、
@@ -324,6 +338,23 @@ pydantic-ai と httpx は**テスト専用**（src は framework-agnostic、ADR-
   Ollama 駆動に必要な provider（`OpenAIChatModel + OllamaProvider`）の extra を dev グループに
   限定し src 閉包を汚さない。uv.lock 差分は Task 0 Spike で実測。`patterns_pydantic_ai` を
   import しない（NFR-3）。
+  - **Spike 実測（Task 0.1, 2026-06-14 / 確定）**: throwaway PoC（`patterns/sse/`,
+    `package=false`, Python 3.14.5）で `fastapi>=0.136 sse-starlette>=3.4` +
+    dev `httpx>=0.28 pydantic-ai-slim[openai]>=2.0.0b6 pytest pytest-asyncio` を解決。
+    - **依存重量 = 軽量・問題なし**: all-groups `uv.lock` = **42 パッケージ / 73.3 KiB**、
+      `.venv` 実体 40 dist-info。**runtime-only 閉包（fastapi + sse-starlette）= 11 パッケージ**
+      で ML wheel ゼロ。provider extra（dev: pydantic-ai-slim[openai]）が足す ~30 パッケージの
+      最大は openai 8.4 MiB / pydantic_ai 3.9 MiB / tiktoken 2.6 MiB。**torch/onnxruntime/
+      numpy/transformers いずれも無し**（RAG レーンの docling/ML 重量とは対照的に pure-Python）。
+    - **同期時間 = CI 影響軽微**: cold `uv sync --all-groups`（uv グローバルキャッシュ温）
+      = 0.79s、warm `uv sync --all-groups --locked` = 0.01–0.02s（×3 計測）。
+    - **副次の確定事項（Task 1 への申し送り）**: pydantic-ai V2 beta（`pydantic-graph` の
+      pre-release ピン）解決のため `[tool.uv] prerelease = "allow"` が必須だが、これが
+      **runtime 閉包にも波及**し pydantic 2.14.0a1（alpha）/ starlette 1.3.1 を引く。Task 1 の
+      本番レーンでは prerelease 許可を pydantic-graph/pydantic-ai 系へ限定（per-package）するか
+      pydantic を stable に上限ピンし、fw 非依存 src 閉包が alpha pydantic に乗らないようにする。
+    - **判断**: provider extra 重量は許容範囲（NFR-3 の「src は非依存・dev/結合のみ」で隔離
+      可能）。**R-3 クローズ**、prerelease スコープのみ Task 1.1 で対応。
 - ⚠️ **R-4 カバレッジフロア**（R5.4 / NFR-4）— 新規レーンは切断/エラー分岐が多い。
   mitigation: 兄弟レーン parity（98）を目標、被覆困難なグルー（OTLP 遅延 import 等）が残れば
   005/006 エントリフロア 85 から ratchet で着地し rationale を spec/commit に明示。RAG が

@@ -1,0 +1,45 @@
+# patterns/sse — Task 0 Spike PoC (Spec 008-2c). THROWAWAY.
+#
+# `package = false` -> uv treats this as a virtual project (no build, no src
+# required). This file exists ONLY to measure, before committing to the lane:
+#   * the dependency closure weight of fastapi + sse-starlette + the
+#     dev/integration-only pydantic-ai openai-provider extra (Risk R-3),
+#   * uv.lock size and cold/warm `uv sync --locked` time (Req 1.1),
+#   * and to host the ASGITransport spike that finalizes ADR-4 / Risk R-1.
+#
+# Task 1 replaces this with the real lane pyproject (hatchling build,
+# patterns-contracts path dep, ruff/pyright/coverage gates). Do NOT depend on
+# anything here surviving the spike gate.
+[project]
+name = "patterns-sse-spike"
+version = "0.0.0"
+description = "THROWAWAY Task 0 spike — measure dep weight + confirm ASGITransport behavior (ADR-4)."
+requires-python = ">=3.14"
+dependencies = [
+    # SSE delivery runtime under evaluation (Req 1.1). Pinned to the floors the
+    # research log verified on PyPI (fastapi 0.136.x / sse-starlette 3.4.4).
+    "fastapi>=0.136",
+    "sse-starlette>=3.4",
+]
+
+[dependency-groups]
+dev = [
+    # httpx ASGITransport drives the in-process happy-path spike (R5 / ADR-4a).
+    "httpx>=0.28",
+    # Integration-only: present here solely to MEASURE the provider-extra
+    # closure weight (Risk R-3). The lane src stays framework-agnostic; this is
+    # never imported by the spike test below. Mirrors the pydantic-ai lane's
+    # `pydantic-ai-slim[openai]` (OpenAIChatModel + OllamaProvider for Ollama).
+    "pydantic-ai-slim[openai]>=2.0.0b6",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.uv]
+package = false
+# pydantic-ai V2 is beta; pydantic-graph ships matching pre-release pins. Mirror
+# the pydantic-ai lane's `prerelease = "allow"` so the dev closure resolves.
+prerelease = "allow"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
