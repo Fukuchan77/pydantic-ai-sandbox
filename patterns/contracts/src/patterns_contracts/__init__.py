@@ -31,6 +31,14 @@ from patterns_contracts.parallelization import Branch, ParallelResult
 from patterns_contracts.prompt_chaining import ChainResult, ChainStep, GateOutcome
 from patterns_contracts.rag import Citation, RagAnswer, RetrievedChunk
 from patterns_contracts.routing import Route, RoutedAnswer, RouteDecision
+from patterns_contracts.sse import (
+    CompletedEvent,
+    ErrorEvent,
+    SseEvent,
+    StepStartedEvent,
+    TokenEvent,
+    ToolCalledEvent,
+)
 
 __all__ = [
     "AgentRunResult",
@@ -40,6 +48,8 @@ __all__ = [
     "ChainResult",
     "ChainStep",
     "Citation",
+    "CompletedEvent",
+    "ErrorEvent",
     "GateOutcome",
     "Iteration",
     "OptimizationResult",
@@ -50,8 +60,12 @@ __all__ = [
     "Route",
     "RouteDecision",
     "RoutedAnswer",
+    "SseEvent",
+    "StepStartedEvent",
     "SubTask",
     "TaskPlan",
+    "TokenEvent",
     "Tool",
+    "ToolCalledEvent",
     "WorkerResult",
 ]
