@@ -412,7 +412,7 @@ _Boundary:_ `patterns/rag/src/patterns_rag/observability.py`, `patterns/rag/test
 _Depends:_ 1
 _Requirements:_ 8.1, 8.2, 8.3
 
-- [ ] 8.1 exporter 優先チェーン（注入 > `OTEL_EXPORTER_OTLP_ENDPOINT` > no-op）と
+- [x] 8.1 exporter 優先チェーン（注入 > `OTEL_EXPORTER_OTLP_ENDPOINT` > no-op）と
   instrumentor 着脱を検証するテストを**先行作成（Red）**してから、
   `configure_tracing(exporter=None)` / `instrument_llamaindex(provider)` /
   `uninstrument_llamaindex(instrumentor)` を実装する（プロセスグローバル instrumentor の
@@ -420,13 +420,46 @@ _Requirements:_ 8.1, 8.2, 8.3
   _Boundary:_ `patterns/rag/src/patterns_rag/observability.py`, `patterns/rag/tests/unit/test_observability.py`
   _Depends:_ 1
   _Requirements:_ 8.1
-- [ ] 8.2 `InMemorySpanExporter` 注入で RAG 実行時に span≥1 と末端 LLM/検索スパンの
+- [x] 8.2 `InMemorySpanExporter` 注入で RAG 実行時に span≥1 と末端 LLM/検索スパンの
   存在を検証するテストを作成する（属性集計はアサートしない）。
   _Boundary:_ `patterns/rag/tests/unit/test_observability.py`
   _Depends:_ 8.1, 7
   _Requirements:_ 8.2, 8.3
 
 ### Implementation Notes
+
+実装（Task 8, 2026-06-14 / openinference-instrumentation-llama-index + opentelemetry-sdk,
+CPython 3.13.7）:
+
+- **observability.py（NFR-3 レーン自前コピー / R8.1）**: 兄弟 `llamaindex` レーンから
+  vendoring せず**同一契約を自前実装**。`configure_tracing(exporter=None)` は優先チェーン
+  注入 > `OTEL_EXPORTER_OTLP_ENDPOINT` > no-op、`instrument_llamaindex(provider)` /
+  `uninstrument_llamaindex(instrumentor)` は OpenInference `LlamaIndexInstrumentor` の
+  プロセスグローバル着脱。RAG パイプラインは LlamaIndex 上で走る（`VectorStoreIndex`
+  リトリーバと LLM が dispatcher 経由）ため、この instrumentor が検索/LLM スパンを捕捉する。
+- **優先チェーン3段を全被覆（R8.1, observability.py 100%）**: (1) no-op=env 未設定で
+  OTLP 非構築、(2) 注入>env=endpoint 設定下でも注入 exporter にスパン着地し OTLP 分岐は
+  短絡、(3) env>no-op=endpoint 設定+注入なしで OTLP 構築。env 分岐は実 `OTLPSpanExporter` を
+  記録スパイ `_RecordingOTLPExporter(SpanExporter)` へ monkeypatch（`from … import` を
+  呼出時解決する性質を利用）— **ネットワークゼロで OTLP 経路の発火のみ立証**、`provider.shutdown()`
+  で BatchSpanProcessor ワーカースレッドを join。
+- **span スパイク（事前 de-risk）**: TDD 前に instrumentor を inline 配線した throwaway で
+  実 `run_rag`（`build_index`+HashEmbedding → `as_retriever` → ScriptedLLM）が吐く 11 スパンを
+  実測し名前を確認 — 検索=`VectorIndexRetriever.retrieve`、LLM=`ScriptedLLM.complete`/
+  `.astructured_predict`（"llm"/"complete" 双方に一致）。Task 7 の事前スパイク慣行に倣う。
+- **8.2/8.3 末端スパン存在のみ（R8.3）**: instrument→実 `run_rag`→span≥1 をアサートし、
+  名前小文字に "llm"/"complete"（末端 LLM）と "retriev"（末端検索）の**存在**を確認。属性集計は
+  一切アサートしない（バックエンド責務・二重計上トラップ回避、兄弟レーンと同一判定形状）。
+  着脱の実効性は「uninstrument 後の再 run で同 exporter にスパン**増分ゼロ**」で立証（飾りでない）。
+- **`__init__` への tracing 再エクスポートは本タスクの boundary 外**: Task 8 の `_Boundary:_` は
+  observability.py / test_observability.py の2点のみ。`__init__.py`（Task 7.3 所有）への tracing
+  シンボル合流は本タスク境界に含まれず、トップレベル import を要求するテストも存在しないため**未変更**
+  （境界規律を優先。合流が要る場合は __init__.py を再開するタスクの所有物）。smoke は不変。
+- **TDD/検証**: RED（`ModuleNotFoundError: patterns_rag.observability`）→ 5 新規テスト green。
+  lane **55 passed**・ruff/format/pyright strict グリーン、coverage **98%**
+  （observability.py 100% / 21 stmts・4 branch 全被覆, gate 85）。`HF_HUB_OFFLINE=1` 下・
+  ネットワークゼロ。boundary 2ファイルのみ、ルート・他レーン無変更。mise `patterns:*` 配線は
+  Task 12.1 の所有物（本タスクは per-lane 直接起動で検証）。
 
 ---
 
