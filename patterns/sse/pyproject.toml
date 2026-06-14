@@ -1,0 +1,144 @@
+# patterns/sse — Server-Sent Events delivery lane (Spec 008-2c Req 1.1/1.2).
+#
+# Independent uv project (plan §File Structure Plan), the second *application*
+# layer after the RAG lane. Python is pinned to 3.14 (ADR-1 / research.md I-7):
+# the SSE closure is pure-Python (Task 0 spike measured 11 runtime pkg, zero ML
+# wheels), so the 3.13 cap the Docling/LlamaIndex lanes carry does not apply
+# here — this lane matches the pydantic-ai lane's 3.14 interpreter instead.
+#
+# The lane src is deliberately **framework-agnostic** (Req 1.3 / NFR-3): it owns
+# FastAPI + sse-starlette delivery and the EventSource DI seam, never a sibling
+# lane. pydantic-ai is dev/integration-only — it backs the gated Ollama
+# `run_stream_events` adapter (Task 10), never the runtime closure.
+#
+# Prerelease policy (Task 0 hand-off, do.md learning #3): pydantic-ai V2 is beta
+# and pins `pydantic-graph` to a pre-release, so `prerelease = "allow"` is
+# required for the dev closure to resolve (mirrors the pydantic-ai lane). Left
+# unbounded, `allow` also drags the *runtime* pydantic onto an alpha (2.14.0aN).
+# We keep the framework-agnostic runtime off pre-release pydantic with an
+# explicit stable upper bound below — the alpha then stays confined to nothing
+# (pydantic-graph itself rides its own pre-release pin, not pydantic's).
+
+[project]
+name = "patterns-sse"
+version = "0.1.0"
+description = "Cross-framework agent patterns — Server-Sent Events delivery lane (streamed agent-run events over text/event-stream)."
+# `readme` is intentionally not declared yet: the lane README (the contract
+# canonical source) is created in Task 11. Pointing `readme` at a missing file
+# would break the hatchling build.
+requires-python = ">=3.14"
+dependencies = [
+    # Shared contract package (path dep, Req 1.2). The SSE event models and the
+    # `SseEvent` discriminated union live here as the single source of truth
+    # (Task 2); the lane never duplicates them and never imports a sibling lane
+    # (NFR-3 / Req 1.3).
+    "patterns-contracts",
+    # SSE delivery runtime (Req 1.1). Floors pinned to the versions the Task 0
+    # spike resolved and exercised against ASGITransport (fastapi 0.136.x /
+    # sse-starlette 3.4.x).
+    "fastapi>=0.136",
+    "sse-starlette>=3.4",
+    # Framework-agnostic event contracts ride Pydantic. Upper-bounded to keep
+    # the runtime closure on a *stable* pydantic even though `prerelease =
+    # "allow"` (required for the dev pydantic-ai closure) would otherwise pull
+    # an alpha into this shared package (Task 0 hand-off).
+    "pydantic>=2,<2.14",
+    # Observability parity with the sibling lanes (Req 7): the OTLP exporter is
+    # the default span sink; `configure_tracing` (Task 8) falls back to no-op
+    # when neither an exporter nor OTEL_EXPORTER_OTLP_ENDPOINT is present.
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
+[dependency-groups]
+dev = [
+    # httpx ASGITransport drives the in-process happy-path tests (R5 / ADR-4a).
+    "httpx>=0.28",
+    # Integration-only (Task 10): the `run_stream_events` -> SseEvent adapter
+    # backs the gated Ollama lane. Mirrors the pydantic-ai lane's
+    # `pydantic-ai-slim[openai]` (OpenAIChatModel + OllamaProvider). Never
+    # imported by the framework-agnostic lane src (NFR-3).
+    "pydantic-ai-slim[openai]>=2.0.0b6",
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_sse"]
+
+[tool.uv]
+# pydantic-ai V2 is beta; pydantic-graph ships matching pre-release pins. Mirror
+# the pydantic-ai lane's `prerelease = "allow"` so the dev closure resolves. The
+# runtime pydantic stays stable via the `<2.14` upper bound above.
+prerelease = "allow"
+
+# Path dependency to the shared contracts package. Editable so contract edits
+# (Task 2 adds `patterns_contracts.sse`) land without a re-sync; `../contracts`
+# resolves from patterns/sse/ to patterns/contracts/ — one segment shallower
+# than the frameworks/*/ lanes' `../../contracts` because this lane sits at
+# depth 1 under patterns/, mirroring the RAG lane.
+[tool.uv.sources]
+patterns-contracts = { path = "../contracts", editable = true }
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_sse"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/patterns_sse"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+# Ratcheted to the 98 sibling-lane parity (pydantic-ai / rag lanes, 005/006
+# target; NFR-4 / R5.4 / research.md R-4). Task 9.1's hermetic one-pass and
+# runaway-backstop cases lifted the lane to 99.01%, so 98 holds with a 1-point
+# buffer. The single residual uncovered branch is `app.py:113->exit` — the
+# `aclose is None` arm of the producer-release `finally`, which is unreachable
+# in practice: every injected `EventSource` (scripted fake and the gated
+# pydantic-ai adapter alike) is an async generator that *has* `aclose`. Covering
+# it would require a contrived non-generator iterator that exists only to take
+# that branch, so per R-4 it is left as the documented hard-to-cover glue rather
+# than ratcheted to a brittle 100.
+fail_under = 98
+show_missing = true
+skip_covered = false

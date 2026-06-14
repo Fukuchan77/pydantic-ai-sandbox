@@ -28,6 +28,10 @@ on:
       # at patterns/rag/ with its own dedicated job below. `patterns/**` already
       # matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/rag/**'
+      # The SSE delivery lane (Spec 008-2c Req 10.1) is an independent lane at
+      # patterns/sse/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/sse/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   pull_request:
@@ -42,6 +46,10 @@ on:
       # at patterns/rag/ with its own dedicated job below. `patterns/**` already
       # matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/rag/**'
+      # The SSE delivery lane (Spec 008-2c Req 10.1) is an independent lane at
+      # patterns/sse/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/sse/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -188,5 +196,55 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 7.2 / 007-2b Req 11.1: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # The SSE delivery lane (Spec 008-2c Req 1.1) is an independent uv project at
+  # patterns/sse/ — depth 1 under patterns/, a sibling of frameworks/ and rag/,
+  # NOT an entry in the lane matrix above (Task 0 spike: 11-pkg runtime closure,
+  # no ML wheels). Like contracts and rag it gets a dedicated job mirroring the
+  # lane gates (Req 10.1). The unit suite is offline and hermetic — a block_network
+  # fixture loud-fails on any internet socket and the ASGITransport driver opens
+  # no real sockets (R5.1), so NO daemon or model pre-fetch step is needed; the
+  # live-Ollama e2e is gated by RUN_INTEGRATION_PATTERNS and runs in the separate
+  # patterns-integration-ollama.yml. Coverage floor is the sibling-lane parity 98
+  # (NFR-4); the lane lands at 99.01%.
+  sse:
+    name: sse
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/sse
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads patterns/sse/.python-version (3.14) and provisions the matching
+      # interpreter — no mise needed (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/sse/uv.lock
+
+      - name: Sync sse dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Offline + hermetic: block_network fixture + in-process ASGITransport driver
+      # keep the whole unit suite network-zero (R5.1); no daemon needed here.
+      - name: pytest (offline, coverage floor 98)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 005 Req 7.2 / 008-2c Req 8.2: per-lockfile dependency CVE scan.
       - name: pip-audit
         run: uv run pip-audit
