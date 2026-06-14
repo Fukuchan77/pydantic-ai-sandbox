@@ -1,0 +1,131 @@
+# patterns/rag — Docling RAG application lane (Spec 007-2b Req 1.1/1.2).
+#
+# Independent uv project (plan §File Structure Plan). Python is capped at 3.13
+# to match the sibling llamaindex lane and dodge 3.14 wheel gaps across the
+# Docling / LlamaIndex transitive trees. Placement was finalized as an
+# independent lane (ADR-1, Task 0 spike): 119 pkg / no torch / no onnxruntime,
+# co-location with the llamaindex lane rejected to keep that lane's HF-free
+# closure pure.
+#
+# Security floors (patterns/SECURITY-NOTES.md):
+#   * Full `docling` converter is NOT a dependency — only `docling-core`
+#     (HybridChunker + DoclingDocument.load_from_json). Layout/OCR models are
+#     pushed off the CI path via pre-converted *.docling.json fixtures (ADR-3),
+#     keeping unit runs offline and hermetic (R6.1).
+#   * In-memory SimpleVectorStore is the default; external vector-store
+#     integrations (CVE-2025-1793 SQLi) stay out of scope.
+
+[project]
+name = "patterns-rag"
+version = "0.1.0"
+description = "Cross-framework agent patterns — Docling + LlamaIndex RAG application lane (cited retrieval-augmented answers)."
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # Shared contract package (path dep, Req 1.2). The RAG contracts
+    # (RetrievedChunk / Citation / RagAnswer) live here as the single source of
+    # truth; the lane never duplicates them and never imports a sibling lane
+    # (NFR-3 / Req 1.3).
+    "patterns-contracts",
+    # RAG-core runtime (ADR-3): docling-core ships HybridChunker and
+    # DoclingDocument.load_from_json. The [chunking] extra pulls the tokenizer
+    # stack HybridChunker needs. The full `docling` converter is deliberately
+    # excluded — conversion is fixtured off the CI path.
+    "docling-core[chunking]>=2.82",
+    "llama-index-core>=0.14",
+    # Embedding + LLM backends for the gated Ollama integration lane (Req 7).
+    # Offline unit runs inject deterministic fakes instead (Req 3.2 / 6.3).
+    "llama-index-embeddings-ollama",
+    "llama-index-llms-ollama",
+    "pydantic>=2",
+    # Observability parity with the llamaindex lane (Req 8.1): OpenInference
+    # instruments LlamaIndex into any OTel TracerProvider.
+    "openinference-instrumentation-llama-index",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
+]
+
+[dependency-groups]
+dev = [
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    # Sets HF_HUB_OFFLINE=1 for every unit run (see [tool.pytest.ini_options]
+    # env below) so the real HybridChunker tokenizer can never reach the Hub
+    # network path during offline tests (R6.1 / research.md R-1).
+    "pytest-env",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_rag"]
+
+# Path dependency to the shared contracts package. Editable so contract edits
+# land without a re-sync; `../contracts` resolves from patterns/rag/ to
+# patterns/contracts/ — one segment shallower than the frameworks/*/ lanes'
+# `../../contracts` because this lane sits at depth 1 under patterns/.
+[tool.uv.sources]
+patterns-contracts = { path = "../contracts", editable = true }
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_rag"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+# Docling / LlamaIndex ship partial/loose type stubs; strict mode stays on for
+# first-party code while unknown-member noise from the libraries is reported
+# (not silenced) — fix sites use targeted ignores with an upstream rationale.
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+# Offline hermetic floor (R6.1): force the HF Hub into offline mode for every
+# unit run so the real HybridChunker tokenizer resolves from local assets only
+# and any accidental network reach loud-fails instead of silently downloading.
+env = [
+    "HF_HUB_OFFLINE=1",
+]
+
+[tool.coverage.run]
+source = ["src/patterns_rag"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+# Sibling-lane parity (NFR-4): ratcheted from the 005/006 entry floor of 85 to 98 once the
+# full pipeline was covered (Task 9.2). 98 matches the pydantic-ai / llamaindex / beeai
+# lanes; the final uncovered path (a prov-less chunk's `_first_prov` -> None section
+# fallback) is exercised by test_chunking_golden (research.md R-4).
+fail_under = 98
+show_missing = true
+skip_covered = false

@@ -8,7 +8,7 @@
 |---|---|---|---|
 | CVE-2026-25580 | pydantic-ai < 1.56.0 — URL ダウンロードの SSRF（クラウドメタデータ窃取） | 修正済 v1.56.0（GHSA-2jrp-274c-jhv3） | pydantic-ai レーンは `>=2.0.0b6`。2.x ベータ系は v1.99.0 修正の**後継**であり影響なし |
 | CVE-2026-46678 | pydantic-ai 1.56.0–1.98.x — IPv4-mapped IPv6 等でブロックリスト迂回（前項の不完全修正） | 修正済 v1.99.0（GHSA-cqp8-fcvh-x7r3） | 同上。**1.x を使う場合は >=1.99.0 必須** |
-| CVE-2025-1793 | llama-index-core <=0.12.21 のベクトルストア統合 8 種 — SQL インジェクション | 修正済 v0.12.28 | 本イテレーションはベクトルストア**不使用**。Docling RAG イテレーション着手時のゲート条件として記録 |
+| CVE-2025-1793 | llama-index-core <=0.12.21 のベクトルストア統合 8 種 — SQL インジェクション | 修正済 v0.12.28 | RAG レーンは **in-memory `SimpleVectorStore` 既定のみ**を能動的に明示構築し、脆弱な外部ベクタ DB 統合 8 種を**混入させない**（`indexing.py` で `isinstance` 固定・上流既定変化を回帰検知）。外部ベクタストア採用時は `>=0.12.28` フロアを必須ゲートとする |
 | CVE-2025-1752 | llama-index-readers-web <=0.3.5 — KnowledgeBaseWebReader の無制限再帰 DoS | 修正済 0.3.6 | **非依存**。採用時は `llama-index-readers-web>=0.3.6` フロア + max_depth 制御を必須とする |
 | CVE-2024-50050 | llama-stack <0.0.41 — pyzmq/pickle 経由のデシリアライズ RCE | 修正済 v0.0.41 | **llama-stack は採用禁止**（本パターン集に不要。導入提案は本ノートの更新を伴うこと） |
 
@@ -49,6 +49,25 @@ autonomous-agent は唯一の「Agent」型パターンで OWASP Agentic AI Top 
 fan-out は無く逐次ツールループのため、本パターンの無制限消費対策はワーカー数
 上限ではなく `max_iterations` ＋ `budget` の二重上界で構成する（routing /
 orchestrator-workers の `max_workers` とはレーン横断で対称）。
+
+### RAG 応用レイヤ → OWASP LLM Top 10 マッピング（Spec 007 Req 9.1）
+
+RAG（`patterns/rag/`）は検索済みコンテキストを LLM 生成へ供給する応用レイヤで、
+ワークフローパターンとは別系統のリスク面を持つ。RAG 固有リスクを OWASP LLM
+Top 10（2025）へマッピングし、契約レベルの緩和策と対応づける。
+
+| RAG 固有リスク | OWASP LLM Top 10（2025） | 本レーンでの緩和策と契約面 |
+|---|---|---|
+| **インデックス汚染**（信頼できない文書がコーパスに混入し、汚染チャンクが検索される） | LLM08 Vector and Embedding Weaknesses ／ **過度の依存**（汚染された検索結果の無批判な信頼） | 取り込みは固定資産（`sample.docling.json`、ADR-3）に限定し変換器を CI 経路外へ。`chunk_id` 序数導出 + golden スナップショット（`golden_chunks.json`）で**チャンク境界の改変を回帰検知**。本番取り込み層の入力検証は後続イテレーションで多層防御として実装 |
+| **引用なりすまし**（dangling citation: 検索されていない `chunk_id` を指す捏造引用） | **過度の依存**（Misinformation / Overreliance） | `validate_citations` が各 `Citation.chunk_id` の検索済み集合メンバシップを検証し、未検索 id は `DanglingCitationError` で **loud-fail**（R4.3/R9.3）。引用ゼロは `EmptyCitationError`。引用は飾りでなく**接地を契約で強制** |
+| **PII を含むチャンクの露出**（個人情報を含むチャンクが検索・引用され回答へ漏出） | LLM02 **データ漏洩**（Sensitive Information Disclosure） | in-memory `SimpleVectorStore` 既定で外部ベクタ DB へ PII を流出させない（CVE-2025-1793 回避）。コーパスの PII 除去は取り込み層の責務として後続イテレーションで実装。gitleaks がリポジトリ全域（RAG 固定資産を含む）を走査し、秘匿情報のコミットを遮断 |
+
+**pre-commit 不変条件（Req 9.4）**: `gitleaks` と `forbid-hardcoded-model-ids`
+の2フックは **`exclude: ^patterns/` を持たず、RAG レーンを含む patterns/ 全域を
+走査する**（`.pre-commit-config.yaml`）。レーン品質ゲート（ruff/format/typecheck）
+の3フックは `mise run patterns:check` と patterns-ci.yml へ委譲するため
+`exclude: ^patterns/` を持つが、**秘匿情報スキャンとモデル ID ハードコード禁止は
+リポジトリ全域の不変条件**として RAG レーンも例外なく対象に含む。
 
 ## 既知の制約（Accepted Risk）
 

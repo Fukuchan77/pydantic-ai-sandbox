@@ -65,66 +65,78 @@ run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
 # import via `tool.uv.sources`, so its gate must pass before any lane that
 # depends on it (Req 10.2 / 13.1). With `set -e`, a contracts failure stops
 # the run before the lanes execute.
+#
+# The RAG application lane (Spec 007-2b Req 1.1) lives at `patterns/rag/` —
+# depth 1 under patterns/, a sibling of frameworks/, NOT under the
+# `patterns/frameworks/*/` glob the loop walks. It was finalized as an
+# independent lane (ADR-1 / Task 0 spike), so each task carries an explicit
+# `(cd patterns/rag && …)` line after the lane loop (Req 12.1).
 # ---------------------------------------------------------------------------
 
 [tasks."patterns:setup"]
-description = "Sync the contracts package and all pattern lanes (uv resolves each lane's .python-version)."
+description = "Sync the contracts package and all pattern lanes incl. rag (uv resolves each lane's .python-version)."
 run = """
 set -e
 echo "== setup patterns/contracts"; (cd patterns/contracts && uv sync --all-groups)
 for d in patterns/frameworks/*/; do
   echo "== setup $d"; (cd "$d" && uv sync --all-groups)
 done
+echo "== setup patterns/rag"; (cd patterns/rag && uv sync --all-groups)
 """
 
 [tasks."patterns:lint"]
-description = "Ruff lint across the contracts package and all pattern lanes."
+description = "Ruff lint across the contracts package and all pattern lanes incl. rag."
 run = """
 set -e
 echo "== lint patterns/contracts"; (cd patterns/contracts && uv run ruff check .)
 for d in patterns/frameworks/*/; do
   echo "== lint $d"; (cd "$d" && uv run ruff check .)
 done
+echo "== lint patterns/rag"; (cd patterns/rag && uv run ruff check .)
 """
 
 [tasks."patterns:format"]
-description = "Ruff format verification across the contracts package and all pattern lanes."
+description = "Ruff format verification across the contracts package and all pattern lanes incl. rag."
 run = """
 set -e
 echo "== format patterns/contracts"; (cd patterns/contracts && uv run ruff format --check .)
 for d in patterns/frameworks/*/; do
   echo "== format $d"; (cd "$d" && uv run ruff format --check .)
 done
+echo "== format patterns/rag"; (cd patterns/rag && uv run ruff format --check .)
 """
 
 [tasks."patterns:typecheck"]
-description = "Pyright strict across the contracts package and all pattern lanes (per-lane venv/python)."
+description = "Pyright strict across the contracts package and all pattern lanes incl. rag (per-lane venv/python)."
 run = """
 set -e
 echo "== typecheck patterns/contracts"; (cd patterns/contracts && uv run pyright)
 for d in patterns/frameworks/*/; do
   echo "== typecheck $d"; (cd "$d" && uv run pyright)
 done
+echo "== typecheck patterns/rag"; (cd patterns/rag && uv run pyright)
 """
 
 [tasks."patterns:test"]
-description = "Offline unit suites across the contracts package and all pattern lanes (contracts floor 85, lanes 98)."
+description = "Offline unit suites across the contracts package and all pattern lanes (contracts floor 85, lanes incl. rag 98)."
 run = """
 set -e
 echo "== test patterns/contracts"; (cd patterns/contracts && uv run pytest --cov)
 for d in patterns/frameworks/*/; do
   echo "== test $d"; (cd "$d" && uv run pytest --cov)
 done
+echo "== test patterns/rag"; (cd patterns/rag && uv run pytest --cov)
 """
 
 [tasks."patterns:audit"]
-description = "pip-audit for the contracts package and per lane lockfile (Spec 005 Req 7.2 / 006-2a Req 13.1)."
+description = "pip-audit for the contracts package and per lane lockfile incl. rag (Spec 005 Req 7.2 / 006-2a Req 13.1)."
 run = """
 set -e
 echo "== audit patterns/contracts"; (cd patterns/contracts && uv run pip-audit)
 for d in patterns/frameworks/*/; do
   echo "== audit $d"; (cd "$d" && uv run pip-audit)
 done
+echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit)
 """
 
 [tasks."patterns:check"]
@@ -132,12 +144,13 @@ description = "Aggregate lane quality gate (lint / format / typecheck / test)."
 depends = ["patterns:lint", "patterns:format", "patterns:typecheck", "patterns:test"]
 
 [tasks."patterns:test:integration"]
-description = "Gated Ollama integration lanes (RUN_INTEGRATION_PATTERNS=1)."
+description = "Gated Ollama integration lanes incl. rag (RUN_INTEGRATION_PATTERNS=1)."
 run = """
 set -e
 for d in patterns/frameworks/*/; do
   echo "== integration $d"; (cd "$d" && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 done
+echo "== integration patterns/rag"; (cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 """
 
 [tasks.dev]

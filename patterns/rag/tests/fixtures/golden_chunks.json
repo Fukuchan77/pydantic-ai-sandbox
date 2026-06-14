@@ -1,0 +1,26 @@
+[
+  {
+    "chunk_id": "rag-overview::0000",
+    "source": "rag-overview",
+    "locator": "page=1",
+    "text": "Retrieval-Augmented Generation\nRAG grounds a language model answer in retrieved source chunks rather than parametric memory.\nEach returned chunk carries a stable identifier so that a citation can point back to it."
+  },
+  {
+    "chunk_id": "rag-overview::0001",
+    "source": "rag-overview",
+    "locator": "page=2",
+    "text": "Deterministic Chunking\nThe chunker merges peer passages under a shared heading while respecting a fixed token budget."
+  },
+  {
+    "chunk_id": "rag-overview::0002",
+    "source": "rag-overview",
+    "locator": "page=3",
+    "text": "Token Budget\nBecause the token budget is fixed in advance the same document always yields the same chunk boundaries on every run which means a golden snapshot can detect any regression in"
+  },
+  {
+    "chunk_id": "rag-overview::0003",
+    "source": "rag-overview",
+    "locator": "page=3",
+    "text": "Token Budget\nthe chunking behaviour whenever a dependency version changes underneath the lane and shifts how passages are grouped or split apart into separate records."
+  }
+]
