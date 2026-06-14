@@ -569,19 +569,43 @@ _Boundary:_ `patterns/rag/README.md`, `patterns/contracts/tests/unit/test_contra
 _Depends:_ 2, 7
 _Requirements:_ 5.2, 5.3, 10.1, 10.3
 
-- [ ] 11.1 パターン README を作成する（契約正本の python fenced block〔注釈のみ、
+- [x] 11.1 パターン README を作成する（契約正本の python fenced block〔注釈のみ、
   `Field`/description なし〕、型安全/テスト/可観測性/セキュリティの必須4セクション、
   Docling/使用ライブラリのバージョンとベータ注記）。
   _Boundary:_ `patterns/rag/README.md`
   _Depends:_ 2, 7
   _Requirements:_ 10.1, 10.3
-- [ ] 11.2 `test_contract_drift.py` の `_README_PATHS` に `"rag"` 1行を追加し、README
+- [x] 11.2 `test_contract_drift.py` の `_README_PATHS` に `"rag"` 1行を追加し、README
   正本 == `patterns_contracts` 実体の一致と既存6パターン非破壊を検証する。
   _Boundary:_ `patterns/contracts/tests/unit/test_contract_drift.py`
   _Depends:_ 11.1
   _Requirements:_ 5.2, 5.3
 
 ### Implementation Notes
+
+実装（Task 11, 2026-06-14 / patterns_contracts 0.x, CPython 3.13.7）:
+
+- **計画済み RED 窓の閉鎖**: Task 2 が `patterns_contracts` へ 3 型を追加・再エクスポートした
+  時点から `test_contract_drift.py` の 3 テストが RED（`Extra items: RagAnswer / RetrievedChunk /
+  Citation` = package のみ存在・README 正本未記載）。本タスクが正本 README + `_README_PATHS`
+  登録で閉じる（fix-forward せず DAG Wave1→Wave5 の計画どおり）。RED→GREEN を実測で確認
+  （3 failed → 4 passed）。
+- **11.1 正本 README**: `patterns/rag/README.md` を兄弟（autonomous-agent）と同一スタイルで作成。
+  `## パターン契約（正本）` 見出し下の python fenced block は**注釈のみ**（`Field`/description
+  なし）で 3 型を記載 — パッケージのフィールド集合と完全一致（`RetrievedChunk`{chunk_id,source,
+  locator,text,score} / `Citation`{source,locator,chunk_id,score} / `RagAnswer`{answer,citations}）。
+  RAG は閉じた `Literal` 語彙を持たない（ワークフローパターンの `stop_reason`/`Route` と差分）。
+  `run_rag` signature はドリフト parser がスキップ（`async ` 始まり・`class ` 非該当）。必須4
+  セクション（型安全/テスト/可観測性/セキュリティ）+ 使用ライブラリ版表（docling-core 2.82 /
+  llama-index-core 0.14 ベータ系 / ollama embed+llm / openinference 4.4）+ ベータ注記を記載。
+- **11.2 単一点ドリフト配線**: `_README_PATHS` に `"rag"` 1 行を追加（既存6パターン非破壊）。
+  parser は package `__all__` 全モデルが**ちょうど1つの README** に記載されることを要求 —
+  `documented == _PACKAGE.classes` で RAG 3 型の正本一致を1点検証。
+- **TDD/検証**: 4 drift テスト green（class set / field set / literal / one-README invariant）。
+  contracts レーン全体 **12 passed**・coverage gate 充足、ruff check / format / pyright strict
+  全グリーン。boundary 2 ファイルのみ（README + drift test）、ルート・他レーン・RAG ソース無変更。
+  これにより Task 9 が記録した `mise run patterns:test` の contracts 停止窓も解消（rag レーンの
+  mise/CI 配線自体は Task 12 の所有）。
 
 ---
 
