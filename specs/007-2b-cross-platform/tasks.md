@@ -308,19 +308,43 @@ _Boundary:_ `patterns/rag/src/patterns_rag/citation.py`, `patterns/rag/tests/uni
 _Depends:_ 2
 _Requirements:_ 4.2, 4.3, 6.4, 9.3
 
-- [ ] 6.1 `validate_citations(answer, retrieved)` と例外型 `DanglingCitationError` /
+- [x] 6.1 `validate_citations(answer, retrieved)` と例外型 `DanglingCitationError` /
   `EmptyCitationError` を実装する。dangling（実在しない `chunk_id`）と empty（引用ゼロ）の
   loud-fail テストを先行作成（Red）。
   _Boundary:_ `patterns/rag/src/patterns_rag/citation.py`, `patterns/rag/tests/unit/test_dangling_citation.py`
   _Depends:_ 2
   _Requirements:_ 4.2, 4.3, 9.3
-- [ ] 6.2 引用健全性テストを作成する（各 `Citation` が実在チャンクを指し、`locator` が
+- [x] 6.2 引用健全性テストを作成する（各 `Citation` が実在チャンクを指し、`locator` が
   ソース範囲に対応）。
   _Boundary:_ `patterns/rag/tests/unit/test_citation_soundness.py`
   _Depends:_ 6.1
   _Requirements:_ 6.4
 
 ### Implementation Notes
+
+実装（Task 6, 2026-06-14 / patterns_contracts パス依存, CPython 3.13.7）:
+
+- **`validate_citations`（R4.2/R4.3/R9.3）**: `def validate_citations(answer, retrieved) -> None`
+  の純検証。`chunk_id` がレーン一意なため**集合メンバシップ**が健全性キー — `known =
+  {c.chunk_id for c in retrieved}` に対し各 `Citation.chunk_id` の所属のみで grounded を判定。
+  契約は依存ゼロのまま（R4.2/R4.3 不変条件はパイプライン責務、Task 2 の所有境界どおり）。
+- **例外階層**: `CitationError(Exception)` 基底 + `EmptyCitationError` / `DanglingCitationError`。
+  基底は Task 7 オーケストレータが `except CitationError` で両者を一括捕捉するための seam
+  （`__init__` フラット再エクスポート対象）。`test_citation_errors_share_a_common_base_class`
+  で `issubclass` を固定。
+- **チェック順序の決定**: empty を dangling より先に判定（空回答 vs 空 retrieved の交差で
+  EmptyCitationError を優先）。plan §Error Handling「空インデックス→引用不能→EmptyCitationError」
+  と整合。`test_empty_citation_check_precedes_dangling_check` で順序を固定。
+- **loud-fail の情報量**: dangling は最初の1件で止めず `sorted({...})` で**全違反 id** を
+  既知集合と併記して送出（なりすまし調査の足場）。`test_..._reports_all_dangling_chunk_ids` で担保。
+- **6.2 健全性（R6.4/R4.4）**: retrieved から忠実構築した citation が「実在チャンクを指し
+  source/locator がチャンクの出所範囲に対応」する不変条件を `by_id` 解決で固定。locator は
+  種別非依存（page/section/char）のため 3 スタイルを parametrize 被覆。
+- **TDD/検証**: RED（`ModuleNotFoundError: patterns_rag.citation`）→ 11 新規テスト green
+  （dangling 7 + soundness 4）。lane 43 passed・ruff/format/pyright strict グリーン、
+  coverage 97.06%（citation.py 100%, gate 85）。`HF_HUB_OFFLINE=1` 下・ネットワークゼロ。
+  boundary 3ファイルのみ、ルート・他レーン無変更。`__init__` 再エクスポートは Task 7.3 の所有物
+  のため本タスクでは未更新（smoke は不変）。
 
 ---
 
