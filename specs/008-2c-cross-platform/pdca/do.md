@@ -749,3 +749,52 @@ $ mise run check
   ワークフローは無改変。patterns/ は root pyproject の extend-exclude で隔離されるため、
   mise/CI 配線追加は root `mise run check` の挙動に波及しない（実測でも無変更グリーン）。
 - 残 Wave 6: Task 13（patterns/README.md 索引 + SECURITY-NOTES.md）。
+
+---
+
+## Task 13: タクソノミー索引とセキュリティノート（Wave 6, docs/security）
+
+### 13.1 patterns/README.md — SSE 応用レイヤ索引
+
+- RAG 節の直後・フレームワーク比較表の前へ `## 応用レイヤー（SSE 配信）` を追加。
+- blockquote で「SSE はワークフローパターンではなく**配信インフラの応用**」を明記（R9.2）、
+  Anthropic 6パターン表とは別軸索引。契約は `contracts/` 集約 + 同一ドリフト検知（R2.2）を併記。
+- `## レーン構成`（frameworks/ 3レーン列挙）には追記せず（RAG と同様、応用レイヤは別索引）。
+
+### 13.2 patterns/SECURITY-NOTES.md — SSE → OWASP マッピング + pre-commit 不変条件
+
+- `### SSE 配信応用レイヤ → OWASP マッピング（Spec 008 Req 8.1）` を「既知の制約」節の前へ追加。
+- 4リスク → OWASP: 機微情報混入→LLM02 データ漏洩 / 無制限消費→Unbounded Consumption /
+  切断リソースリーク→Unbounded Consumption / 認証前提の不在→過剰な公開面。緩和策は実装済みの
+  `_MAX_EVENTS=1000` / `send_timeout=60s` / 1行 `ErrorEvent.message` / `is_disconnected`+
+  `except CancelledError: raise`+`finally: aclose` / `asgi_driver` hermetic 検証と対応（R8.1/8.3）。
+- pre-commit 不変条件（R8.4）を**実測確認のうえ**記載。
+
+### 検証ゲート（docs タスクのため load-bearing = リンク実在 + 不変条件実測 + ルート不変）
+
+```
+# (1) 新規内部リンク実在
+OK  patterns/sse/README.md
+OK  patterns/contracts/README.md
+
+# (2) R8.4 pre-commit 不変条件（yaml.safe_load + 正規表現マッチで assertion）
+OK  gitleaks: covers patterns/sse (exclude=None)
+OK  forbid-hardcoded-model-ids: covers patterns/sse (exclude='^(tests/.*|src/.*/config\.py)$')
+INVARIANT HOLDS: both secret/model-ID hooks scan patterns/sse
+
+# (3) ルート無変更グリーン（R11.2/R10.3）
+$ mise run check
+  [format] all formatted / [lint] All checks passed! / [typecheck] 0 errors
+  [test] 277 passed, 4 skipped in 3.22s   # Task 12 baseline と同値
+```
+
+### 学び / 申し送り
+
+- **応用レイヤ docs は lane gate の外**: `patterns/README.md` / `SECURITY-NOTES.md` は
+  どの lane の `pyproject` にも属さず、契約ドリフトテストはパターン README（`patterns/sse/
+  README.md`）のみ読む。よってこの2ファイルへの変更はテストスイートに inert で、docs タスクの
+  load-bearing は「テスト緑」ではなく「主張の事実性（リンク実在・不変条件の実測）」で立てる。
+- **R8.4 は誇張しない**: gitleaks/forbid-model-id は patterns/ 全域を走査するが、
+  ruff/format/pyright の3フックは `exclude: ^patterns/` で lane gate へ委譲。両者を分離して
+  記述（秘匿情報・モデル ID 禁止 = リポジトリ全域不変、品質ゲート = lane 委譲）。
+- **Wave 6 完了 = 008-2c 全 13 タスク green**: 残タスクなし。次は /sdd-validate-impl。

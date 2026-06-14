@@ -636,7 +636,7 @@ _Requirements:_ 1.4, 8.2, 10.1, 10.2, 10.3, 11.1, 11.2
 
 ---
 
-## 13. (P) タクソノミー索引とセキュリティノート
+## 13. (P) タクソノミー索引とセキュリティノート ✅
 
 `patterns/README.md` に SSE を応用レイヤとして索引追加し、`SECURITY-NOTES.md` に SSE
 リスク → OWASP マッピングと pre-commit フック不変条件を記載する。
@@ -645,13 +645,13 @@ _Boundary:_ `patterns/README.md`, `patterns/SECURITY-NOTES.md`
 _Depends:_ 1, 11
 _Requirements:_ 8.1, 8.3, 8.4, 9.2
 
-- [ ] 13.1 `patterns/README.md` の応用レイヤー索引に SSE 行を追加する（Anthropic ワークフロー
+- [x] 13.1 `patterns/README.md` の応用レイヤー索引に SSE 行を追加する（Anthropic ワークフロー
   6 パターンの表とは別セクション。SSE はワークフローパターンではなく配信インフラの応用で
   ある旨を明記、R9.2）。
   _Boundary:_ `patterns/README.md`
   _Depends:_ 1, 11
   _Requirements:_ 9.2
-- [ ] 13.2 `patterns/SECURITY-NOTES.md` に SSE 固有リスク（イベントに機微情報を載せない /
+- [x] 13.2 `patterns/SECURITY-NOTES.md` に SSE 固有リスク（イベントに機微情報を載せない /
   接続あたりリソース上限 / 認証前提）→ OWASP（無制限消費 / データ漏洩）マッピング節を追加し、
   `gitleaks` / `forbid-hardcoded-model-ids` の pre-commit フックが `patterns/sse/` を含む
   patterns/ 全域を除外しない不変条件を `.pre-commit-config.yaml` で実測確認のうえ明記する
@@ -662,7 +662,33 @@ _Requirements:_ 8.1, 8.3, 8.4, 9.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **13.1 は RAG 応用レイヤ節の idiom 複製**: `patterns/README.md` に
+  `## 応用レイヤー（SSE 配信）` を RAG 節の直後・フレームワーク比較表の前へ追加。
+  「SSE はワークフローパターンではなく配信インフラの応用」である旨を blockquote で
+  明記し（R9.2）、Anthropic 6パターン表とは別軸の索引とする。表行は構成（判別共用体
+  → `to_sse` → `EventSourceResponse` → 切断時解放 → `parse_sse_events`）/ レーン
+  （`patterns/sse/`, `frameworks/` 外の独立 uv, Python 3.14）/ 状態（✅）。契約は
+  `contracts/` 集約 + 同一ドリフトテストで正本一致を検知する旨も併記（R2.2）。RAG と
+  同様 `## レーン構成`（frameworks/ 3レーン列挙）には追記しない（応用レイヤは別索引）。
+- **13.2 は RAG マッピング節の idiom 複製 + SSE 固有リスク**: `SECURITY-NOTES.md` に
+  `### SSE 配信応用レイヤ → OWASP マッピング（Spec 008 Req 8.1）` を追加。4リスク
+  （機微情報混入→LLM02 データ漏洩 / 無制限ストリーム消費→Unbounded Consumption /
+  切断時リソースリーク→Unbounded Consumption / 認証前提の不在）を実装済み緩和策
+  （最小フィールド設計・1行 `ErrorEvent.message`・`_MAX_EVENTS=1000`・`send_timeout=60s`・
+  `is_disconnected` 協調 + `except CancelledError: raise` + `finally: aclose`・
+  `asgi_driver` hermetic 検証）と対応づけ（R8.1/8.3）。
+- **pre-commit 不変条件は実測確認（R8.4）**: `.pre-commit-config.yaml` を `yaml.safe_load`
+  し、`gitleaks`（`exclude` 宣言なし）/ `forbid-hardcoded-model-ids`
+  （`exclude: ^(tests/.*|src/.*/config\.py)$` のみ）の双方が `patterns/sse/src/.../app.py`
+  を走査対象に含むことを assertion で立証してから記載。レーン品質ゲート3フックの
+  `exclude: ^patterns/` は `mise run patterns:check` / patterns-ci.yml `sse` ジョブへの
+  委譲（既存トレードオフ）で、秘匿情報・モデル ID 禁止のリポジトリ全域不変条件とは分離。
+- **被覆・テスト面**: markdown 2 ファイルのみの変更で src 被覆は不変。これら2ファイルは
+  どの lane の `pyproject` にも属さず（root `extend-exclude` で隔離）、契約ドリフトテストは
+  パターン README（`patterns/sse/README.md`）のみを読むため非該当。検証は (1) 新規内部
+  リンク実在（`sse/README.md` / `contracts/README.md`）、(2) pre-commit 不変条件の実測
+  assertion、(3) ルート `mise run check` 無変更グリーン（277 passed, 4 skipped = Task 12
+  baseline と同値）の3点で立証。
 
 ---
 
