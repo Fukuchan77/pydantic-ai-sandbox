@@ -567,3 +567,37 @@ collection/lint/typecheck 健全」。live-green は実 Ollama daemon + granite/
   live-green は CI の env 所有とし、TDD 証跡を daemon 可用性に依存させない。
 - チャンク化を結合テストでもオフライン `_WordTokenizer` に保つことで、`HF_HUB_OFFLINE=1` 全 run 強制
   の不変条件を破らず「Ollama に触れるのは埋め込み/生成のみ」と責務境界を明示できる。
+
+---
+
+## Task 11 — パターン契約正本と単一点ドリフト配線（2026-06-14）
+
+### Do（実装）
+
+- 11.1: `patterns/rag/README.md` を正本として作成。`## パターン契約（正本）` 下の python
+  fenced block は注釈のみ（`Field`/description なし）で `RetrievedChunk`/`Citation`/`RagAnswer`
+  を記載。必須4セクション（型安全/テスト/可観測性/セキュリティ）+ 使用ライブラリ版表 + ベータ注記。
+- 11.2: `test_contract_drift.py` の `_README_PATHS` に `"rag"` 1 行を追加。
+
+### 実測（VERIFY 証跡）
+
+- RED（計画済み窓・Task 2 由来）: `pytest tests/unit/test_contract_drift.py` →
+  **3 failed, 1 passed**（`Extra items in the right set: RagAnswer / RetrievedChunk / Citation`
+  = package のみ存在・README 未記載）。
+- GREEN: README 作成 + `_README_PATHS` 登録後 → **4 passed**（class set / field set / literal /
+  one-README invariant）。
+- contracts レーン全体 `pytest` → **12 passed**、coverage gate 充足。
+  `ruff check` → `All checks passed!`、`ruff format --check` → `1 file already formatted`、
+  `pyright` → `0 errors, 0 warnings`。
+- boundary 2 ファイルのみ（`patterns/rag/README.md` + `test_contract_drift.py`）。RAG ソース・
+  ルート・他レーン無変更。
+
+### 学び（Act 候補）
+
+- ドリフト parser は「package `__all__` の全モデルがちょうど1つの README に記載」を要求するため、
+  契約追加（Task 2）→ 正本記載（Task 11）の DAG 分離は**計画済み RED 窓**を生む。これは欠陥では
+  なく単一点ドリフト設計の帰結で、fix-forward せず所有タスクで閉じるのが正しい。
+- fenced block は注釈のみ・閉じた `Literal` なし。parser はフィールド名集合（順序非依存）のみ照合
+  するため、正本とパッケージの**フィールド集合の完全一致**が GREEN の必要十分条件。
+- Task 9 が記録した `mise run patterns:test` の contracts 停止窓は本タスクで解消（rag レーンの
+  mise/CI 配線自体は Task 12 の所有として残置）。
