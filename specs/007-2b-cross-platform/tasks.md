@@ -266,7 +266,7 @@ _Boundary:_ `patterns/rag/src/patterns_rag/retrieval.py`, `patterns/rag/tests/un
 _Depends:_ 2, 4
 _Requirements:_ 3.1, 3.3
 
-- [ ] 5.1 `retrieve(retriever, query, *, top_k=4)` を実装する。`top_k<1` は `ValueError`、
+- [x] 5.1 `retrieve(retriever, query, *, top_k=4)` を実装する。`top_k<1` は `ValueError`、
   スコア同点は `chunk_id` 昇順タイブレーク（ADR-5）、node metadata→`RetrievedChunk`
   復元。順序・タイブレークの決定論テストを先行作成（Red）。
   _Boundary:_ `patterns/rag/src/patterns_rag/retrieval.py`, `patterns/rag/tests/unit/test_retrieval_determinism.py`
@@ -274,6 +274,28 @@ _Requirements:_ 3.1, 3.3
   _Requirements:_ 3.1, 3.3
 
 ### Implementation Notes
+
+実装（Task 5, 2026-06-14 / llama-index-core 0.14.22, CPython 3.13.7）:
+
+- **ADR-5 ポストプロセッサ（R3.3）**: `retrieve` は `retriever.retrieve(query)` の
+  `list[NodeWithScore]` を `key=(-score, node_id)` で `sort` 後 `top_k` 切詰。`chunk_id` が
+  レーン一意なため同点は完全に決定論化（安定ソート非依存の全順序）。順序が**入力順非依存**で
+  あることを forward/reversed 二経路で固定。
+- **score=None の堅牢化**: 実リトリーバは score を `None` で返し得る。`-None` は `TypeError`
+  で sort を壊すため純ヘルパ `_score_of` で `0.0` 既定化（無スコアは正スコア群の下に着地）。
+  `RetrievedChunk.score`（必須 float）にもこの値を充当。
+- **契約復元（R3.1）**: `node.node_id`/`metadata["source","locator"]`/`get_content()`/score を
+  `RetrievedChunk` へ。metadata 欠落は自然 `KeyError`=loud-fail（範囲外を抱え込まない）。
+  `RetrievedChunk` は `patterns_contracts` パス依存から import（レーン内再定義しない, NFR-3）。
+- **`top_k<1` loud-fail**: `ValueError`（0 と負を parametrize で被覆）。
+- **pyright strict（テスト stub）**: `_StubRetriever(BaseRetriever)` の `super().__init__()` は
+  上流 `__init__` が untyped（`Dict` 型引数なし）のため `reportUnknownMemberType`。runtime では
+  `callback_manager` 初期化に必須のため呼出は残し、原因明記の局所 `# pyright: ignore` で解消
+  （症状抑止でなく上流型欠落の明示）。
+- **TDD/検証**: RED（`ModuleNotFoundError: patterns_rag.retrieval`）→ 9 新規テスト green。
+  lane 32 passed・ruff/format/pyright strict グリーン、coverage 96.47%（retrieval.py 100%,
+  gate 85）。`HF_HUB_OFFLINE=1` 下・ネットワークゼロ。boundary 2ファイルのみ、ルート・他レーン
+  無変更。
 
 ---
 
