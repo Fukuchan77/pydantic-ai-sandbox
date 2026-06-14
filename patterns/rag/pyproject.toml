@@ -122,9 +122,10 @@ branch = true
 relative_files = true
 
 [tool.coverage.report]
-# Initial lane floor (NFR-4): starts at the 005/006 entry floor of 85. Task 9.2
-# ratchets this toward sibling parity (98) once the full pipeline is covered;
-# raise as coverage climbs (research.md R-4).
-fail_under = 85
+# Sibling-lane parity (NFR-4): ratcheted from the 005/006 entry floor of 85 to 98 once the
+# full pipeline was covered (Task 9.2). 98 matches the pydantic-ai / llamaindex / beeai
+# lanes; the final uncovered path (a prov-less chunk's `_first_prov` -> None section
+# fallback) is exercised by test_chunking_golden (research.md R-4).
+fail_under = 98
 show_missing = true
 skip_covered = false

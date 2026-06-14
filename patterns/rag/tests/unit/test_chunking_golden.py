@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
 from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.labels import DocItemLabel
 
 from patterns_rag.chunking import ChunkRecord, chunk_document, derive_locator
 
@@ -128,6 +129,20 @@ def test_derive_locator_falls_back_to_char() -> None:
 def test_derive_locator_loud_fails_without_anchor() -> None:
     with pytest.raises(ValueError, match="locator"):
         derive_locator(page_no=None, headings=None, charspan=None)
+
+
+def test_chunk_without_provenance_falls_back_to_section_locator() -> None:
+    # A chunk whose doc items carry no provenance drives `_first_prov` to None, so
+    # chunk_document derives the locator from the heading path (ADR-4 section priority)
+    # instead of a page/charspan -- prov-less items are tolerated, not a crash (R4.4).
+    doc = DoclingDocument(name="no-prov")
+    doc.add_heading(text="Synthetic Heading")
+    doc.add_text(label=DocItemLabel.TEXT, text="alpha beta gamma delta epsilon")
+
+    records = chunk_document(doc, source="noprov", tokenizer=WordTokenizer(), max_tokens=MAX_TOKENS)
+
+    assert records
+    assert all(r.locator == "section=Synthetic Heading" for r in records)
 
 
 # --- determinism anchor: max_tokens must match the injected tokenizer's budget ---
