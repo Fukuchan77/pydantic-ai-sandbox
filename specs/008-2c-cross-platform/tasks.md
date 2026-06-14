@@ -269,7 +269,7 @@ _Boundary:_ `patterns/sse/tests/unit/test_token_determinism.py`
 _Depends:_ 4
 _Requirements:_ 5.3
 
-- [ ] 5.1 `ScriptedEventSource` の固定チャンク列を ASGITransport 経由で配信し、`token`
+- [x] 5.1 `ScriptedEventSource` の固定チャンク列を ASGITransport 経由で配信し、`token`
   イベントのテキスト増分列が実行間で完全一致することを検証する。
   _Boundary:_ `patterns/sse/tests/unit/test_token_determinism.py`
   _Depends:_ 4
@@ -277,7 +277,16 @@ _Requirements:_ 5.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. -->
+- **test_stream_order との差別化**: 既存 `test_stream_is_deterministic_across_runs` は
+  全イベント列の等価比較。Task 5 は R5.3 の射程どおり `token` レーンへ絞り、`TokenEvent.text`
+  の**増分列**だけを抽出して (a) 固定チャンク列への完全一致、(b) 同一 app 3 連続実行の
+  byte 一致、(c) 独立構築 source × 異なる query での一致（台本は query 非依存）を立証する。
+- **load-bearing 立証（RED→GREEN）**: 増分期待値を一時的に `["To","ken"]` へ誤設定して
+  実 RED（`['To','ken',' stream'] == ['To','ken']` で AssertionError）を確認後に是正。
+  純テスト成果物だが assertion が実際に bite することを証跡化。
+- **空マッチ防御**: `len(runs[0]) >= 2` で vacuous な空リスト一致を排除。
+- **被覆**: テストのみ追加のため src 被覆は不変（86.75%、floor 85 充足）。98 への ratchet は
+  従来どおり Task 9.2。
 
 ---
 
