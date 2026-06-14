@@ -58,6 +58,12 @@ def _format_context(chunks: Sequence[RetrievedChunk]) -> str:
     Each chunk occupies a labelled header line followed by its indented text. The header is
     the citation contract surface the model copies back; an empty sequence yields an empty
     string, so the model has nothing to cite and the answer loud-fails as empty downstream.
+
+    A chunk's ``text`` is untrusted input (it originates from the indexed corpus): citation
+    grounding (:func:`patterns_rag.citation.validate_citations`) defends the cited *ids*, not
+    the answer prose, so content manipulation via a poisoned chunk is out of this surface's
+    scope and is mitigated upstream by fixed fixtures + golden regression (Spec 007 §Security
+    / OWASP LLM08).
     """
     return "\n".join(
         f"- chunk_id={chunk.chunk_id} | source={chunk.source} | "
