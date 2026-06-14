@@ -261,3 +261,70 @@ $ uv run pytest --cov          → 9 passed in 0.09s
    src/patterns_sse/events.py   19  0  4  0  100%
    TOTAL                        20  0  4  0  100%   (fail_under=85 達成 / 100.00%)
 ```
+
+---
+
+## Task 4 — FastAPI アプリと SSE 配信（4.1 / 4.2 / 4.3）
+
+### 実装サマリ
+
+- **4.1 `ScriptedEventSource`**（`tests/support/scripted_source.py`）: 固定 `SseEvent` 列
+  （`step_started → tool_called → token×4 → completed`、固定チャンク `("Hel","lo"," wor","ld")`
+  → `"Hello world"`）を決定論で yield。seam = `fail_at`（N 件後 `RuntimeError`）/ `block_after`
+  （N 件後に未 set Event で park）/ 公開属性 `cancelled`・`released`（Task 6/7 用）。
+- **4.2 `create_app` + `POST /sse/runs`**（`src/patterns_sse/app.py`）: DI seam で `EventSource` を
+  注入受領、`RunRequest{query:str}` を受け `_event_stream` を `EventSourceResponse` で配信。順序は
+  source 順を保持（R4.1）、`except Exception → ErrorEvent` で終端（R4.3/4.4）、`except
+  CancelledError: raise` + `finally: aclose` + `is_disconnected` poll で切断対応（R6.1/6.3）、
+  `tracer_provider` から 1 span（R7.1）。`_MAX_EVENTS=1000` / `send_timeout=60s`（R-2）。
+- **4.3 公開面再エクスポート**（`__init__.py`）: `create_app`/`EventSource`/`to_sse`/
+  `parse_sse_events` を flat 再エクスポート。
+
+### 一次確認（切断機構）
+
+設計が併用を指示する `await request.is_disconnected()` と sse-starlette 自身の
+`_listen_for_disconnect` の receive 競合を実装ソースで一次確認:
+- starlette 1.3.1 `requests.py:328` の `is_disconnected` は**事前キャンセル済み `CancelScope`**
+  内で `receive()` を呼ぶ非ブロッキング peek → ほぼ常に `False`・メッセージ非消費。
+- httpx 0.28.1 `asgi.py:134` の receive は `response_complete` 待ち（同一 anyio Event の複数
+  wait は安全）。
+- 結論: **load-bearing な停止経路は CancelledError（task-group cancel）一本**。poll は設計どおり
+  協調的二次手段として配置（飾りではなく仕様準拠）、実停止は `except/finally` が担保。Task 0
+  spike(b) と整合。
+
+### 学び（Act 候補）
+
+1. **app-factory の nested route は pyright strict `reportUnusedFunction` を踏む**。closure が
+   必要な DI seam では入れ子が正で、リポジトリ既存 idiom `# pyright: ignore[reportUnusedFunction]`
+   （`tests/unit/test_chat_agent_v2_surface.py:79`）で抑止する。
+2. **`is_disconnected` は事前キャンセル peek で実質ノーオペになり得る**。切断検証は sse-starlette
+   の cancel 経路（CancelledError）に依存させ、poll はそれの補助と位置づけるのが正しい設計理解。
+3. **AsyncIterator の cleanup は `getattr(agen,"aclose",None)`** で行う（Protocol は `aclose` を
+   保証しないため、sse-starlette 自身の `sse.py:369` と同 idiom）。
+
+### 検証ゲート（証跡）
+
+```
+# 4.2 Red（実装前 / ハッピーパステスト先行作成）
+$ uv run pytest --no-cov tests/unit/test_stream_order.py -q
+E  ImportError: cannot import name 'create_app' from 'patterns_sse'
+   1 error in 0.25s
+
+# 4 Green（4.1/4.2/4.3 実装後）→ Task 4 テスト + 既存ユニット
+$ uv run pytest --no-cov tests/unit/test_stream_order.py tests/unit/test_smoke.py \
+    tests/unit/test_event_serialization.py -q   → 16 passed in 0.23s
+
+# レーン全体ゲート（Refactor 後）
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 7 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 16 passed in 0.23s
+   src/patterns_sse/__init__.py   4  0   0  0  100%
+   src/patterns_sse/app.py       46  7  10  4   80%   (73,102,106-110,113->exit = Wave4 Task6/7/8 被覆)
+   src/patterns_sse/events.py    19  0   4  0  100%
+   TOTAL                         69  7  14  4   87%   (fail_under=85 達成 / 86.75%)
+```
+
+- **被覆の中間状態**: `app.py` 未被覆分岐（is_disconnected break / CancelledError 再 raise /
+  error 変換 / max-events / span 有効化）は Wave 4（Task 6 エラー終端・Task 7 切断・Task 8 span）が
+  exercise、98 への ratchet は Task 9.2。floor 85 は充足、回帰なし。
