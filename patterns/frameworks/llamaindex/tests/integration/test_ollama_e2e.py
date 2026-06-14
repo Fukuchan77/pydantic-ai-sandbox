@@ -42,10 +42,16 @@ def _ollama_llm() -> object:
     # timeout well above the contended latency, and a bounded num_predict (the
     # Ollama generation cap) so each branch returns promptly. Contract-level
     # assertions only require non-empty output, so the cap is safe.
+    #
+    # context_window bounds the Ollama num_ctx: the default (-1) requests the
+    # model's full context, whose KV cache (~20 GB for granite4.1) OOMs the
+    # runner's llama-server. 8192 tokens is ample for the short contract prompts
+    # and keeps the KV cache within the runner's memory.
     return Ollama(
         model=os.environ["OLLAMA_MODEL_NAME"],
         base_url=base_url,
         request_timeout=1200.0,
+        context_window=8192,
         additional_kwargs={"num_predict": 512},
     )
 
