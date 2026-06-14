@@ -468,23 +468,52 @@ CPython 3.13.7）:
 全 unit がネットワーク I/O ゼロで完走することを保証し、レーンの `fail_under` を
 ratchet で引き上げて充足する。
 
-_Boundary:_ `patterns/rag/tests/unit/test_smoke.py`, `patterns/rag/pyproject.toml`
+_Boundary:_ `patterns/rag/tests/unit/test_smoke.py`, `patterns/rag/pyproject.toml`, `patterns/rag/tests/unit/test_chunking_golden.py`
 _Depends:_ 3, 4, 5, 6, 7, 8
 _Requirements:_ 6.1, 6.5
 
-- [ ] 9.1 スモークに hermetic ガードを追加する（`HF_HUB_OFFLINE=1` 下で fake 一巡が
+> 境界拡張メモ（Task 9 実装時）: 98 parity 達成に必要な最後の未被覆経路（`chunking._first_prov`
+> の `None` 分岐 = ADR-4 section フォールバック / R4.4）は chunking 本来の test ホームで被覆するのが
+> 自然なため、`test_chunking_golden.py` を 9.2 の被覆作業として境界に追記（加算的テスト1件のみ・
+> 既存アサート無改変・下流契約への影響なし）。
+
+- [x] 9.1 スモークに hermetic ガードを追加する（`HF_HUB_OFFLINE=1` 下で fake 一巡が
   ネットワーク到達せず完走、到達時は loud-fail）。
   _Boundary:_ `patterns/rag/tests/unit/test_smoke.py`
   _Depends:_ 3, 4, 5, 6, 7, 8
   _Requirements:_ 6.1
-- [ ] 9.2 `fail_under` を兄弟レーンの parity（005/006 フロア起点）まで ratchet で
+- [x] 9.2 `fail_under` を兄弟レーンの parity（005/006 フロア起点）まで ratchet で
   引き上げ、`mise run patterns:test` 経由でレーンカバレッジ充足を確認する（最終着地値を
-  Implementation Notes に記録: 目標 98 / 被覆困難時 85→ratchet, research.md R-4）。
-  _Boundary:_ `patterns/rag/pyproject.toml`
+  Implementation Notes に記録: 目標 98 / 被覆困難時 85→ratchet, research.md R-4）。被覆のため
+  `test_chunking_golden.py` に prov なしチャンクの section フォールバック テストを 1 件追加。
+  _Boundary:_ `patterns/rag/pyproject.toml`, `patterns/rag/tests/unit/test_chunking_golden.py`
   _Depends:_ 9.1
   _Requirements:_ 6.5
 
 ### Implementation Notes
+
+実装（Task 9, 2026-06-14 / CPython 3.13.7）:
+
+- **9.1 hermetic ガード（R6.1）**: `block_network` フィクスチャが `socket.socket.connect` /
+  `connect_ex`（AF_INET/AF_INET6 のみ）と `socket.getaddrinfo` を monkeypatch し、ネットワーク
+  到達時に `NetworkReachError` で loud-fail。AF_UNIX 等のローカルソケットは実装へ委譲（reach のみ
+  対象、IPC は素通し）。その上で **fake 一巡**（実 `HybridChunker` → `HashEmbedding` → 実
+  `as_retriever` → `ScriptedLLM` → `run_rag`）が `HF_HUB_OFFLINE=1` 下でネットワークゼロ完走する
+  ことを検証。ガードが飾りでない立証として、**ガード下の実 AF_INET connect が `NetworkReachError`
+  を送出**する load-bearing テストを併設（兄弟レーンの「validate_citations は load-bearing」慣行に
+  倣う）。
+- **9.2 カバレッジ ratchet（R6.5 / NFR-4）**: `fail_under` を **85 → 98**（兄弟 pydantic-ai /
+  llamaindex / beeai と parity）へ引き上げ。最後の未被覆経路だった `chunking._first_prov` の
+  `None` 分岐（`89->88` ループ継続 + line 91 `return None`）を `test_chunking_golden` の新規テスト
+  で被覆 — provenance を持たないチャンク（プログラム生成 `DoclingDocument` の `add_heading` +
+  `add_text`）が ADR-4 の section フォールバック（`section=…`）で locator を導出することを検証
+  （R4.4）。**最終着地値: gate 98 / 実カバレッジ 100.00%**（chunking.py 100%）。
+- **検証**: lane 単体 **58 passed**・coverage **100.00%**（gate 98 充足）、ruff check / format /
+  pyright strict 全グリーン。`mise run patterns:test`（集約）は **contracts レーンの計画済み
+  README ドリフト窓（Task 11.1/11.2 所有、本ファイル L143-145 / L399）** で `set -e` により先頭の
+  contracts で停止 — RAG レーン由来ではなく、Task 9 境界（`patterns/rag`）外の既知ギャップ。
+  RAG レーンは per-lane 直接起動でグリーンを確認済み。boundary 2ファイル（test_smoke.py /
+  pyproject.toml）+ 被覆のため test_chunking_golden.py を更新。
 
 ---
 
