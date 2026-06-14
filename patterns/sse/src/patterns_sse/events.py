@@ -50,6 +50,12 @@ class EventSource(Protocol):
     that an ``async def stream(...)`` async-generator implementation is a
     structural match; an ``async def`` declaration here would instead type the
     member as a coroutine *returning* an iterator, which no generator satisfies.
+
+    Concurrency: one ``EventSource`` is injected for the app's lifetime and
+    ``create_app`` calls ``stream`` once per request, so an implementation MUST
+    return an independent async generator per call and hold no per-stream state on
+    ``self`` that concurrent requests would race (the pydantic-ai adapter is safe
+    because ``run_stream_events`` opens a fresh run each call).
     """
 
     def stream(self, query: str) -> AsyncIterator[SseEvent]:

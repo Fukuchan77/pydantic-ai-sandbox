@@ -29,11 +29,11 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import FastAPI, Request
 from patterns_contracts import ErrorEvent
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sse_starlette.sse import EventSourceResponse
 
 from patterns_sse.events import to_sse
@@ -63,7 +63,11 @@ _TRACER_NAME = "patterns_sse.app"
 class RunRequest(BaseModel):
     """Request body for ``POST /sse/runs``."""
 
-    query: str = Field(description="The query that drives the agent run.")
+    # Non-empty after stripping: an empty / whitespace-only query is invalid input
+    # rejected with 422 before any streaming begins (R3.1; plan.md "空クエリ -> 4xx").
+    query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(
+        description="The query that drives the agent run; must be non-empty."
+    )
 
 
 def _open_span(tracer_provider: TracerProvider | None) -> AbstractContextManager[object]:
@@ -103,7 +107,11 @@ async def _event_stream(
                     yield to_sse(event)
                     sent += 1
                     if sent >= _MAX_EVENTS:
-                        break  # R-2 backstop against a non-terminating producer
+                        # R-2 backstop against a non-terminating producer: terminate
+                        # explicitly with an `error` marker rather than truncating
+                        # silently, so the stream always ends on a marker (R4.3/R4.4).
+                        yield to_sse(ErrorEvent(message=f"stream exceeded {_MAX_EVENTS} events"))
+                        break
             except asyncio.CancelledError:
                 raise  # client went away mid-stream; never swallow it (R6.3)
             except Exception as exc:  # noqa: BLE001 - any run-time error must terminate the stream as `error`, not crash it (R4.3)

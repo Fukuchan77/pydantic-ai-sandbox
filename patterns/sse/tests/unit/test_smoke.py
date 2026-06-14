@@ -137,13 +137,16 @@ async def test_fake_one_pass_runs_hermetically(block_network: None) -> None:
 
 async def test_runaway_producer_is_bounded_by_the_backstop(block_network: None) -> None:
     # An offline run must *complete* even when the producer never reaches its terminal marker:
-    # the R-2 backstop caps the stream at `_MAX_EVENTS` so ASGITransport (which buffers the whole
-    # finite stream, ADR-4a) cannot hang. Scripted with > `_MAX_EVENTS` tokens so `completed`
-    # sits beyond the cap and is never delivered.
+    # the R-2 backstop caps the stream at `_MAX_EVENTS` and then closes it with an explicit
+    # `error` marker -- never a silent truncation (R4.3) and always a terminal marker (R4.4) --
+    # so ASGITransport (which buffers the whole finite stream, ADR-4a) cannot hang. Scripted with
+    # > `_MAX_EVENTS` tokens so the producer's own `completed` sits beyond the cap.
     runaway_tokens = tuple("x" for _ in range(_MAX_EVENTS + 1))
     app = create_app(event_source=ScriptedEventSource(tokens=runaway_tokens))
     resp = await _post_run(app, {"query": "weather"})
 
     events = parse_sse_events(resp.text)
-    assert len(events) == _MAX_EVENTS  # bounded exactly at the cap, not the full script
-    assert events[-1].type != "completed"  # terminal marker lies beyond the cap, never reached
+    # `_MAX_EVENTS` capped events plus exactly one terminal `error` marker the backstop appends.
+    assert len(events) == _MAX_EVENTS + 1
+    assert events[-1].type == "error"  # the backstop terminates explicitly (R4.4), never silent
+    assert not any(event.type == "completed" for event in events)  # producer's marker unreached
