@@ -54,6 +54,7 @@ _README_PATHS: dict[str, Path] = {
     "evaluator-optimizer": _PATTERNS_DIR / "evaluator-optimizer" / "README.md",
     "autonomous-agent": _PATTERNS_DIR / "autonomous-agent" / "README.md",
     "rag": _PATTERNS_DIR / "rag" / "README.md",
+    "sse": _PATTERNS_DIR / "sse" / "README.md",
 }
 
 

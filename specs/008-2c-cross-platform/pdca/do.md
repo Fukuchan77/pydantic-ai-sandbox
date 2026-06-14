@@ -638,3 +638,54 @@ $ uv run pytest --cov          → 36 passed, 1 skipped
 ```
 
 - 回帰なし（既存 36 件継続、結合 1 件は offline skip）。Task 10 完了 → 残 Wave 6（Task 11/12/13）。
+
+---
+
+## Task 11: パターン契約正本と単一点ドリフト配線 (11.1, 11.2) — ✅
+
+`/sdd-impl 008-2c-cross-platform Task11`。Task 2 が `__all__` 追記で残した既存 RED
+（drift 4 ケース）を、SSE README 正本作成（11.1）+ `_README_PATHS["sse"]` 登録（11.2）で解消。
+
+### RED → GREEN（既存 RED を再確認 → 解消）
+
+```
+# 実装前 RED（Task 2 申し送り: package に 5 SSE モデル / README owner に不在）
+$ cd patterns/contracts && uv run pytest --no-cov tests/unit/test_contract_drift.py -q
+   → 4 failed
+     test_documented_class_set_matches_package
+     test_documented_field_sets_match_package
+     test_documented_literal_vocabularies_match_package
+     test_each_package_model_is_documented_in_exactly_one_readme
+   → Extra in package: CompletedEvent/ErrorEvent/StepStartedEvent/TokenEvent/ToolCalledEvent
+
+# 11.1 patterns/sse/README.md 作成（正本 fenced block: 5 モデル + SseEvent 注釈のみ、
+#       必須4セクション、版表+ベータ注記+curl/httpx 例、R8.3 機微情報非掲載方針）
+# 11.2 _README_PATHS に "sse" 1 行追加
+$ uv run pytest --no-cov tests/unit/test_contract_drift.py -q
+   → 4 passed
+```
+
+### 検証ゲート（contracts + sse 両レーン）
+
+```
+# contracts レーン
+$ uv run ruff check .          → All checks passed!
+$ uv run ruff format --check . → 12 files already formatted
+$ uv run pyright               → 0 errors, 0 warnings, 0 informations
+$ uv run pytest --cov          → 19 passed
+   → test_contract_drift.py .... / test_rag_contracts.py / test_sse_contracts.py
+
+# sse レーン（README 追加が配信パイプラインへ非回帰なことを確認）
+$ cd patterns/sse && uv run ruff check .  → All checks passed!
+$ uv run pytest --cov          → 36 passed, 1 skipped（結合 offline skip）
+   → Total coverage 99.01%（fail_under=98 充足、被覆不変）
+```
+
+### 学び / 申し送り
+
+- **parser 互換が load-bearing**: 正本ブロックは `name: annotation` 形（`ast.AnnAssign`）+ `type:
+  Literal[...]` で判別子語彙をロック。`SseEvent` は単一行代入で記載し parser が対称スキップ（I-5）。
+  接続例の python fence は normative block の後段に配置（`_normative_block` は最初の fence のみ抽出）。
+- **`[project].readme` 宣言は Task 11 境界外**（`pyproject.toml` 所掌）。README 欠損は解消したが
+  long-description 宣言は未変更 — 境界厳守。hatchling build は引き続き既存挙動。
+- 回帰なし。残 Wave 6: Task 12（mise/CI）/ Task 13（docs/security 索引・SECURITY-NOTES）。
