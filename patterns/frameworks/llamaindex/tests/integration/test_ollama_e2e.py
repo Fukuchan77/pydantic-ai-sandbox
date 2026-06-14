@@ -30,6 +30,13 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# LlamaIndex Workflows impose their own per-run timeout (default 120s), separate
+# from the Ollama request_timeout above. On the CPU-only runner a multi-step
+# workflow over the 8B model exceeds 120s (WorkflowTimeoutError), so the
+# workflow-based patterns are run with a generous timeout via their exposed knob.
+_WORKFLOW_TIMEOUT_SECONDS = 1200.0
+
+
 def _ollama_llm() -> object:
     from llama_index.llms.ollama import Ollama  # pyright: ignore[reportMissingTypeStubs]
 
@@ -82,6 +89,7 @@ async def test_routing_against_live_ollama() -> None:
     result = await run_routing(
         "I was billed twice for my subscription this month.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
+        timeout=_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert result.route in get_args(Route)
     assert result.answer.strip()
@@ -92,6 +100,7 @@ async def test_orchestrator_against_live_ollama() -> None:
         "List two advantages and two disadvantages of local LLM inference.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
         max_workers=2,
+        timeout=_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.results) >= 1
     assert result.summary.strip()
@@ -103,6 +112,7 @@ async def test_prompt_chain_against_live_ollama() -> None:
     result = await run_prompt_chain(
         "Write a short paragraph explaining what a local LLM is.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
+        timeout=_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.steps) >= 1
     assert all(step.output.strip() for step in result.steps)
@@ -117,6 +127,7 @@ async def test_parallelization_against_live_ollama() -> None:
         variant="sectioning",
         llm=_ollama_llm(),  # type: ignore[arg-type]
         n=n,
+        timeout=_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.branches) == n
     assert result.aggregate.strip()
