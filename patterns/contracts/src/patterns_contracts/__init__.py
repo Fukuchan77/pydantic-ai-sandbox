@@ -21,6 +21,12 @@ from patterns_contracts.autonomous_agent import (
     Tool,
 )
 from patterns_contracts.evaluator_optimizer import Iteration, OptimizationResult
+from patterns_contracts.live_ollama import (
+    LIVE_CONTEXT_WINDOW,
+    LIVE_MAX_TOKENS,
+    LIVE_REQUEST_TIMEOUT_SECONDS,
+    LIVE_WORKFLOW_TIMEOUT_SECONDS,
+)
 from patterns_contracts.orchestrator_workers import (
     OrchestratedResult,
     SubTask,
@@ -41,6 +47,10 @@ from patterns_contracts.sse import (
 )
 
 __all__ = [
+    "LIVE_CONTEXT_WINDOW",
+    "LIVE_MAX_TOKENS",
+    "LIVE_REQUEST_TIMEOUT_SECONDS",
+    "LIVE_WORKFLOW_TIMEOUT_SECONDS",
     "AgentRunResult",
     "AgentStep",
     "ApprovalHook",
