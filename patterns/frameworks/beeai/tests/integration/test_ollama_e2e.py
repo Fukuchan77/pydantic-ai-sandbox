@@ -30,15 +30,36 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+# CPU-only CI runners serve the 8B model slowly, and the parallelization lane
+# fans out concurrent generations that contend for that single CPU, roughly
+# doubling each branch's effective latency. The default litellm 600s per-request
+# timeout was crossed under that contention, surfacing as a ChatModelError. Two
+# safeguards keep the gated live run inside a sane envelope without weakening the
+# contract-level assertions (which only require non-empty output):
+#   (2) a per-request timeout well above the 600s default so a slow concurrent
+#       branch finishes instead of being cut off;
+#   (3) a bounded max_tokens so each branch returns promptly.
+_LIVE_REQUEST_TIMEOUT_SECONDS = 1200.0
+_LIVE_MAX_TOKENS = 512
+
+
 def _ollama_chat_model() -> object:
     from beeai_framework.adapters.ollama.backend.chat import OllamaChatModel
+    from beeai_framework.backend.types import ChatModelParameters
 
     # BeeAI's Ollama adapter (litellm-backed) expects the daemon root URL;
     # the repo-wide convention is an OpenAI-style base ending in /v1, so
     # strip it when present.
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     base_url = base_url.removesuffix("/v1")
-    return OllamaChatModel(os.environ["OLLAMA_MODEL_NAME"], base_url=base_url)
+    # `settings` flows verbatim into the litellm `acompletion` call (timeout); the
+    # `max_tokens` parameter is a supported OpenAI param and bounds generation.
+    return OllamaChatModel(
+        os.environ["OLLAMA_MODEL_NAME"],
+        base_url=base_url,
+        parameters=ChatModelParameters(max_tokens=_LIVE_MAX_TOKENS),
+        settings={"timeout": _LIVE_REQUEST_TIMEOUT_SECONDS},
+    )
 
 
 def _approve_all(_tool: str, _args: str) -> bool:
