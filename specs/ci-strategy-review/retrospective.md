@@ -61,3 +61,18 @@
   （レーンを実走可能にする修正）。
 - llamaindex 実機レーンは `RUN_LLAMAINDEX_INTEGRATION=1` で **quarantine**（コードは維持、
   per-PR CI からは除外）— 暫定。恒久方針は `improvement-plan.md` で決定する。
+
+### 追記（2026-06-15）— 恒久対応を実装
+
+per-PR で quarantine 後も、beeai + pydantic-ai の 2 レーンだけで遅いランナーでは
+`timeout-minutes:45` に到達した（実測）。これは事象 #6（CI 設計）が単発でなく構造的で
+あることの裏付けであり、`improvement-plan.md` の **P1 + P2 を実装**した：
+
+- **P1**: `patterns-integration-ollama.yml` から `pull_request:` トリガを削除。per-PR の
+  ブロッキング・シグナルは `patterns-ci.yml`（オフライン）のみに限定。
+- **P2**: 実機統合を **1 レーン 1 ジョブの nightly マトリクス**へ再設計（専用 daemon /
+  レーン別 `timeout-minutes` / `fail-fast:false` / レーン別 concurrency）。llamaindex は
+  専用 mise タスク（`patterns:test:integration:llamaindex`）で `RUN_LLAMAINDEX_INTEGRATION=1`
+  を opt-in し、マトリクスへ復帰（quarantine はジョブ分離が前提という注記どおり）。
+
+P3（空振り検知）/ P4（lock 衛生）/ P5（再現性）は本 PR の範囲外。次イテレーションで対応。
