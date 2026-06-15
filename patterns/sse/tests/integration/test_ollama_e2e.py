@@ -72,6 +72,9 @@ def _ollama_model() -> Model:
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.ollama import OllamaProvider
 
+    # OpenAI-compatible /v1 path uses the server's default num_ctx (not the model
+    # maximum), so this lane needs no context_window bound to avoid the KV-cache
+    # OOM the llama-index lanes guard against (patterns_contracts.live_ollama).
     model_name = os.environ["OLLAMA_MODEL_NAME"]
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     return OpenAIChatModel(model_name=model_name, provider=OllamaProvider(base_url=base_url))

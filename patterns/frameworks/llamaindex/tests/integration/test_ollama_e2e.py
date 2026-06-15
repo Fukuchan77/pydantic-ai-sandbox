@@ -15,7 +15,15 @@ from dataclasses import dataclass
 from typing import get_args
 
 import pytest
-from patterns_contracts import AgentRunResult, OptimizationResult, Route
+from patterns_contracts import (
+    LIVE_CONTEXT_WINDOW,
+    LIVE_MAX_TOKENS,
+    LIVE_REQUEST_TIMEOUT_SECONDS,
+    LIVE_WORKFLOW_TIMEOUT_SECONDS,
+    AgentRunResult,
+    OptimizationResult,
+    Route,
+)
 
 from patterns_llamaindex.autonomous_agent import run_autonomous_agent
 from patterns_llamaindex.evaluator_optimizer import run_evaluator_optimizer
@@ -42,13 +50,6 @@ pytestmark = [
 ]
 
 
-# LlamaIndex Workflows impose their own per-run timeout (default 120s), separate
-# from the Ollama request_timeout above. On the CPU-only runner a multi-step
-# workflow over the 8B model exceeds 120s (WorkflowTimeoutError), so the
-# workflow-based patterns are run with a generous timeout via their exposed knob.
-_WORKFLOW_TIMEOUT_SECONDS = 1200.0
-
-
 def _ollama_llm() -> object:
     from llama_index.llms.ollama import Ollama  # pyright: ignore[reportMissingTypeStubs]
 
@@ -56,22 +57,19 @@ def _ollama_llm() -> object:
     # an OpenAI-style base ending in /v1, so strip it when present.
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
     base_url = base_url.removesuffix("/v1")
-    # The parallelization lane fans out concurrent generations that contend for
-    # the CPU-only CI runner. Mirror the beeai lane's safeguards: a request
-    # timeout well above the contended latency, and a bounded num_predict (the
-    # Ollama generation cap) so each branch returns promptly. Contract-level
-    # assertions only require non-empty output, so the cap is safe.
-    #
-    # context_window bounds the Ollama num_ctx: the default (-1) requests the
-    # model's full context, whose KV cache (~20 GB for granite4.1) OOMs the
-    # runner's llama-server. 8192 tokens is ample for the short contract prompts
-    # and keeps the KV cache within the runner's memory.
+    # Shared live-Ollama knobs (patterns_contracts.live_ollama): a request timeout
+    # well above the contended CPU latency, a bounded num_predict (the Ollama
+    # generation cap), and -- critically on this llama-index path -- a bounded
+    # context_window. llama-index forwards context_window as Ollama's num_ctx;
+    # leaving it unset requests the model's full context (granite4.1 = 131072),
+    # whose ~20 GB KV cache OOMs the runner's llama-server. Contract-level
+    # assertions only require non-empty output, so the generation cap is safe.
     return Ollama(
         model=os.environ["OLLAMA_MODEL_NAME"],
         base_url=base_url,
-        request_timeout=1200.0,
-        context_window=8192,
-        additional_kwargs={"num_predict": 512},
+        request_timeout=LIVE_REQUEST_TIMEOUT_SECONDS,
+        context_window=LIVE_CONTEXT_WINDOW,
+        additional_kwargs={"num_predict": LIVE_MAX_TOKENS},
     )
 
 
@@ -101,7 +99,7 @@ async def test_routing_against_live_ollama() -> None:
     result = await run_routing(
         "I was billed twice for my subscription this month.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
-        timeout=_WORKFLOW_TIMEOUT_SECONDS,
+        timeout=LIVE_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert result.route in get_args(Route)
     assert result.answer.strip()
@@ -112,7 +110,7 @@ async def test_orchestrator_against_live_ollama() -> None:
         "List two advantages and two disadvantages of local LLM inference.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
         max_workers=2,
-        timeout=_WORKFLOW_TIMEOUT_SECONDS,
+        timeout=LIVE_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.results) >= 1
     assert result.summary.strip()
@@ -124,7 +122,7 @@ async def test_prompt_chain_against_live_ollama() -> None:
     result = await run_prompt_chain(
         "Write a short paragraph explaining what a local LLM is.",
         llm=_ollama_llm(),  # type: ignore[arg-type]
-        timeout=_WORKFLOW_TIMEOUT_SECONDS,
+        timeout=LIVE_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.steps) >= 1
     assert all(step.output.strip() for step in result.steps)
@@ -139,7 +137,7 @@ async def test_parallelization_against_live_ollama() -> None:
         variant="sectioning",
         llm=_ollama_llm(),  # type: ignore[arg-type]
         n=n,
-        timeout=_WORKFLOW_TIMEOUT_SECONDS,
+        timeout=LIVE_WORKFLOW_TIMEOUT_SECONDS,
     )
     assert len(result.branches) == n
     assert result.aggregate.strip()
