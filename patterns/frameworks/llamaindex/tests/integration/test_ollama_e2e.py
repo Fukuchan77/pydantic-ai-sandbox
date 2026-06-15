@@ -24,10 +24,22 @@ from patterns_llamaindex.parallelization import run_parallelization
 from patterns_llamaindex.prompt_chaining import run_prompt_chain
 from patterns_llamaindex.routing import run_routing
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("RUN_INTEGRATION_PATTERNS") != "1",
-    reason="integration lane gated by RUN_INTEGRATION_PATTERNS=1",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.environ.get("RUN_INTEGRATION_PATTERNS") != "1",
+        reason="integration lane gated by RUN_INTEGRATION_PATTERNS=1",
+    ),
+    # Temporarily quarantined from per-PR CI: once this lane actually runs
+    # end-to-end (after the anyio/httpx/OOM/timeout fixes), the combined
+    # three-lane integration job exceeds its 45-minute budget because
+    # granite4.1:8b is slow on CPU runners. Keep the (now-working) lane code and
+    # opt into it explicitly with RUN_LLAMAINDEX_INTEGRATION=1, pending the
+    # CI-strategy review.
+    pytest.mark.skipif(
+        os.environ.get("RUN_LLAMAINDEX_INTEGRATION") != "1",
+        reason="llamaindex live lane quarantined (CI budget); set RUN_LLAMAINDEX_INTEGRATION=1 to run",
+    ),
+]
 
 
 # LlamaIndex Workflows impose their own per-run timeout (default 120s), separate
