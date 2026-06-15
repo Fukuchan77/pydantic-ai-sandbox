@@ -124,7 +124,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ollama
-          key: ollama-model-${{ hashFiles('.github/workflows/patterns-integration-ollama.yml') }}-granite4.1-8b-granite-embedding-278m
+          # Per-lane save key (suffix ${{ matrix.lane }}) so concurrent lanes never
+          # race to reserve/upload the *same* key — that race fails the cache
+          # post-step and reds an otherwise-green job (observed: a slow lane saving
+          # while a sibling's identical-key upload was in flight). The shared
+          # `restore-keys: ollama-model-` prefix still lets every lane restore from
+          # any sibling's cache, so the ~5 GB model is pulled at most once per epoch;
+          # GitHub evicts least-recently-used entries to stay within the repo cache
+          # cap. (CI-strategy P5 — flaky elimination.)
+          key: ollama-model-${{ hashFiles('.github/workflows/patterns-integration-ollama.yml') }}-granite4.1-8b-granite-embedding-278m-${{ matrix.lane }}
           restore-keys: |
             ollama-model-
 
