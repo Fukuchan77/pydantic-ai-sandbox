@@ -90,8 +90,19 @@ def _ollama_embedding() -> BaseEmbedding:
 def _ollama_llm() -> LLM:
     from llama_index.llms.ollama import Ollama  # pyright: ignore[reportMissingTypeStubs]
 
+    # context_window bounds the Ollama num_ctx: llama-index's default requests the
+    # model's full context (num_ctx=131072 for granite4.1), whose KV cache (~20 GB)
+    # OOMs the CPU runner's llama-server with a 500. 8192 tokens is ample for the
+    # short contract-level RAG prompt (4 retrieved chunks + template) and keeps the
+    # KV cache within the runner's memory. num_predict caps generation so the cited
+    # answer returns promptly; request_timeout matches the sibling lanes' headroom
+    # for slow CPU structured-predict. (Same OOM class fixed in the llamaindex lane.)
     return Ollama(
-        model=os.environ["OLLAMA_MODEL_NAME"], base_url=_base_url(), request_timeout=180.0
+        model=os.environ["OLLAMA_MODEL_NAME"],
+        base_url=_base_url(),
+        request_timeout=1200.0,
+        context_window=8192,
+        additional_kwargs={"num_predict": 512},
     )
 
 
