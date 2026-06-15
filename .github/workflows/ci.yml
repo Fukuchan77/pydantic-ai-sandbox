@@ -47,8 +47,11 @@ jobs:
       # `experimental: true` is required while mise's GitHub Action calls
       # un-stable subcommands; remove once the action stabilises.
       - name: Install mise + tooling
-        uses: jdx/mise-action@v2
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
         with:
+          # Pin action SHA + mise binary version: stop fetching a moving "latest"
+          # mise asset (the transient 404 of root cause #1 / plan P5).
+          version: 2026.6.10
           experimental: true
           install: true
           cache: true
