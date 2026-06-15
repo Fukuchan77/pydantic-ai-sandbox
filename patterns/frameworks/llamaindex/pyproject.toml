@@ -25,6 +25,16 @@ dependencies = [
     "llama-index-core>=0.14",
     # Ollama backend for the gated integration lane (Req 5).
     "llama-index-llms-ollama",
+    # `llama-index-llms-ollama` imports the `ollama` client, whose 0.6.x line
+    # imports `anyio` at module load. It is not pinned in this lane's resolved
+    # tree, so the import fails at collection time in the gated integration lane;
+    # declare it explicitly so the dependency is locked and installed.
+    "anyio",
+    # Pin httpx to the stable line. The unconstrained resolution pulled the
+    # 1.0 dev pre-release (1.0.dev3), whose `httpx.Client` signature is
+    # incompatible with the `ollama` 0.6.x client (`base_url` kwarg), breaking
+    # the gated integration lane at import. ollama requires httpx>=0.27.
+    "httpx>=0.27,<1",
     "pydantic>=2",
     # Tracing surface (Req 6.1): OpenInference instruments LlamaIndex into
     # any OTel TracerProvider.

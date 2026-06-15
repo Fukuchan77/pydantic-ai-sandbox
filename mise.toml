@@ -157,7 +157,7 @@ description = "Aggregate lane quality gate (lint / format / typecheck / test)."
 depends = ["patterns:lint", "patterns:format", "patterns:typecheck", "patterns:test"]
 
 [tasks."patterns:test:integration"]
-description = "Gated Ollama integration lanes incl. rag/sse (RUN_INTEGRATION_PATTERNS=1)."
+description = "Gated Ollama integration lanes incl. rag/sse (RUN_INTEGRATION_PATTERNS=1). Sequential aggregate for local use; CI runs the per-lane tasks below in a nightly matrix (one daemon per lane)."
 run = """
 set -e
 for d in patterns/frameworks/*/; do
@@ -166,6 +166,40 @@ done
 echo "== integration patterns/rag"; (cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 echo "== integration patterns/sse"; (cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 """
+
+# ---------------------------------------------------------------------------
+# Per-lane integration tasks (CI-strategy improvement plan P2). Live 8B Ollama
+# inference is slow, non-deterministic, and environment-bound, so it is NOT a
+# per-PR blocking gate (P1). Instead `patterns-integration-ollama.yml` runs
+# these one-lane-per-job in a nightly matrix: each job gets its own daemon and a
+# generous per-lane timeout, failures stay local to a lane, and total wall-clock
+# drops via parallelism. Each task is the single source of truth for how a lane
+# is exercised live (Constitution V — gates flow through mise, never bare pytest).
+# ---------------------------------------------------------------------------
+
+[tasks."patterns:test:integration:beeai"]
+description = "Gated live-Ollama integration for the beeai lane only (RUN_INTEGRATION_PATTERNS=1)."
+run = "cd patterns/frameworks/beeai && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:pydantic-ai"]
+description = "Gated live-Ollama integration for the pydantic-ai lane only (RUN_INTEGRATION_PATTERNS=1)."
+run = "cd patterns/frameworks/pydantic-ai && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:llamaindex"]
+# Opts past the per-PR quarantine (RUN_LLAMAINDEX_INTEGRATION=1, added in the
+# quarantine commit). The lane code runs end-to-end; it was held out of the
+# per-PR budget only because granite4.1:8b is slow on CPU runners. In the
+# nightly matrix it gets a dedicated job + timeout, so the opt-in is safe here.
+description = "Gated live-Ollama integration for the llamaindex lane only; opts past the per-PR quarantine (nightly matrix)."
+run = "cd patterns/frameworks/llamaindex && RUN_INTEGRATION_PATTERNS=1 RUN_LLAMAINDEX_INTEGRATION=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:rag"]
+description = "Gated live-Ollama integration for the rag lane only (also exercises the real embedding model)."
+run = "cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:sse"]
+description = "Gated live-Ollama integration for the sse lane only (RUN_INTEGRATION_PATTERNS=1)."
+run = "cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
 
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
