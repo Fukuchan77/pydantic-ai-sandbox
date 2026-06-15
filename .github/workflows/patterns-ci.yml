@@ -86,6 +86,19 @@ jobs:
           enable-cache: true
           cache-dependency-glob: patterns/frameworks/${{ matrix.lane }}/uv.lock
 
+      # P4 lock hygiene: fail fast on lockfile drift (lock out of sync with
+      # pyproject) before the heavier sync/test; `uv sync --locked` below is the
+      # install-time backstop. This is what would block a recurrence of root
+      # cause #3 (an out-of-constraint dep like httpx 1.0.dev3 in the lock).
+      #
+      # A pre-release *allowlist/ban* is deliberately NOT enforced: this stack
+      # pins many intentional, working pre-releases (pydantic 2.14 alpha,
+      # opentelemetry 0.63b, litellm rc, numpy/sqlalchemy rc/b, pydantic-ai v2
+      # beta), governed per lane by `[tool.uv] prerelease`. A content guard would
+      # red CI on legitimate pre-releases. See specs/ci-strategy-review (P4).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
+
       - name: Sync lane dependencies (locked)
         run: uv sync --all-groups --locked
 
@@ -129,6 +142,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: patterns/contracts/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
 
       - name: Sync contracts dependencies (locked)
         run: uv sync --all-groups --locked
@@ -177,6 +194,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: patterns/rag/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
 
       - name: Sync rag dependencies (locked)
         run: uv sync --all-groups --locked
@@ -227,6 +248,10 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: patterns/sse/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
 
       - name: Sync sse dependencies (locked)
         run: uv sync --all-groups --locked
