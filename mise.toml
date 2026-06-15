@@ -175,15 +175,21 @@ echo "== integration patterns/sse"; (cd patterns/sse && RUN_INTEGRATION_PATTERNS
 # generous per-lane timeout, failures stay local to a lane, and total wall-clock
 # drops via parallelism. Each task is the single source of truth for how a lane
 # is exercised live (Constitution V — gates flow through mise, never bare pytest).
+#
+# EXPECT_LIVE_TESTS=<n> declares how many tests each lane must actually execute.
+# The shared anti-false-green guard (patterns_contracts.pytest_live_guard, P3)
+# fails the run if fewer ran — turning a collected-zero / all-skipped / import-
+# error "green" into a red, so a hidden never-green can't recur. The aggregate
+# task above deliberately omits it (llamaindex is quarantined there and skips).
 # ---------------------------------------------------------------------------
 
 [tasks."patterns:test:integration:beeai"]
 description = "Gated live-Ollama integration for the beeai lane only (RUN_INTEGRATION_PATTERNS=1)."
-run = "cd patterns/frameworks/beeai && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+run = "cd patterns/frameworks/beeai && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=6 uv run pytest tests/integration"
 
 [tasks."patterns:test:integration:pydantic-ai"]
 description = "Gated live-Ollama integration for the pydantic-ai lane only (RUN_INTEGRATION_PATTERNS=1)."
-run = "cd patterns/frameworks/pydantic-ai && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+run = "cd patterns/frameworks/pydantic-ai && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=6 uv run pytest tests/integration"
 
 [tasks."patterns:test:integration:llamaindex"]
 # Opts past the per-PR quarantine (RUN_LLAMAINDEX_INTEGRATION=1, added in the
@@ -191,15 +197,15 @@ run = "cd patterns/frameworks/pydantic-ai && RUN_INTEGRATION_PATTERNS=1 uv run p
 # per-PR budget only because granite4.1:8b is slow on CPU runners. In the
 # nightly matrix it gets a dedicated job + timeout, so the opt-in is safe here.
 description = "Gated live-Ollama integration for the llamaindex lane only; opts past the per-PR quarantine (nightly matrix)."
-run = "cd patterns/frameworks/llamaindex && RUN_INTEGRATION_PATTERNS=1 RUN_LLAMAINDEX_INTEGRATION=1 uv run pytest tests/integration"
+run = "cd patterns/frameworks/llamaindex && RUN_INTEGRATION_PATTERNS=1 RUN_LLAMAINDEX_INTEGRATION=1 EXPECT_LIVE_TESTS=6 uv run pytest tests/integration"
 
 [tasks."patterns:test:integration:rag"]
 description = "Gated live-Ollama integration for the rag lane only (also exercises the real embedding model)."
-run = "cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+run = "cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run pytest tests/integration"
 
 [tasks."patterns:test:integration:sse"]
 description = "Gated live-Ollama integration for the sse lane only (RUN_INTEGRATION_PATTERNS=1)."
-run = "cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration"
+run = "cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run pytest tests/integration"
 
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
