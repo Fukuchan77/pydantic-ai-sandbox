@@ -1,61 +1,48 @@
-# Spec 005 Req 8.2 / plan §6.
+# Spec 005 Req 8.2 / plan §6 — redesigned per the CI-strategy improvement plan
+# (specs/ci-strategy-review/improvement-plan.md, items P1 + P2).
 #
-# Live-Ollama integration lane for the patterns/ framework lanes. The
-# daemon scaffolding (docker run + ~/.ollama cache + readiness loop +
-# pull-if-missing + log artifact) is cloned from integration-ollama.yml —
-# see that file for the rationale on each step. The `restore-keys:
-# ollama-model-` prefix deliberately shares the existing model blob cache
-# with the app's integration lane so the ~5GB granite pull happens at most
-# once per cache epoch.
+# WHY THIS IS NOT A PER-PR GATE (P1). Live 8B Ollama inference is slow,
+# non-deterministic, and environment-bound. A single per-PR job running every
+# lane sequentially against one daemon blew its 45-minute budget (beeai alone
+# was ~20min; beeai+pydantic-ai together hit the cap on a slow runner), so live
+# integration is no longer a blocking per-PR signal. per-PR coverage stays
+# deterministic and fast via patterns-ci.yml (offline unit/contracts/lint/
+# pyright/coverage). This workflow therefore has NO `pull_request:` trigger.
 #
-# Single job (not a matrix): `mise run patterns:test:integration` runs the
-# three lanes sequentially against one daemon, so the model is pulled and
-# warmed exactly once (plan §6). The mise task is pattern-agnostic — it runs
-# each lane's whole tests/integration/ suite — so the four patterns added in
-# Spec 006-2a (prompt-chaining, parallelization, evaluator-optimizer,
-# autonomous-agent) are exercised alongside routing + orchestrator-workers
-# with no per-pattern step here (Req 12.2 / plan file-table). That is six
-# contract-level e2e cases per lane, eighteen total.
+# WHY A PER-LANE MATRIX (P2). Each lane runs in its own job with its own Ollama
+# daemon and a generous per-lane `timeout-minutes`: failures stay local to a
+# lane, the slow lanes no longer starve the others, and total wall-clock drops
+# via parallelism. This is what lets the llamaindex lane rejoin (it stays
+# quarantined from per-PR via RUN_LLAMAINDEX_INTEGRATION, which its dedicated
+# mise task opts into) — job isolation is the precondition the quarantine note
+# called out.
+#
+# The daemon scaffolding (docker run + ~/.ollama cache + readiness loop +
+# pull-if-missing + log artifact) is cloned from integration-ollama.yml — see
+# that file for the rationale on each step. The `restore-keys: ollama-model-`
+# prefix deliberately shares the existing model blob cache with the app's
+# integration lane so the ~5GB granite pull happens at most once per cache epoch.
+#
+# Each lane's mise task (`patterns:test:integration:<lane>`) runs that lane's
+# whole tests/integration/ suite — six contract-level e2e cases per framework
+# lane (Spec 006-2a Req 12.2) — and is the single source of truth for how the
+# lane is exercised live (Constitution V).
 
 name: patterns-integration-ollama
 
 on:
+  # Nightly per-lane matrix (P2). Off-zero minute; one hour after the app
+  # lane's cron. Was weekly (Mon); nightly now that each lane is isolated.
+  schedule:
+    - cron: '47 4 * * *'
+  # Post-merge signal on main only — NOT a per-PR gate (P1). A merge that
+  # touches the patterns tree re-validates the live lanes immediately.
   push:
     branches: [main]
     paths:
       - 'patterns/**'
       - '.github/workflows/patterns-integration-ollama.yml'
-  schedule:
-    - cron: '47 4 * * 1'  # off-zero minute; one hour after the app lane's cron
-  pull_request:
-    branches: [main]
-    paths:
-      - 'patterns/frameworks/*/src/**'
-      - 'patterns/frameworks/*/tests/integration/**'
-      - 'patterns/frameworks/*/pyproject.toml'
-      # The RAG application lane (Spec 007-2b Req 11.2) is an independent lane at
-      # patterns/rag/; its gated e2e case rides this same daemon (the mise
-      # patterns:test:integration task now runs it). A change to the lane must
-      # re-trigger the live gate, parallel to the frameworks paths above. The
-      # push trigger already covers it via 'patterns/**'.
-      - 'patterns/rag/**'
-      # The SSE delivery lane (Spec 008-2c Req 10.2) is an independent lane at
-      # patterns/sse/; its gated Ollama e2e (run_stream_events → SseEvent adapter)
-      # rides this same daemon via mise patterns:test:integration. A change to the
-      # lane must re-trigger the live gate, parallel to rag above. The push trigger
-      # already covers it via 'patterns/**'.
-      - 'patterns/sse/**'
-      # The patterns import their contracts from the shared package, and the
-      # e2e cases assert contract-level behaviour — a contract change must
-      # re-trigger the live gate (parallel to patterns-ci.yml; the push
-      # trigger already covers it via 'patterns/**'). Spec 006-2a Req 12.2.
-      - 'patterns/contracts/**'
-      - '.github/workflows/patterns-integration-ollama.yml'
   workflow_dispatch: {}
-
-concurrency:
-  group: patterns-integration-ollama-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -66,15 +53,53 @@ env:
   # real Ollama embedding model, supplied here as a sibling to the generation
   # LLM. Pinned to an explicit tag (model-ID hygiene — never `:latest`); the
   # granite-embedding family keeps parity with the granite4.1 generation model.
-  # 278m is the multilingual variant (563MB). Lanes that do not embed ignore it.
+  # 278m is the multilingual variant (563MB). Only the rag lane pulls it.
   OLLAMA_EMBED_MODEL_NAME: granite-embedding:278m
   OLLAMA_BASE_URL: http://localhost:11434/v1
 
 jobs:
   e2e:
-    name: patterns integration (6 patterns × 3 lanes, one daemon)
+    name: integration (${{ matrix.lane }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Per-lane budget (P2). Generous so a slow CPU runner finishes one lane's
+    # 8B inference without the cross-lane contention that broke the old single
+    # job; llamaindex gets the most headroom (it was the slowest to converge).
+    timeout-minutes: ${{ matrix.timeout }}
+    # Job-level concurrency keyed by lane so a re-push cancels only the same
+    # lane's in-flight run, never a sibling lane.
+    concurrency:
+      group: patterns-integration-ollama-${{ github.ref }}-${{ matrix.lane }}
+      cancel-in-progress: true
+    strategy:
+      # One lane's breakage must not cancel the others (plan §6 / P2 isolation).
+      fail-fast: false
+      matrix:
+        include:
+          - lane: beeai
+            dir: patterns/frameworks/beeai
+            task: 'patterns:test:integration:beeai'
+            embed: false
+            timeout: 60
+          - lane: pydantic-ai
+            dir: patterns/frameworks/pydantic-ai
+            task: 'patterns:test:integration:pydantic-ai'
+            embed: false
+            timeout: 60
+          - lane: llamaindex
+            dir: patterns/frameworks/llamaindex
+            task: 'patterns:test:integration:llamaindex'
+            embed: false
+            timeout: 90
+          - lane: rag
+            dir: patterns/rag
+            task: 'patterns:test:integration:rag'
+            embed: true
+            timeout: 60
+          - lane: sse
+            dir: patterns/sse
+            task: 'patterns:test:integration:sse'
+            embed: false
+            timeout: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -86,8 +111,13 @@ jobs:
           install: true
           cache: true
 
-      - name: Sync pattern lanes
-        run: mise run "patterns:setup"
+      - name: Sync contracts + lane
+        # Sync only this lane (plus the shared contracts package the framework
+        # lanes import via tool.uv.sources) — not the whole patterns tree — so a
+        # lane job stays lean and isolated.
+        run: |
+          (cd patterns/contracts && uv sync --all-groups)
+          (cd "${{ matrix.dir }}" && uv sync --all-groups)
 
       - name: Restore Ollama model cache
         id: ollama-cache
@@ -131,13 +161,11 @@ jobs:
             docker exec ollama ollama pull "${OLLAMA_MODEL_NAME}"
           fi
 
-      # The RAG lane's gated e2e embeds with a real Ollama model (Spec 007-2b
-      # Req 11.2 / Q-2). Pulled with the same skip-if-cached guard as the
-      # generation LLM; 278m is ~563MB so the warm-up cost stays modest. If this
-      # pull is ever measured to inflate daemon warm-up materially, R11.4 permits
-      # splitting the RAG e2e into its own job/gate (Task 12.3 defers that to CI
-      # measurement; not pre-emptively isolated here).
+      # Only the rag lane embeds with a real Ollama model (Spec 007-2b Req 11.2
+      # / Q-2). Per-lane isolation (P2) means the other jobs never pay the
+      # ~563MB embedding-model warm-up.
       - name: Pull embedding model (skip if cached)
+        if: ${{ matrix.embed }}
         run: |
           if docker exec ollama ollama list 2>/dev/null \
               | awk 'NR>1 {print $1}' \
@@ -148,8 +176,8 @@ jobs:
             docker exec ollama ollama pull "${OLLAMA_EMBED_MODEL_NAME}"
           fi
 
-      - name: Run pattern integration lanes
-        run: mise run "patterns:test:integration"
+      - name: Run lane integration suite
+        run: mise run "${{ matrix.task }}"
 
       - name: Capture Ollama daemon logs
         if: always()
@@ -159,6 +187,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: patterns-ollama-daemon-${{ github.run_id }}
+          name: patterns-ollama-daemon-${{ matrix.lane }}-${{ github.run_id }}
           path: ollama-daemon.log
           retention-days: 14
