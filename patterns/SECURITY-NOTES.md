@@ -30,14 +30,14 @@
 
 autonomous-agent は唯一の「Agent」型パターンで OWASP Agentic AI Top 10 の主戦場。
 契約 `AgentRunResult.stop_reason`（`Literal["completed", "max_iterations",
-"budget_exceeded", "denied"]`、`test_contract_drift.py` で語彙固定）が、どの
-ガードレールでループが止まったかを型レベルで記録する。4ガードレールは全3レーン
+"budget_exceeded", "denied", "disallowed_tool"]`、`test_contract_drift.py` で
+語彙固定）が、どのガードレールでループが止まったかを型レベルで記録する。4ガードレールは全3レーン
 （pydantic-ai / beeai / llamaindex）で契約レベル共通化されている
 （[autonomous-agent/README.md](autonomous-agent/README.md) §セキュリティ）。
 
 | ガードレール | OWASP Agentic AI リスク項目 | 緩和メカニズムと契約面 |
 |---|---|---|
-| ツール許可リスト（`allowed_tools`、最小権限） | 過剰エージェンシー / Insecure Tool Use | 許可外ツールは**実行せず**、拒否 observation を feedback して**ループ継続**（per-call refusal）。停止語彙に "forbidden" 系を持たない非対称性に整合し、試行は `steps` に記録（Req 6.4） |
+| ツール許可リスト（`allowed_tools`、最小権限） | 過剰エージェンシー / Insecure Tool Use | 許可外ツールは**実行せず**、拒否 observation を記録して**ループ停止**・`stop_reason="disallowed_tool"`（ハード停止、`denied` とは判別可能）。試行は `steps` に記録（Req 6.4） |
 | 危険操作のヒューマン承認フック（`approval_hook`） | Human-in-the-loop bypass / 過剰エージェンシー | `dangerous=True` ツールは呼出前に承認要求、否認で**ループ停止**・`stop_reason="denied"`・`final_output=None`（Req 6.5） |
 | ループ毎予算消費記録（`budget`） | Unbounded Consumption（無制限消費） | `_budget_spent(response)` をレーン毎1点に閉じ込めトークンを決定論集計、`total_budget_spent > budget` で**ループ停止**・`stop_reason="budget_exceeded"`（Req 6.6） |
 | 最大反復数（`max_iterations`） | Unbounded Consumption（無制限消費） | 反復上限到達で**ループ停止**・`stop_reason="max_iterations"`。暴走ループ／無限エージェンシーの上界を契約で固定（Req 6.3） |

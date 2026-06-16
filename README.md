@@ -1,6 +1,10 @@
 # pydantic-ai-sandbox
 
-A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + multi-provider LLM routing**. The design lives in [specs/inputs/idea0.md](specs/inputs/idea0.md); the binding rules live in [.sdd/memory/constitution.md](.sdd/memory/constitution.md).
+A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + multi-provider LLM routing**. The design lives in [specs/inputs/idea0.md](specs/inputs/idea0.md); the binding rules live in `.sdd/memory/constitution.md`.
+
+> **Note:** `.sdd/` and `CLAUDE.md` are git-ignored, locally-generated SDD
+> artifacts (see [.gitignore](.gitignore)) — they are not present in a fresh
+> clone. References to them below point at these local-only files.
 
 ## Onboarding
 
@@ -21,7 +25,7 @@ re-running after pulling main is safe.
 ## Day-to-day commands
 
 All quality gates flow through `mise` — never invoke bare `ruff` / `pyright` /
-`pytest` (Constitution V / [CLAUDE.md](CLAUDE.md)). Available tasks:
+`pytest` (Constitution V / `CLAUDE.md`). Available tasks:
 
 | Task                          | Purpose                                                        |
 | ----------------------------- | -------------------------------------------------------------- |
@@ -53,7 +57,7 @@ FALLBACK_ORDER=ollama     # required when LLM_PROVIDER=fallback
 
 `Settings` (loaded by `pydantic-settings`) validates env at startup and
 fail-fasts on missing required variables (Req 1.2 / Req 4.5). Model IDs are
-**never** hardcoded in `src/` — see [CLAUDE.md](CLAUDE.md) "Model-ID hygiene"
+**never** hardcoded in `src/` — see `CLAUDE.md` "Model-ID hygiene"
 and the `forbid-hardcoded-model-ids` pre-commit hook for the enforced rule.
 
 ## Running the FastAPI app
