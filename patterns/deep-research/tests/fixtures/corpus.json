@@ -1,0 +1,26 @@
+[
+  {
+    "source": "anthropic-multi-agent",
+    "locator": "url=anthropic.com/engineering/multi-agent-research-system",
+    "snippet": "A lead agent decomposes the query and spawns subagents that search in parallel, each with its own context window.",
+    "score": 0.95
+  },
+  {
+    "source": "open-deep-research",
+    "locator": "url=github.com/langchain-ai/open_deep_research",
+    "snippet": "A supervisor coordinates parallel researchers; scoping precedes a research brief and a final report writer synthesises sections.",
+    "score": 0.90
+  },
+  {
+    "source": "local-deep-research",
+    "locator": "url=github.com/LearningCircuit/local-deep-research",
+    "snippet": "An iterative agent adaptively selects search engines and collects more sources than fixed pipelines before synthesising.",
+    "score": 0.80
+  },
+  {
+    "source": "hf-open-deep-research",
+    "locator": "url=huggingface.co/blog/open-deep-research",
+    "snippet": "A code-driven agent loop browses the web and reads pages, performing well on the GAIA benchmark.",
+    "score": 0.70
+  }
+]

@@ -1,0 +1,109 @@
+"""Scripted ``FunctionModel`` fakes for deterministic Deep Research tests.
+
+``TestModel`` (used by the smoke test) generates schema-valid but arbitrary data;
+the pipeline tests instead need *chosen* plans, reflect decisions, finding drafts,
+and report text. ``scripted_model`` dispatches on the output tool's property names
+so a single fake serves every stage of the pipeline and stays correct under the
+parallel ``asyncio.gather`` fan-out (it is stateless — no call cursor to interleave):
+
+* ``subquestions`` in the schema  → a ``ResearchPlan`` payload (the lead agent);
+* ``enough`` in the schema        → a ``_ResearchAction`` payload (reflect step);
+* ``cited_sources`` in the schema → a ``_FindingDraft`` payload (compression);
+* no output tool (plain ``str``)  → the clarifier / report writer text.
+
+A fixed per-call token usage is surfaced so an instrumented run produces spans
+deterministically.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.usage import RequestUsage
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from pydantic_ai.messages import ModelMessage
+    from pydantic_ai.models.function import AgentInfo
+
+__all__ = ["plan_payload", "scripted_model"]
+
+_DEFAULT_ACTION: dict[str, Any] = {"query": "deep research multi-agent", "enough": True}
+_DEFAULT_FINDING: dict[str, Any] = {
+    "summary": "Multi-agent research uses a lead plus parallel sub-researchers.",
+    "cited_sources": ["anthropic-multi-agent"],
+}
+
+
+def plan_payload(
+    subquestions: Sequence[str],
+    *,
+    query: str = "the research query",
+    objective: str = "Cover the trade-offs of multi-agent research systems.",
+    out_of_scope: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Build a ``ResearchPlan``-shaped payload from a list of subquestion strings."""
+    return {
+        "brief": {
+            "query": query,
+            "objective": objective,
+            "out_of_scope": list(out_of_scope or []),
+        },
+        "subquestions": [{"description": description} for description in subquestions],
+    }
+
+
+def scripted_model(
+    *,
+    plan: dict[str, Any] | None = None,
+    action: dict[str, Any] | None = None,
+    finding: dict[str, Any] | None = None,
+    text: str = "A synthesised research report grounded in the findings.",
+    tokens: int = 7,
+    model_name: str = "fake-deep-research",
+) -> FunctionModel:
+    """Build a ``FunctionModel`` returning canned per-stage responses by output schema.
+
+    Args:
+        plan: Args for the ``ResearchPlan`` output tool (schema exposes ``subquestions``).
+        action: Args for the ``_ResearchAction`` tool (schema exposes ``enough``);
+            defaults to ``{"query": ..., "enough": True}`` so a researcher runs once.
+        finding: Args for the ``_FindingDraft`` tool (schema exposes ``cited_sources``);
+            defaults to a single grounded citation.
+        text: Response for plain-text (``output_type=str``) requests (clarifier / report).
+        tokens: Output-token usage surfaced on each response so an instrumented run
+            produces spans deterministically.
+        model_name: Identifier surfaced in instrumentation spans.
+
+    Returns:
+        A ``FunctionModel`` usable anywhere the pipeline accepts ``model``.
+
+    Raises:
+        AssertionError: At call time, when an output schema is requested that the
+            script has no payload for — a test-authoring error that fails loudly.
+    """
+    action_payload = action if action is not None else _DEFAULT_ACTION
+    finding_payload = finding if finding is not None else _DEFAULT_FINDING
+
+    def _respond(_messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        usage = RequestUsage(output_tokens=tokens)
+        if info.output_tools:
+            tool = info.output_tools[0]
+            properties: dict[str, Any] = tool.parameters_json_schema.get("properties", {})
+            if "subquestions" in properties:
+                if plan is None:
+                    msg = "scripted_model: a ResearchPlan was requested but no plan payload was set"
+                    raise AssertionError(msg)
+                return ModelResponse(parts=[ToolCallPart(tool.name, plan)], usage=usage)
+            if "enough" in properties:
+                return ModelResponse(parts=[ToolCallPart(tool.name, action_payload)], usage=usage)
+            if "cited_sources" in properties:
+                return ModelResponse(parts=[ToolCallPart(tool.name, finding_payload)], usage=usage)
+            msg = f"scripted_model has no payload for output schema: {sorted(properties)}"
+            raise AssertionError(msg)
+        return ModelResponse(parts=[TextPart(text)], usage=usage)
+
+    return FunctionModel(_respond, model_name=model_name)
