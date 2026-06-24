@@ -11,9 +11,11 @@ dependencies = [
     # TypeError); >=1.5.13 (requires_python <3.15,>=3.11) fixes the import.
     "ibm-watsonx-ai>=1.5.13",
     "logfire[fastapi,httpx]",
-    # slim[openai] pulls the OpenAI-compatible chat client used by the Ollama provider.
-    "pydantic-ai>=2.0.0b6",
-    "pydantic-ai-slim[openai]>=2.0.0b6",
+    # Use pydantic-ai-slim with explicit extras instead of the full `pydantic-ai`
+    # meta-package, so only what the app actually uses is installed:
+    #   openai  → OpenAI-compatible chat client used by the Ollama provider.
+    #   logfire → instrument_pydantic_ai instrumentation (logging_setup.py).
+    "pydantic-ai-slim[logfire,openai]>=2.0.0",
     "pydantic-settings",
     "uvicorn",
 ]
@@ -56,9 +58,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pydantic_ai_sandbox"]
-
-[tool.uv]
-prerelease = "allow"
 
 [tool.ruff]
 target-version = "py314"

@@ -78,6 +78,12 @@ run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
 # (Task 0 spike: 11-pkg runtime closure, no ML wheels), so it likewise carries
 # an explicit `(cd patterns/sse && …)` line after the rag line in each task
 # (Spec 008-2c Req 8.2 / 11.1).
+#
+# The Deep Research lane (Spec 009 Req 1.1) lives at `patterns/deep-research/` —
+# also depth 1 under patterns/, a sibling of frameworks/ / rag/ / sse/, NOT under
+# the `patterns/frameworks/*/` glob. It is an independent uv project on Python 3.13
+# (matching the rag app lane; pydantic-ai-slim supports it), so it likewise carries
+# an explicit `(cd patterns/deep-research && …)` line after the sse line in each task.
 # ---------------------------------------------------------------------------
 
 [tasks."patterns:setup"]
@@ -90,6 +96,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== setup patterns/rag"; (cd patterns/rag && uv sync --all-groups)
 echo "== setup patterns/sse"; (cd patterns/sse && uv sync --all-groups)
+echo "== setup patterns/deep-research"; (cd patterns/deep-research && uv sync --all-groups)
 """
 
 [tasks."patterns:lint"]
@@ -102,6 +109,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== lint patterns/rag"; (cd patterns/rag && uv run ruff check .)
 echo "== lint patterns/sse"; (cd patterns/sse && uv run ruff check .)
+echo "== lint patterns/deep-research"; (cd patterns/deep-research && uv run ruff check .)
 """
 
 [tasks."patterns:format"]
@@ -114,6 +122,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== format patterns/rag"; (cd patterns/rag && uv run ruff format --check .)
 echo "== format patterns/sse"; (cd patterns/sse && uv run ruff format --check .)
+echo "== format patterns/deep-research"; (cd patterns/deep-research && uv run ruff format --check .)
 """
 
 [tasks."patterns:typecheck"]
@@ -126,6 +135,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== typecheck patterns/rag"; (cd patterns/rag && uv run pyright)
 echo "== typecheck patterns/sse"; (cd patterns/sse && uv run pyright)
+echo "== typecheck patterns/deep-research"; (cd patterns/deep-research && uv run pyright)
 """
 
 [tasks."patterns:test"]
@@ -138,6 +148,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== test patterns/rag"; (cd patterns/rag && uv run pytest --cov)
 echo "== test patterns/sse"; (cd patterns/sse && uv run pytest --cov)
+echo "== test patterns/deep-research"; (cd patterns/deep-research && uv run pytest --cov)
 """
 
 [tasks."patterns:audit"]
@@ -150,6 +161,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit)
 echo "== audit patterns/sse"; (cd patterns/sse && uv run pip-audit)
+echo "== audit patterns/deep-research"; (cd patterns/deep-research && uv run pip-audit)
 """
 
 [tasks."patterns:check"]
@@ -165,6 +177,7 @@ for d in patterns/frameworks/*/; do
 done
 echo "== integration patterns/rag"; (cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 echo "== integration patterns/sse"; (cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
+echo "== integration patterns/deep-research"; (cd patterns/deep-research && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 """
 
 # ---------------------------------------------------------------------------
@@ -206,6 +219,10 @@ run = "cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run 
 [tasks."patterns:test:integration:sse"]
 description = "Gated live-Ollama integration for the sse lane only (RUN_INTEGRATION_PATTERNS=1)."
 run = "cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:deep-research"]
+description = "Gated live-Ollama integration for the deep-research lane only (live model x fake search by default; set RUN_INTEGRATION_SEARCH=1 for a live backend)."
+run = "cd patterns/deep-research && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run pytest tests/integration"
 
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
