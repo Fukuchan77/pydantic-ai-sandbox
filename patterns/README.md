@@ -64,6 +64,28 @@ FastAPI + sse-starlette `EventSourceResponse` で **Server-Sent Events として
 > [contracts/](contracts/README.md) に集約し、同一ドリフトテストで正本
 > （[sse/README.md](sse/README.md)）== パッケージ実体の一致を検知する（R2.2）。
 
+## 応用レイヤー（Deep Research / Multi-Agent オーケストレーション）
+
+RAG・SSE と同じく、**Deep Research もワークフローパターンではない**。lead エージェントが
+クエリを分解（brief→plan）し、**有界並列の sub-researcher** がそれぞれ独立コンテキストで
+search→read→reflect の反復ループを回して引用付き `Finding` を返し、report writer が
+`ResearchReport` に統合する、**Agentic AI（Multi-Agent System）の応用レイヤ**であり、
+ワークフロー6表とは別軸として索引する（Spec 009）。
+
+| 応用パターン | 構成 | レーン | 状態 |
+|---|---|---|---|
+| **Deep Research（マルチエージェント調査）** | lead（brief/plan）→ `max_researchers` で cap した並列 researcher（`asyncio.gather`）→ 有界 search→read→reflect ループ＋`SearchProvider` seam → 引用 grounding（dangling/empty loud-fail）→ report 合成 | `patterns/deep-research/`（`frameworks/` 外の独立 uv レーン, Python 3.13） | ✅ [deep-research/](deep-research/README.md) |
+
+> Deep Research は orchestrator-workers（動的計画＋並列実行）・parallelization（fan-out）・
+> autonomous-agent（有界ループ＋ガードレール）・RAG（`Citation`／引用検証）・SSE（進捗イベント）の
+> **既存プリミティブを合成**する（再実装しない）。参照アーキテクチャは Anthropic multi-agent research
+> system / langchain open_deep_research / local-deep-research。契約（`ResearchBrief` / `SubQuestion` /
+> `ResearchPlan` / `Finding` / `ResearchReport` / `ProgressEvent`）は他パターンと同じ
+> [contracts/](contracts/README.md) に集約し（`Citation` は RAG 契約を再利用）、同一ドリフトテストで
+> 正本一致を検知する。他フレームワーク（LangGraph / CrewAI / Microsoft Agent Framework / LlamaIndex /
+> BeeAI / Langflow / Dify）との比較・ハイブリッド活用方針は
+> [deep-research/COMPARISON.md](deep-research/COMPARISON.md)。
+
 ## フレームワーク比較（本イテレーションで実測した差異）
 
 | 比較軸 | PydanticAI (v2 Beta) | BeeAI Framework (0.1.x) | LlamaIndex Workflows (0.14.x) |

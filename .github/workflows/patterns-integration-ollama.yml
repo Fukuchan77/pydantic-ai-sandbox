@@ -100,6 +100,11 @@ jobs:
             task: 'patterns:test:integration:sse'
             embed: false
             timeout: 60
+          - lane: deep-research
+            dir: patterns/deep-research
+            task: 'patterns:test:integration:deep-research'
+            embed: false
+            timeout: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4

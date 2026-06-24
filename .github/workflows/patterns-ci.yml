@@ -32,6 +32,10 @@ on:
       # patterns/sse/ with its own dedicated job below. `patterns/**` already
       # matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/sse/**'
+      # The Deep Research lane (Spec 009 Req 12.1) is an independent lane at
+      # patterns/deep-research/ with its own dedicated job below. `patterns/**`
+      # already matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/deep-research/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   pull_request:
@@ -50,6 +54,10 @@ on:
       # patterns/sse/ with its own dedicated job below. `patterns/**` already
       # matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/sse/**'
+      # The Deep Research lane (Spec 009 Req 12.1) is an independent lane at
+      # patterns/deep-research/ with its own dedicated job below. `patterns/**`
+      # already matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/deep-research/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -271,5 +279,58 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 7.2 / 008-2c Req 8.2: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # The Deep Research lane (Spec 009 Req 1.1) is an independent uv project at
+  # patterns/deep-research/ — depth 1 under patterns/, a sibling of frameworks/ /
+  # rag/ / sse/, NOT an entry in the lane matrix above. Like the other app lanes it
+  # gets a dedicated job mirroring the lane gates (Req 12.1). The unit suite is
+  # offline and hermetic — an autouse block_network fixture loud-fails on any
+  # internet socket and the model/search are scripted fakes (Req 8.1), so NO daemon
+  # or model pre-fetch step is needed; the live-Ollama e2e is gated by
+  # RUN_INTEGRATION_PATTERNS and runs in patterns-integration-ollama.yml. Coverage
+  # floor is the sibling-lane parity 98 (NFR-4); the lane lands at 100%.
+  deep-research:
+    name: deep-research
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/deep-research
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads patterns/deep-research/.python-version (3.13, matching the rag app
+      # lane; pydantic-ai-slim supports it) and provisions the matching interpreter.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/deep-research/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
+
+      - name: Sync deep-research dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Offline + hermetic: autouse block_network fixture + scripted model/search
+      # fakes keep the whole unit suite network-zero (Req 8.1); no daemon needed.
+      - name: pytest (offline, coverage floor 98)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 005 Req 7.2 / 009 Req 13: per-lockfile dependency CVE scan.
       - name: pip-audit
         run: uv run pip-audit
