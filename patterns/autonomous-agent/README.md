@@ -58,6 +58,26 @@ async def run_autonomous_agent(
 
 3レーンとも手動一様ループで4ガードレールと `stop_reason` Literal を同一化。**fan-out は無し**（逐次ツールループ）。`_budget_spent` を1関数に閉じ込めて予算会計を決定論化（plan「決定論性の核心」）。
 
+## ツール設計（Anthropic「Writing tools for agents」準拠）
+
+本パターンは唯一のツールループ型で、ツールを `allowed_tools: Sequence[Tool]`（最小権限
+allow-list = 注入シーム）として受け取る。公式原則（namespacing / token 効率 /
+`response_format` / 厳格データモデル / 入力検証 / 最小権限）への準拠状況は
+[TOOL-DESIGN-NOTES.md](../TOOL-DESIGN-NOTES.md) に正本として集約し、実演（runnable demo）を
+[`tool_design.py`](../frameworks/pydantic-ai/src/patterns_pydantic_ai/tool_design.py)
+（解説 [`docs/tool-design.md`](../../docs/tool-design.md)）で提供する。
+
+| 原則 | 準拠 | 要点 |
+|---|---|---|
+| Namespacing（`<resource>_<verb>`） | ✅ 実演 | `directory_search` / `directory_get` が共通接頭辞 `directory_` を共有 |
+| Token 効率（pagination/filter/truncation） | ✅ 実演 | 小さな既定 `limit`（上限クランプ）・`offset`/`next_offset` カーソル・`query` フィルタ・自由記述の可視 truncate |
+| `response_format`（concise/detailed） | ✅ 実演 | 既定 `concise`（最小フィールド）、`detailed` 指定時のみ全メタデータ |
+| 厳格データモデル / 入力検証 / 最小権限 | ✅ 既存実装 | `output_type` + `patterns_contracts`、noisy 引数の安全劣化、`allowed_tools` ハード停止 |
+
+デモは凍結済みの6パターン契約・他 lane・ドリフト README を変更せず、既存の `Tool` Protocol /
+`allowed_tools` シームに差し込む（Spec 006-2a 維持）。BeeAI / LlamaIndex lane への横展開は
+将来イテレーション。
+
 ## 必須4セクション
 
 ### 型安全
