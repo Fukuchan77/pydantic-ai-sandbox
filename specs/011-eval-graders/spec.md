@@ -1,7 +1,8 @@
 # 011-eval-graders
 
-> **Status: Draft**（改善提案 P4 の起票ドラフト。`specs/best-practices-review/improvement-plan.md` P4 が出典。
-> `/sdd-init` での確定前に下記 Clarifications の未確定論点を解消する。）
+> **Status: Draft（Clarifications 確定済）**。改善提案 P4 の起票ドラフト。
+> 出典 `specs/best-practices-review/improvement-plan.md` P4。4 論点は IBM/Anthropic/Google/AWS の公式指針に
+> 照らし CONFIRMED（→ ADR-1〜4）。`plan.md` / `tasks.md` / `spec.json` は未整備。
 
 outcome+behavior の評価グレーダ(Anthropic「Demystifying evals」)を `patterns/contracts` の
 **単一ソース**として契約化し、evaluator-optimizer / deep-research / autonomous-agent の複数パターンで
@@ -22,18 +23,30 @@ evaluator-optimizer は Generator / Evaluator を物理分離し独立 judge を
 
 ## Clarifications
 
-### Session（要確定 — /sdd-init 前の未解決論点）
+### Session 2026-06-24（公式指針に基づき CONFIRMED）
 
-- **[要確定] グレーダ契約の所有 README**: 契約ドリフトテストは「1クラス = 1 README 所有」を強制する
-  (`test_contract_drift.py` の `_README_PATHS` と `_OWNERS` 一意性)。共有グレーダは横断的なので、
-  (a) 新規の横断 README(例 `patterns/EVAL-GRADERS.md` を `_README_PATHS` へ追加)を所有者にするか、
-  (b) evaluator-optimizer README を所有者とし他パターンは参照に留めるか、を確定する。
-- **[要確定] スコアスキーマ**: 多軸スコアの軸定義(例 outcome: correctness / completeness、
-  behavior: tool-use discipline / guardrail-respect)と尺度(0–1 float か `Literal` 段階か)。
-- **[要確定] judge の独立性表現**: グレーダ契約に judge メタ(独立 judge モデル ID / self-eval 禁止フラグ)を
-  含めるか、契約は純データ(スコア + 根拠)に限定し独立性は実装規律に委ねるか。
-- **[要確定] 既存 `OptimizationResult` との関係**: 収束ゲートとグレーダを別契約として併存させるか、
-  グレーダを参照する形へ寄せるか(後方互換維持が前提)。
+IBM / Anthropic / Google / AWS の公式技術情報に照らし、4 論点を確定（→ ADR-1〜4）。
+
+- **グレーダ契約の所有 README → CONFIRMED**: **新規横断 README `patterns/EVAL-GRADERS.md`** を
+  `test_contract_drift.py` の `_README_PATHS` へ追加し、共有グレーダ契約の所有者とする。**根拠**: P4 の
+  目的が「outcome+behavior グレーダの単一ソース化・横展開」そのものであり、3 パターン共有の契約は真に
+  横断的(P2 の `ResearchNote` が deep-research 固有なのと対照的)（ADR-1）。
+- **スコアスキーマ → CONFIRMED**: **outcome 軸と behavior 軸を分離**して保持する。各軸は
+  **離散 1–5 rating + 各段階の rubric 文言 + 証拠不足を表す `Unknown` + 根拠(rationale)必須**、
+  最終集約は **partial credit を許す float**。例: outcome=`correctness`/`completeness`、
+  behavior=`tool_use_discipline`/`guardrail_adherence`/`faithfulness`。**根拠**: Anthropic(transcript と
+  outcome の分離 / 次元の分離 / Unknown / partial credit / reasoning を含める)、Google Vertex(criteria +
+  5 点 rating_rubric)、AWS(correctness/completeness + Tool Selection Accuracy)、IBM(faithfulness +
+  全判断の audit trail)（ADR-2）。
+- **judge の独立性表現 → CONFIRMED**: 契約は **純データ(軸スコア + rationale + 集約)+ judge 出自の
+  最小メタ(`judge_id` 等の任意フィールド)**に限定。`self_eval_forbidden` 等のフラグは契約に入れず、
+  独立性は実装規律(別モデル注入・Generator/Evaluator 物理分離)で担保する。**根拠**: Anthropic は独立
+  judge と人手キャリブレーションを運用規律として説き(型制約ではない)、IBM は誰が採点したかの監査証跡を
+  重視。SSE レーンの「過剰な型制約で誤った安全感を与えない」方針と一貫（ADR-3）。
+- **既存 `OptimizationResult` との関係 → CONFIRMED**: **併存(後方互換維持)**。`OptimizationResult`
+  (`verdict: pass|revise`)はランタイム収束ゲート(in-the-loop)のまま、新グレーダ契約はオフライン/CI の
+  多軸採点という別レイヤに置く。橋渡しは将来拡張。**根拠**: IBM は in-the-loop(実行中の判断点)と offline の
+  2 モードを補完的と定義、Anthropic も収束判定と eval(CI 採点)を区別（ADR-4）。
 
 ## Overview
 
@@ -68,18 +81,20 @@ stop_reason / ガードレール遵守を、同一の軸スキーマで採点す
 
 ## Requirements（EARS）
 
-### Requirement 1: 共有グレーダ契約
+### Requirement 1: 共有グレーダ契約（ADR-1, ADR-2）
 1.1 outcome+behavior の多軸スコアを表す単一契約(`GradeReport` 相当)を `patterns/contracts` に追加する。
-1.2 契約は軸別スコア・各軸の根拠・集約判定を保持し、軸スキーマは Clarifications で確定したものに従う。
-1.3 README 正本 = パッケージ実体の一致を `test_contract_drift.py` で検証する(所有 README は Clarifications で確定)。
+1.2 契約は **outcome 軸と behavior 軸を分離**して保持し、各軸は離散 1–5 rating + 証拠不足の `Unknown` + 根拠(rationale)必須、最終集約は partial credit を許す float とする。
+1.3 各 rating 段階の意味は rubric 文言で定義する(Google Vertex の rating_rubric 方式)。
+1.4 グレーダ契約の README 正本は **新規横断 README `patterns/EVAL-GRADERS.md`** を所有者とし、`_README_PATHS` へ登録のうえ 正本 = パッケージ実体の一致を `test_contract_drift.py` で検証する。
 
-### Requirement 2: 複数パターンからの参照
+### Requirement 2: 複数パターンからの参照（ADR-4）
 2.1 evaluator-optimizer / deep-research / autonomous-agent の eval が同一グレーダ契約を import して採点結果を構築する。
-2.2 各パターンの既存ランタイム契約(`OptimizationResult` / `ResearchReport` / `AgentRunResult`)は後方互換を維持する。
+2.2 各パターンの既存ランタイム契約(`OptimizationResult` / `ResearchReport` / `AgentRunResult`)は後方互換を維持する。グレーダ契約はランタイム収束ゲートと**併存する別レイヤ**(オフライン/CI 採点)とし、既存契約を置換しない。
 
-### Requirement 3: 独立 judge と self-eval バイアス回避
+### Requirement 3: 独立 judge と self-eval バイアス回避（ADR-3）
 3.1 採点は被評価系と分離した judge シーム(注入)で行い、self-eval を構造的に避ける。
 3.2 judge はオフライン決定論フェイクで差し替え可能とし、hermetic に採点形状を検証する。
+3.3 契約は純データ(軸スコア + rationale + 集約)+ judge 出自の最小メタ(`judge_id` 等の任意フィールド)に限定し、self-eval 禁止フラグ等の規律は型制約にしない(実装規律で担保)。
 
 ### Requirement 4: テスト
 4.1 全グレーディング unit はネットワーク I/O ゼロ(決定論フェイク judge)。
@@ -89,6 +104,31 @@ stop_reason / ガードレール遵守を、同一の軸スキーマで採点す
 ### Requirement 5: ドキュメント
 5.1 グレーダ契約の所有 README に正本を置き、各パターン README の評価節へ参照を追記する。
 5.2 `specs/best-practices-review/verification.md` の観点6(評価)へ単一ソース化を反映する(本 spec 完了時)。
+
+## ADR（確定事項）
+
+### ADR-1: 共有グレーダは新規横断 README `patterns/EVAL-GRADERS.md` が所有
+3 パターン共有の契約は真に横断的なので、横断 README を単一ソースの所在とし `_README_PATHS` へ登録する。
+**根拠**: P4 の目的が「単一ソース化・横展開」そのもの。P2 の `ResearchNote`(deep-research 固有)とは
+対照的で、評価グレーダは複数パターンに跨る。ドリフトテストの「1クラス = 1 README 所有」も満たす。
+
+### ADR-2: スコアは outcome/behavior 分離 × 1–5 rating + Unknown + rationale、集約は float
+outcome 軸と behavior 軸を分離し、各軸は離散 1–5 rating(各段階 rubric 定義)+ 証拠不足 `Unknown` +
+rationale 必須、最終集約は partial credit を許す float。**根拠**: Anthropic(transcript と outcome の分離 /
+次元の分離 / Unknown / partial credit / reasoning を含める)、Google Vertex(criteria + 5 点
+rating_rubric)、AWS(correctness/completeness + Tool Selection Accuracy)、IBM(faithfulness + audit
+trail)の合流点。rationale 必須は本リポジトリの「silent empty 禁止」規律と一致。
+
+### ADR-3: 独立性は実装規律、契約は純データ + judge 最小メタ
+契約は軸スコア + rationale + 集約 + `judge_id` 等の最小メタに限定し、self-eval 禁止フラグは型に入れない。
+独立性は別モデル注入・Generator/Evaluator 物理分離で担保。**根拠**: Anthropic は独立 judge と人手
+キャリブレーションを運用規律として説き、IBM は採点者の監査証跡を重視。SSE レーンの「過剰な型制約で誤った
+安全感を与えない」方針と一貫。
+
+### ADR-4: 既存収束ゲートと併存（置換しない）
+`OptimizationResult`(`verdict: pass|revise`)はランタイム収束ゲート(in-the-loop)のまま、グレーダ契約は
+オフライン/CI の多軸採点という別レイヤに置く。**根拠**: IBM は in-the-loop(実行中の判断点)と offline の
+2 モードを補完的と定義、Anthropic も収束判定と eval(CI 採点)を区別。後方互換を壊さず単一ソース化を達成。
 
 ## Non-Functional Requirements
 
@@ -107,5 +147,9 @@ stop_reason / ガードレール遵守を、同一の軸スキーマで採点す
 ## References
 
 - Anthropic, *Demystifying evals for AI agents*: https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+- Google Cloud, *Details for managed rubric-based metrics (Vertex AI Gen AI evaluation)*: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/rubric-metric-details
+- AWS, *Evaluate Amazon Bedrock Agents with Ragas and LLM-as-a-judge*: https://aws.amazon.com/blogs/machine-learning/evaluate-amazon-bedrock-agents-with-ragas-and-llm-as-a-judge/
+- AWS, *Build reliable AI agents with Amazon Bedrock AgentCore Evaluations*: https://aws.amazon.com/blogs/machine-learning/build-reliable-ai-agents-with-amazon-bedrock-agentcore-evaluations/
+- IBM, *Agentic AI evaluation (watsonx documentation)*: https://www.ibm.com/docs/en/watsonx/saas?topic=sdk-agentic-ai-evaluation
 - 既存: `patterns/contracts/`(evaluator_optimizer / deep_research / autonomous_agent)、`contracts/tests/unit/test_contract_drift.py`
 - 出典: `specs/best-practices-review/improvement-plan.md` P4、`verification.md` 観点6
