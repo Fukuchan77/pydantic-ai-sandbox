@@ -25,6 +25,7 @@ from patterns_contracts import (
     ReportReadyEvent,
     ResearchBrief,
     ResearcherStartedEvent,
+    ResearchNote,
     ResearchPlan,
     ResearchReport,
     SearchQuery,
@@ -38,6 +39,7 @@ _MODELS = (
     ResearchPlan,
     SearchQuery,
     SearchResult,
+    ResearchNote,
     Finding,
     ResearchReport,
     BriefReadyEvent,
@@ -62,12 +64,14 @@ def test_field_sets() -> None:
     assert set(ResearchPlan.model_fields) == {"brief", "subquestions"}
     assert set(SearchQuery.model_fields) == {"text"}
     assert set(SearchResult.model_fields) == {"source", "locator", "snippet", "score"}
+    assert set(ResearchNote.model_fields) == {"source", "locator", "key_point", "score"}
     assert set(Finding.model_fields) == {
         "subquestion",
         "summary",
         "citations",
         "iterations",
         "truncated",
+        "notes",
     }
     assert set(ResearchReport.model_fields) == {
         "brief",
@@ -84,6 +88,44 @@ def test_event_field_sets() -> None:
     assert set(ResearcherStartedEvent.model_fields) == {"type", "subquestion"}
     assert set(FindingReadyEvent.model_fields) == {"type", "subquestion", "citation_count"}
     assert set(ReportReadyEvent.model_fields) == {"type", "citation_count"}
+
+
+def test_research_note_is_frozen() -> None:
+    note = ResearchNote(source="doc", locator="url=a", key_point="X is a thing", score=0.9)
+    with pytest.raises(ValidationError):
+        note.score = 0.1  # frozen=True forbids mutation
+
+
+def test_finding_notes_defaults_to_empty_list() -> None:
+    finding = Finding.model_validate(
+        {
+            "subquestion": {"description": "What is X?"},
+            "summary": "X is a thing.",
+            "citations": [
+                {"source": "doc", "locator": "url=a", "chunk_id": "doc::0001", "score": 0.9},
+            ],
+            "iterations": 2,
+        }
+    )
+    assert finding.notes == []  # default_factory=list, backward compatible
+
+
+def test_finding_carries_research_notes() -> None:
+    finding = Finding.model_validate(
+        {
+            "subquestion": {"description": "What is X?"},
+            "summary": "X is a thing.",
+            "citations": [
+                {"source": "doc", "locator": "url=a", "chunk_id": "doc::0001", "score": 0.9},
+            ],
+            "iterations": 2,
+            "notes": [
+                {"source": "doc", "locator": "url=a", "key_point": "X is a thing", "score": 0.9},
+            ],
+        }
+    )
+    assert isinstance(finding.notes[0], ResearchNote)
+    assert finding.notes[0].key_point == "X is a thing"
 
 
 def test_finding_reuses_citation_from_rag() -> None:
