@@ -51,6 +51,7 @@ __all__ = [
     "ProgressEvent",
     "ReportReadyEvent",
     "ResearchBrief",
+    "ResearchNote",
     "ResearchPlan",
     "ResearchReport",
     "ResearcherStartedEvent",
@@ -106,6 +107,29 @@ class SearchResult(BaseModel):
     score: float = Field(description="Provider relevance score; ties break by ascending source.")
 
 
+class ResearchNote(BaseModel):
+    """One distilled, high-signal note kept in a sub-researcher's external notebook.
+
+    Structured note-taking carrier (Anthropic "Effective context engineering"):
+    each gathered ``SearchResult`` is reduced to a single ``key_point`` and kept
+    as external memory rather than raw transcript, deduplicated by its
+    ``(source, locator)`` anchor and ranked by ``score`` (lane-side compaction in
+    ``patterns_deep_research.notes``). ``frozen=True`` keeps a note immutable and
+    hashable once distilled. The v1 shape is fixed at these four fields; an
+    adoption/rejection ``decision`` family ("information that constrains future
+    reasoning") is a documented future extension, not part of this contract.
+    """
+
+    model_config = {"frozen": True}
+
+    source: str = Field(description="Distilled-from SearchResult.source; dedup anchor.")
+    locator: str = Field(description="Distilled-from SearchResult.locator; dedup anchor.")
+    key_point: str = Field(
+        description="Lead sentence truncated to key_point_chars with a visible marker."
+    )
+    score: float = Field(description="Distilled-from SearchResult.score; descending-rank key.")
+
+
 class Finding(BaseModel):
     """One sub-researcher's compressed output for its subquestion."""
 
@@ -120,6 +144,10 @@ class Finding(BaseModel):
     truncated: bool = Field(
         default=False,
         description="True when the per-researcher iteration cap was hit before 'enough'.",
+    )
+    notes: list[ResearchNote] = Field(
+        default=[],
+        description="Distilled high-signal notes for the handoff (default []; raw transcript not propagated).",
     )
 
 
