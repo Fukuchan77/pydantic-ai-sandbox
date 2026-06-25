@@ -96,23 +96,53 @@ _Boundary:_ `patterns/deep-research/src/patterns_deep_research/researcher.py`, `
 _Depends:_ 1, 2
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 2.2, 4.1, 4.2, 4.3
 
-- [ ] 3.1 `test_researcher.py` に (a) `compact_digest` 注入時に reflect プロンプトがノート縮約 digest になる（赤）、(b) 既定（未注入）時は reflect プロンプトが `_results_digest(collected)` から**独立に組み立てた期待文字列**と `==` 完全一致（FunctionModel でプロンプト捕捉、関数同一性に依拠しない byte 互換ロック）、(c) compression ターンは full `_results_digest` 維持、を先に書く。`researcher.py` に `digest_fn: Callable[[Sequence[SearchResult]], str] = _results_digest` シームを **reflect ループ限定**で追加し、`_results_digest` 引数型を `list` → `Sequence` へ拡幅して全アサートを緑化する。
+- [x] 3.1 `test_researcher.py` に (a) `compact_digest` 注入時に reflect プロンプトがノート縮約 digest になる（赤）、(b) 既定（未注入）時は reflect プロンプトが `_results_digest(collected)` から**独立に組み立てた期待文字列**と `==` 完全一致（FunctionModel でプロンプト捕捉、関数同一性に依拠しない byte 互換ロック）、(c) compression ターンは full `_results_digest` 維持、を先に書く。`researcher.py` に `digest_fn: Callable[[Sequence[SearchResult]], str] = _results_digest` シームを **reflect ループ限定**で追加し、`_results_digest` 引数型を `list` → `Sequence` へ拡幅して全アサートを緑化する。
   _Boundary:_ `patterns/deep-research/src/patterns_deep_research/researcher.py`, `patterns/deep-research/tests/unit/test_researcher.py`
   _Depends:_ 2
   _Requirements:_ 1.1, 1.2, 1.3, 1.4, 4.1, 4.2, 4.3
-- [ ] 3.2 (P) ループ終了後に `Finding.notes = distill_notes(collected)` を充填し、ハンドオフを「凝縮サマリ + ノートのみ」に固定する（生トランスクリプト非伝播）。`test_researcher.py` で注入時／未注入時いずれも `Finding.notes` が充填されること、空 `collected` で `[]` になることを赤→緑で検証する。
+- [x] 3.2 (P) ループ終了後に `Finding.notes = distill_notes(collected)` を充填し、ハンドオフを「凝縮サマリ + ノートのみ」に固定する（生トランスクリプト非伝播）。`test_researcher.py` で注入時／未注入時いずれも `Finding.notes` が充填されること、空 `collected` で `[]` になることを赤→緑で検証する。
   _Boundary:_ `patterns/deep-research/src/patterns_deep_research/researcher.py`, `patterns/deep-research/tests/unit/test_researcher.py`
   _Depends:_ 3.1
   _Requirements:_ 2.2, 4.1, 4.2, 4.3
-- [ ] 3.3 (P) `run_deep_research` に `digest_fn`（既定 `_results_digest`）を追加し `_research` 内の `run_subquestion` 呼び出しへ透過する。`test_research.py` で end-to-end opt-in（`compact_digest` 注入が sub-researcher の reflect digest へ伝播し、既定は現挙動互換）を赤→緑で検証する。
+- [x] 3.3 (P) `run_deep_research` に `digest_fn`（既定 `_results_digest`）を追加し `_research` 内の `run_subquestion` 呼び出しへ透過する。`test_research.py` で end-to-end opt-in（`compact_digest` 注入が sub-researcher の reflect digest へ伝播し、既定は現挙動互換）を赤→緑で検証する。
   _Boundary:_ `patterns/deep-research/src/patterns_deep_research/research.py`, `patterns/deep-research/tests/unit/test_research.py`
   _Depends:_ 3.1
   _Requirements:_ 1.1, 1.2, 4.1, 4.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- 3.1: byte 互換ロックは捕捉した reflect プロンプト文字列 ＝ `_results_digest(collected)`
+  から独立構築した期待文字列の `==` 完全一致で固定（関数同一性に非依拠）。`_results_digest`
+  は white-box import し `# pyright: ignore[reportPrivateUsage]` を **symbol 行**（多行 import 内
+  `_results_digest,` 行）に付与——pyright は診断行に ignore を紐付けるため `(` 開き括弧行では
+  抑止されない。
+- 3.1: プロンプト捕捉モデルは `_PromptCapture`（`__call__` で reflect/compression プロンプトを
+  stage 別に記録）。`FunctionModel` は `function.__name__` で既定名を導出するためクラスへ
+  `__name__ = "prompt_capture"` を明示（callable インスタンスには無いと `AttributeError`）。
+- 3.1: 既定の byte 互換ロックは変更前から緑（回帰ガード）、`digest_fn` 注入 2 件が赤
+  （`TypeError: unexpected keyword 'digest_fn'`）→ seam 追加で緑。`_results_digest` 引数型を
+  `list` → `Sequence` へ拡幅。reflect ループのみ `digest_fn(collected)`、compression は
+  `_results_digest(collected)` full 維持（ADR-A）。researcher.py 100%・unit 47 passed/1 skipped。
+- 3.2: `Finding.notes = distill_notes(collected)` をコンストラクタ充填。reflect の `digest_fn`
+  シームと独立（notes は `collected` から distill、reflect digest ではない）——注入時／未注入時で
+  notes 同一を検証。`_run` ヘルパを `-> Finding` へ変更（3.1 テストは戻り値非使用で無影響）。
+- 3.2: 「空 collected で []」は happy path では**観測不能**——`map_citations` が空 collected で
+  `EmptyCitationError`/`DanglingCitationError` を loud-fail し Finding を返さない。plan の安全既定 [] は
+  到達不能だが正しい契約既定。テストは populated で `notes == distill_notes(collected)` を赤→緑、
+  空入力は loud-fail（`EmptyCitationError`）＋ `distill_notes([]) == []` 確認で誠実に固定。
+- 3.2: `distill_notes` は researcher で runtime import（compression import 直後、循環なし）。
+  researcher.py 100%・unit 50 passed/1 skipped・TOTAL 100.00%。
+- 3.3: 新規 `test_research.py`（`_PipelineCapture` で full pipeline の sub-researcher reflect
+  プロンプトを捕捉）。注入時に `compact_digest` が end-to-end で reflect digest へ伝播、未注入は
+  `_results_digest` 互換を赤→緑で検証（既定テストは変更前から緑＝回帰ロック）。
+- 3.3 **plan 逸脱（意図的）**: `run_deep_research(digest_fn=...)` の既定を plan の `= _results_digest`
+  ではなく `| None = None` とし、注入時のみ `run_subquestion` へ透過（None は研究者側の
+  `_results_digest` 既定に委譲）。理由＝research.py が private `_results_digest` を import せず済み、
+  **src への `# pyright: ignore[reportPrivateUsage]` を回避**＋レイヤリング改善（reflect-digest 既定は
+  researcher が所有）。`**dict` splat は pyright strict が残余 kwarg（`instrumentation`）と型不一致で
+  reject するため明示 if/else 分岐を採用。挙動は既定＝`_results_digest` で plan と等価。
+- 3.3: research.py 100%（両分岐被覆）・unit 52 passed/1 skipped・TOTAL 100.00%。**major task 3 完了**
+  （compaction DI シーム本線配線：reflect 注入 + Finding.notes 充填 + end-to-end 透過）。
 
 ---
 
