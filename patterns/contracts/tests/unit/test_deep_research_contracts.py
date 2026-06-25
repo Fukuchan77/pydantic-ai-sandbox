@@ -107,7 +107,8 @@ def test_finding_notes_defaults_to_empty_list() -> None:
             "iterations": 2,
         }
     )
-    assert finding.notes == []  # default_factory=list, backward compatible
+    # default=[] is deep-copied per instance by Pydantic v2, so backward compatible.
+    assert finding.notes == []
 
 
 def test_finding_carries_research_notes() -> None:

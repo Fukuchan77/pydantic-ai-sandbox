@@ -173,6 +173,13 @@ erDiagram
 > 変更は deep-research レーン・`patterns_contracts.deep_research`/`__init__`・関連 docs に限定。
 > 凍結 6 パターン契約・他レーン README・他レーン src には触れない（NFR）。
 
+> **既知のスコープ脱線（要追跡）**: 本ブランチには改善提案 P1 の tool-design demo
+> （`patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/tool_design.py` ＋ `tests/unit/test_tool_design.py`、
+> commit `ee0e40c`）が同梱されているが、これは上記ファイルスコープ外であり、本 spec のどの要件 ID にも
+> トレースしない（constitution「Every task traces to a requirement ID」に対する gap）。コード品質は良好だが、
+> SDD 上は **未起票の P1 demo**。今後 P1 tool-design 用の専用 spec を起票してトレースを付与すること
+> （本 spec 010 の受け入れ判定には含めない）。
+
 ## Error Handling & Edge Cases
 
 - `max_notes` または `key_point_chars` が非正 → `ValueError` で loud-fail（既存実装維持、Req 3.3）。

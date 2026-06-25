@@ -128,3 +128,13 @@ def test_research_note_keyword_construction_and_value_equality() -> None:
 def test_distill_notes_returns_empty_for_empty_input() -> None:
     # No gathered results -> empty notebook (Finding.notes stays [] for the handoff).
     assert distill_notes([]) == []
+
+
+def test_empty_snippet_distils_to_empty_key_point_but_keeps_anchor() -> None:
+    # An empty snippet yields an empty key point by design: the note is still
+    # retained with its (source, locator, score) anchor for dedup/ranking. The
+    # low-signal key point is handled downstream at grading time (spec 011 Req 2.3
+    # maps it to Unknown), not silently dropped here.
+    note = distill_notes([_result("A", "1", "   ", 0.9)])[0]
+    assert note.key_point == ""
+    assert (note.source, note.locator, note.score) == ("A", "1", 0.9)
