@@ -9,7 +9,9 @@ notebook block, and the ``compact_digest`` drop-in for ``researcher._results_dig
 from __future__ import annotations
 
 import pytest
+from patterns_contracts import ResearchNote as ContractResearchNote
 from patterns_contracts import SearchResult
+from pydantic import ValidationError
 
 from patterns_deep_research.notes import (
     ResearchNote,
@@ -93,3 +95,36 @@ def test_compact_digest_is_a_bounded_drop_in_for_results_digest() -> None:
     assert lines[0] == "- [S7#1] Finding 7"
     # Empty input renders the placeholder, matching the lane's digest idiom.
     assert compact_digest([]) == "(no notes yet)"
+
+
+def test_research_note_is_the_promoted_contract_single_entity() -> None:
+    # notes.ResearchNote must BE the promoted patterns_contracts.ResearchNote,
+    # not a local redefinition — identical object identity proves a single
+    # entity. RED until notes.py migrates its import (Task 2.2).
+    assert id(ResearchNote) == id(ContractResearchNote)
+
+
+def test_research_note_is_a_frozen_basemodel() -> None:
+    note = ResearchNote(source="A", locator="1", key_point="key thing", score=0.9)
+    # Post-migration frozen immutability follows pydantic: mutation raises
+    # ValidationError (the local frozen dataclass raised FrozenInstanceError).
+    # The attribute name is held in a variable so the staged migration keeps the
+    # lint/type gates green; the runtime frozen rejection is the assertion.
+    frozen_field = "score"
+    with pytest.raises(ValidationError):
+        setattr(note, frozen_field, 0.1)
+
+
+def test_research_note_keyword_construction_and_value_equality() -> None:
+    # Keyword construction and field-wise value equality are preserved across
+    # the dataclass -> BaseModel migration.
+    one = ResearchNote(source="A", locator="1", key_point="key thing", score=0.9)
+    same = ResearchNote(source="A", locator="1", key_point="key thing", score=0.9)
+    other = ResearchNote(source="A", locator="1", key_point="key thing", score=0.1)
+    assert one == same
+    assert one != other
+
+
+def test_distill_notes_returns_empty_for_empty_input() -> None:
+    # No gathered results -> empty notebook (Finding.notes stays [] for the handoff).
+    assert distill_notes([]) == []
