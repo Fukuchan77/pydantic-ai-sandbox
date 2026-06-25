@@ -90,6 +90,7 @@ stop_reason / ガードレール遵守を、同一の軸スキーマで採点す
 ### Requirement 2: 複数パターンからの参照（ADR-4）
 2.1 evaluator-optimizer / deep-research / autonomous-agent の eval が同一グレーダ契約を import して採点結果を構築する。
 2.2 各パターンの既存ランタイム契約(`OptimizationResult` / `ResearchReport` / `AgentRunResult`)は後方互換を維持する。グレーダ契約はランタイム収束ゲートと**併存する別レイヤ**(オフライン/CI 採点)とし、既存契約を置換しない。
+2.3 deep-research の採点対象には spec 010 で追加された `Finding.notes`(`ResearchNote` の distill 済みノート)を含める。IF `ResearchNote.key_point` が空または低信号(distill は空 `SearchResult.snippet` から空 key point を生成しうる)であるとき、THEN behavior/faithfulness 軸は silent にスコアせず `Unknown`(証拠不足、ADR-2)へマップする。
 
 ### Requirement 3: 独立 judge と self-eval バイアス回避（ADR-3）
 3.1 採点は被評価系と分離した judge シーム(注入)で行い、self-eval を構造的に避ける。
@@ -152,4 +153,5 @@ trail)の合流点。rationale 必須は本リポジトリの「silent empty 禁
 - AWS, *Build reliable AI agents with Amazon Bedrock AgentCore Evaluations*: https://aws.amazon.com/blogs/machine-learning/build-reliable-ai-agents-with-amazon-bedrock-agentcore-evaluations/
 - IBM, *Agentic AI evaluation (watsonx documentation)*: https://www.ibm.com/docs/en/watsonx/saas?topic=sdk-agentic-ai-evaluation
 - 既存: `patterns/contracts/`(evaluator_optimizer / deep_research / autonomous_agent)、`contracts/tests/unit/test_contract_drift.py`
+- 関連 spec: `specs/010-context-engineering/spec.md`(deep-research に `Finding.notes` / `ResearchNote` を追加。Req 2.3 のとおり本 spec の deep-research グレーダは distill 済みノートも採点対象に含む)
 - 出典: `specs/best-practices-review/improvement-plan.md` P4、`verification.md` 観点6
