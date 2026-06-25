@@ -25,8 +25,12 @@ exactly like the rest of the lane.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
+
+# ``ResearchNote`` is the promoted single-source contract (patterns_contracts),
+# instantiated at runtime in ``distill_notes`` — not a local redefinition
+# (Spec 010 Req 2.1). The shape and frozen immutability live in the contract.
+from patterns_contracts import ResearchNote
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -48,16 +52,6 @@ _TRUNCATION_MARKER: Final = "…"
 """Suffix appended to a key point that was shortened, so truncation stays visible."""
 _EMPTY_NOTEBOOK: Final = "(no notes yet)"
 """Rendered placeholder when no results have been gathered, mirroring the lane idiom."""
-
-
-@dataclass(frozen=True, slots=True)
-class ResearchNote:
-    """One distilled, high-signal note kept in the researcher's external notebook."""
-
-    source: str
-    locator: str
-    key_point: str
-    score: float
 
 
 def _key_point(snippet: str, limit: int) -> str:

@@ -110,3 +110,82 @@ package 側 `default=[]` と表記も整合させた。
 
 major task 1（契約昇格）完了。`ResearchNote` 契約と `Finding.notes` が package＝README
 で機械検証され一致。Req 2.1/2.2/2.3 充足。次は major task 2（notes.py の契約 import 移行）。
+
+---
+
+## Task 2.1 — test_notes.py に契約移行テストを先行追加（RED 半）
+
+**日付**: 2026-06-25
+**Boundary**: `patterns/deep-research/tests/unit/test_notes.py`（テストのみ）
+**Requirements**: 3.1, 3.2, 3.3, 4.1, 4.2
+
+### RED
+
+`test_notes.py` に 4 件追加（注入用 import: `ResearchNote as ContractResearchNote`,
+`pydantic.ValidationError`）:
+
+- `test_research_note_is_the_promoted_contract_single_entity`: `id(notes.ResearchNote)
+  == id(ContractResearchNote)`。移行前は local dataclass のため **赤**。
+- `test_research_note_is_a_frozen_basemodel`: 変数経由 `setattr` で frozen 変異 →
+  `ValidationError` を要求。移行前は `FrozenInstanceError` のため **赤**。
+- `test_research_note_keyword_construction_and_value_equality`: kwargs 構築 + 値等価
+  （dataclass/BaseModel 両対応の保存ロック、緑）。
+- `test_distill_notes_returns_empty_for_empty_input`: `distill_notes([]) == []`（緑）。
+
+### 検証
+
+- 型/lint ゲートを**緑**に保つ設計判断（do.md の learnings 参照）:
+  - 単一実体は `is` ではなく `id() ==`（pyright `reportUnnecessaryComparison` 回避）。
+  - frozen は変数経由 `setattr`（直接代入=pyright frozen-dataclass 赤／リテラル
+    `setattr`=ruff B010 を同時回避）。
+- 実測（`uv run`、lane venv）:
+  - `ruff check tests/unit/test_notes.py` → All checks passed
+  - `ruff format --check` → already formatted
+  - `pyright` → 0 errors, 0 warnings
+  - `pytest tests/unit --no-cov` → **2 failed, 42 passed**
+    （failed = 単一実体・frozen の 2 件のみ、いずれも移行前 dataclass を正しく検知）
+
+### 結果（ハンドオフ）
+
+新規 2 件は **意図的に赤**（`notes.ResearchNote` がまだ local dataclass）。lint/format/
+pyright は緑のため、Task 2.2 の import 移行は純粋な挙動フリップで両件を緑化する設計上の
+ハンドオフ（Task 1.1→1.2 と同型）。coverage ratchet（`fail_under=98`）は major task 2
+完了（2.2 後）に確認する。
+
+---
+
+## Task 2.2 — notes.py を契約 import へ移行（GREEN 半）
+
+**日付**: 2026-06-25
+**Boundary**: `patterns/deep-research/src/patterns_deep_research/notes.py`
+**Requirements**: 1.2, 3.1, 3.2, 3.3, 4.3
+
+### GREEN（純挙動フリップ）
+
+- `@dataclass(frozen=True, slots=True) ResearchNote` と `from dataclasses import dataclass`
+  を削除。
+- `from patterns_contracts import ResearchNote` を追加。**runtime import**（`distill_notes`
+  が instantiate するため TYPE_CHECKING 不可）。コメントで「昇格済み単一実体・再定義ではない」を明記。
+- `SearchResult` は注釈専用のため TYPE_CHECKING ブロック据え置き。
+- `distill_notes` / `compact_digest` / `render_notebook` / `_key_point` の本体は **byte 不変**
+  （dedup / score 降順 + tiebreak / `max_notes` cap / 可視 truncate / 非正 `ValueError`）。
+- `__all__` は import した `ResearchNote` を再エクスポート（消費側 import 不変）。
+
+### 検証（lane gate, `uv run`）
+
+- `ruff check .` → All checks passed
+- `ruff format --check .` → 24 files already formatted
+- `pyright` → 0 errors, 0 warnings, 0 informations
+- `pytest --cov` → **44 passed, 1 skipped**、`notes.py` 100%、TOTAL 100.00%
+  （`fail_under=98` 到達）。2.1 の赤 2 件（単一実体・frozen）が緑化。
+
+### 根本原因メモ
+
+エラーゼロ。2.1 で型/lint ゲートを緑に保つ設計（`id()` 比較・変数経由 `setattr`）に
+したため、2.2 は import 置換のみで赤 2 件が緑化し、副作用回帰なし（他 42 件不変）。
+
+### 結果
+
+major task 2（notes.py の契約 import 移行）完了。`ResearchNote` は契約の単一実体に一本化され、
+縮約アルゴリズムは不変。Req 1.2 / 3.1 / 3.2 / 3.3 / 4.x 充足。次は major task 3
+（compaction DI シームの本線配線）。
