@@ -155,20 +155,41 @@ _Boundary:_ `docs/context-engineering.md`, `patterns/deep-research/README.md`, `
 _Depends:_ 3
 _Requirements:_ 1.4, 3.4, 5.1, 5.2
 
-- [ ] 4.1 `docs/context-engineering.md` を「diff 提示のみ」から「本線配線済 + 拡張点」へ書き換える。`digest_fn` opt-in 注入手順、compression が full digest 維持である点、v1 非対象（上限トリガの文脈再初期化）と既存 token-budget seam への接続を拡張点として明記する。
+- [x] 4.1 `docs/context-engineering.md` を「diff 提示のみ」から「本線配線済 + 拡張点」へ書き換える。`digest_fn` opt-in 注入手順、compression が full digest 維持である点、v1 非対象（上限トリガの文脈再初期化）と既存 token-budget seam への接続を拡張点として明記する。
   _Boundary:_ `docs/context-engineering.md`
   _Depends:_ 3
   _Requirements:_ 1.4, 3.4, 5.1
-- [ ] 4.2 (P) deep-research README の該当節へ本線昇格の準拠状況と token-budget seam 拡張点を追記する（1.2 で挿入済みの契約正本ブロックには触れない）。
+- [x] 4.2 (P) deep-research README の該当節へ本線昇格の準拠状況と token-budget seam 拡張点を追記する（1.2 で挿入済みの契約正本ブロックには触れない）。
   _Boundary:_ `patterns/deep-research/README.md`
   _Depends:_ 3
   _Requirements:_ 3.4, 5.1
-- [ ] 4.3 (P) `specs/best-practices-review/verification.md` の観点別テーブル第 5 行「コンテキストエンジニアリング」と「主な検証ポイント」節の bullet（→ 改善提案 P2）を実装済（本 spec）へ反映する。
+- [x] 4.3 (P) `specs/best-practices-review/verification.md` の観点別テーブル第 5 行「コンテキストエンジニアリング」と「主な検証ポイント」節の bullet（→ 改善提案 P2）を実装済（本 spec）へ反映する。
   _Boundary:_ `specs/best-practices-review/verification.md`
   _Depends:_ 3
   _Requirements:_ 5.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- 4.1: docs/context-engineering.md を本線昇格へ全面改稿。「現状ギャップ」→「解決したギャップ
+  (Spec 010 で本線昇格)」、「シームへの接続(1 行差し替え)」diff →「本線配線(`digest_fn` DI シーム)」へ
+  置換。`run_subquestion`/`run_deep_research` 双方の opt-in 注入手順（`compact_digest` 直接 +
+  `functools.partial` で `max_notes` 調整）、compression が full `_results_digest` 維持（ADR-A、citation
+  grounding 保全）、`Finding.notes` 充填、新規「拡張点」節（v1 非対象＝上限トリガ文脈再初期化 + 既存
+  token-budget seam 接続）を明記。「適用範囲」の ❌→✅ をフリップ。
+- 4.1: docs-only 変更のため prose を覆う自動テストは無い（drift test は README のみ対象）。検証は
+  実装コードとの整合確認に置換——deep-research unit 52 passed、contract drift 4 passed、doc 内 5 本の
+  相対リンクが実ファイルへ解決することを確認（回帰ゼロ）。
+- 4.2: README の `## パターン契約（正本）` python fence（drift parser 対象）には**触れず**、パイプライン
+  table 直後に新規 `## コンテキストエンジニアリング（compaction / structured note-taking の本線昇格）`
+  節を追加。`digest_fn` DI seam / compression full digest 維持 / `Finding.notes` 凝縮ハンドオフ / 拡張点
+  （上限トリガ文脈再初期化 v1 非対象 → 既存 token-budget seam 接続）を記述。researcher row の seam 列に
+  `digest_fn` ポインタを 1 句追記（reflect ループ記述箇所からの導線）。
+- 4.2: 契約正本ブロック不変を drift test 4 passed で機械確認（canonical fence 無改変）。lane unit 52
+  passed・新規リンク 2 本（docs/context-engineering.md / SECURITY-NOTES.md）解決を確認。Req 3.4 / 5.1 充足。
+- 4.3: plan 指定の 2 点（観点別テーブル第 5 行 L33・「主な検証ポイント」P2 bullet L42）を実装済へ反映。
+  併せて Summary L22-23 の「伸びしろ ... context engineering の spec→実装」を更新（フリップした ✅ 行と
+  矛盾するため。P1 も既に実装済で同文が stale だった）。内部整合の維持であり scope creep ではない。
+- 4.3: 既存行スタイル踏襲——参照は markdown link でなく backtick code span（repo-root 相対パス）。
+  追加参照 `docs/context-engineering.md` / `specs/010-context-engineering/spec.md` の実在を確認。
+- major task 4 完了（4.1 docs / 4.2 README / 4.3 verification.md）。本 spec 全 11 サブタスク完了。
+  docs-only 3 タスクは自動テスト非対象のため、回帰ゼロ（lane unit 52 / drift 4）＋参照リンク解決で誠実に固定。
