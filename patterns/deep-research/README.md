@@ -106,10 +106,33 @@ ProgressEvent = Annotated[BriefReadyEvent | PlanReadyEvent | ResearcherStartedEv
 | lead / 計画 | `build_brief_and_plan`（[`orchestrator.py`](src/patterns_deep_research/orchestrator.py)） | planner `Agent[None, ResearchPlan]` が分解を決める（コードではなく LLM）。subquestion は自己完結・非重複（orchestrator-workers の planner 流儀＋Anthropic brief） |
 | fan-out cap | `run_deep_research`（[`research.py`](src/patterns_deep_research/research.py)） | `plan.subquestions[:max_researchers]` ＋ `ResearchReport.truncated`。無制限 plan を無制限 LLM 呼び出しに変換しない（OWASP excessive-agency / unbounded-consumption） |
 | 並列実行 | `asyncio.gather`（[`research.py`](src/patterns_deep_research/research.py)） | researcher を plan 順で並列実行（gather が入力順を保持） |
-| researcher | `run_subquestion`（[`researcher.py`](src/patterns_deep_research/researcher.py)） | search→read→reflect の**有界ループ**（`max_iterations`）。`Finding.truncated`/`iterations` で cap を可視化（autonomous-agent の停止規律を移植） |
+| researcher | `run_subquestion`（[`researcher.py`](src/patterns_deep_research/researcher.py)） | search→read→reflect の**有界ループ**（`max_iterations`）。`Finding.truncated`/`iterations` で cap を可視化（autonomous-agent の停止規律を移植）。reflect digest は `digest_fn` seam（既定 `_results_digest` byte 互換、`compact_digest` opt-in。下記「コンテキストエンジニアリング」節） |
 | 引用 grounding | `compression`（[`compression.py`](src/patterns_deep_research/compression.py)） | 各 `Citation` は実際に見た `SearchResult` に対応。空引用 `EmptyCitationError` / dangling `DanglingCitationError` で loud-fail（RAG の引用健全性を移植） |
 | 統合 | `write_report`（[`report.py`](src/patterns_deep_research/report.py)） | synthesizer `Agent[None, str]` が引用付きレポートを合成。引用は重複排除和集合、`truncated` を伝播 |
 | 進捗（任意） | `on_event` コールバック seam（[`research.py`](src/patterns_deep_research/research.py)） | `ProgressEvent` を emit。sse への橋渡しはレーン外でアダプト（兄弟レーン非 import、NFR-3） |
+
+## コンテキストエンジニアリング（compaction / structured note-taking の本線昇格）
+
+Anthropic「Effective context engineering for AI agents」の **compaction** と
+**structured note-taking** を本線へ配線済み（Spec 010）。解説と注入手順は
+[../../docs/context-engineering.md](../../docs/context-engineering.md)。
+
+- **`digest_fn` DI seam（reflect ループ）**: `run_subquestion` / `run_deep_research` が
+  `digest_fn: Callable[[Sequence[SearchResult]], str]` を公開。既定は `_results_digest` と
+  byte 互換（後方互換）、`notes.compact_digest` を **opt-in 注入**するとノートベース縮約
+  （dedup + score cap + truncate）へ切り替わる。既存の `SearchProvider` / `model` / `on_event`
+  と同じ seam 規律に揃え、決定論フェイクで hermetic にテスト可能。
+- **compression は full digest 維持**: 引用源選択ターンは注入有無に関わらず `_results_digest`
+  の full 出力を使い citation grounding を保全する（縮約で source を落とし `EmptyCitationError` /
+  `DanglingCitationError` を誘発しない）。
+- **ハンドオフ凝縮**: ループ終了後に `Finding.notes = distill_notes(collected)` を充填し、
+  sub-researcher → lead は「凝縮サマリ + ノート」のみを渡す（生トランスクリプト非伝播）。
+  契約は上記正本ブロックの `ResearchNote` / `Finding.notes`（既定 `[]`、空 gather でも安全）。
+- **拡張点（v1 非対象）**: トークン上限トリガの文脈再初期化・生 result の畳み込み（Anthropic
+  「tool result clearing」相当）は v1 非対象で、v1 は常時 digest 縮約に限定する。上限トリガ実装は
+  deep-research が文書化済みの **token-budget seam**（autonomous-agent の `_budget_spent` ≒
+  `ModelResponse.usage` 合算、後述セキュリティ節）へ接続し、予算ガードが上限近傍を検知したら
+  `digest_fn` 縮約から文脈再初期化へエスカレートする段階化が拡張点（[SECURITY-NOTES.md](../SECURITY-NOTES.md)）。
 
 ## 必須4セクション
 

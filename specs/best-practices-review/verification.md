@@ -19,8 +19,10 @@ Effective context engineering / Demystifying evals)、および LangChain `open_
 (AI Agent = 単一タスク構成要素 / Agentic AI = 複数エージェントのオーケストレーション)を
 明示採用した、定義整合性・実装品質ともに高水準なリファレンス実装である。3 フレームワーク
 (PydanticAI / BeeAI / LlamaIndex)で同一契約を実装し、契約ドリフトテストで一貫性を担保している
-点は、クロスフレームワーク・ベストプラクティスの好例。伸びしろは主に **(1) ツール設計原則の明示**
-と **(2) context engineering(compaction / note-taking)の spec→実装** の 2 点。
+点は、クロスフレームワーク・ベストプラクティスの好例。当初の伸びしろ **(1) ツール設計原則の明示**
+(改善提案 P1)と **(2) context engineering(compaction / note-taking)の spec→実装**(改善提案 P2)は
+いずれも実装済で、それぞれ `TOOL-DESIGN-NOTES.md` の規約化 + `directory_*` デモと、deep-research
+reflect ループへの本線配線(Spec 010)に反映されている。
 
 ## 検証結果(観点別)
 
@@ -30,7 +32,7 @@ Effective context engineering / Demystifying evals)、および LangChain `open_
 | 2 | 「単純さ優先」 | 複雑な framework より単純・合成可能なパターン。透明性 | autonomous-agent を framework Agent でなく `Model.request()` 手動ループで実装 | ✅ 一致 | `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/autonomous_agent.py` |
 | 3 | ツール設計 | Writing tools: 厳格データモデル / 入力検証 / token 効率 / namespacing / `response_format` | 型強制(`output_type` + `contracts/`)・実行前入力検証に加え、token 効率 / namespacing / `response_format` を規約化(`TOOL-DESIGN-NOTES.md`)し PydanticAI lane の `directory_*` デモで実演(P1 実装済) | ✅ 一致 | `patterns/TOOL-DESIGN-NOTES.md`, `patterns/frameworks/pydantic-ai/.../tool_design.py`, autonomous-agent README |
 | 4 | ガードレール / セキュリティ | OWASP Agentic AI Top 10(Excessive Agency / Unbounded Consumption / Insecure Tool Use) | 4 ガードレール + fan-out 上限を明示マッピング | ✅ 強い実装 | `patterns/SECURITY-NOTES.md` |
-| 5 | コンテキストエンジニアリング | sub-agent / context quarantine / compaction / note-taking | deep-research が sub-agent・並列 researcher→合成を実装。compaction / note-taking は未実装 | ✅/△ 部分的 | `patterns/deep-research/README.md`, `specs/009-deep-research/spec.md` |
+| 5 | コンテキストエンジニアリング | sub-agent / context quarantine / compaction / note-taking | deep-research が sub-agent・並列 researcher→合成に加え、compaction(`digest_fn` DI seam・dedup / score cap / truncate)と structured note-taking(`ResearchNote` 契約 + `Finding.notes` 凝縮ハンドオフ)を reflect ループへ本線配線(既定 byte 互換 / `compact_digest` opt-in、Spec 010) | ✅ 一致 | `patterns/deep-research/README.md`, `docs/context-engineering.md`, `specs/010-context-engineering/spec.md` |
 | 6 | 評価(Evals) | Generator/Evaluator 分離・独立 judge・outcome+behavior・hermetic | 物理分離、ネットワークフリーテスト、契約レベル assertion | ✅ 準拠 | `patterns/frameworks/*/tests/`, `contracts/tests/unit/test_contract_drift.py` |
 | 7 | フレームワーク横断 | 同一契約を複数 framework で検証 | PydanticAI / BeeAI / LlamaIndex 3 lane + 契約ドリフトテスト | ✅ 好例 | `patterns/frameworks/`, `patterns/contracts/` |
 | 8 | プロバイダ非依存 | モデル ID ハードコード回避・env 駆動 | ModelFactory(4 プロバイダ + fallback)、env 駆動 | ✅ 一致 | `src/pydantic_ai_sandbox/llm/factory.py`, `config.py` |
@@ -39,7 +41,10 @@ Effective context engineering / Demystifying evals)、および LangChain `open_
 
 - **ツール設計の明示**: token 効率(pagination / filter / truncation)・namespacing・`response_format`
   を規約化(`patterns/TOOL-DESIGN-NOTES.md`)し、PydanticAI lane の `directory_*` デモで実演。→ 改善提案 P1 実装済。
-- **context engineering の spec→実装ギャップ**: compaction / structured note-taking が未実装。→ 改善提案 P2。
+- **context engineering の本線昇格**: compaction(`digest_fn` DI seam)と structured note-taking
+  (`ResearchNote` 契約 + `Finding.notes`)を deep-research reflect ループへ本線配線。既定は
+  `_results_digest` と byte 互換、`compact_digest` を opt-in 注入。compression ターンは full digest を
+  維持し citation grounding を保全。→ 改善提案 P2 実装済(Spec 010)。
 - **AWS 参照**: 公式参照に AWS(Bedrock Agents / Well-Architected GenAI Lens)を追加し、本リポジトリの
   ガードレール/プロバイダ非依存設計との対応関係を明記。→ 改善提案 P3 実装済(下記 References)。
 

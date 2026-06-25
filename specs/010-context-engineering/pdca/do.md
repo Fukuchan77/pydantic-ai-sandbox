@@ -315,3 +315,111 @@ Task 3.3 完了。`run_deep_research` が `digest_fn` を公開し全 sub-resear
 end-to-end opt-in が成立（既定は現挙動互換）。Req 1.1 / 1.2 / 4.1 / 4.3 充足。
 **major task 3（compaction DI シーム本線配線）完了**：reflect 注入（3.1）+ Finding.notes 充填（3.2）+
 end-to-end 透過（3.3）。残りは major task 4（ドキュメント反映、4.1 / 4.2 / 4.3）。
+
+---
+
+## Task 4.1 — docs/context-engineering.md 本線昇格反映（2026-06-25）
+
+_Requirements:_ 1.4, 3.4, 5.1 / _Boundary:_ `docs/context-engineering.md`
+
+### Plan
+
+「diff 提示のみ」だった解説を、Spec 010 で本線配線済みの実態へ全面改稿する。
+
+### Do
+
+- 「現状ギャップ」→「解決したギャップ(Spec 010 で本線昇格)」へ改題し、ギャップが解消済みである
+  事実（`digest_fn` DI シーム化 + `ResearchNote` 契約昇格 + `Finding.notes` 固定）を明記。
+- 「シームへの接続(1 行差し替え)」の diff（配線していないデモ提示）を「本線配線(reflect digest の
+  DI シーム)」へ置換。`run_subquestion` / `run_deep_research` 双方が `digest_fn` を公開、注入時のみ
+  ノートベース縮約、既定は `_results_digest` と byte 互換である点を記述。opt-in 注入手順を
+  `compact_digest` 直接注入 + `functools.partial(max_notes=...)` の 2 例で提示。
+- 新規「compression ターンは full digest を維持」節で ADR-A（citation grounding 保全、
+  `EmptyCitationError`/`DanglingCitationError` 回避）を明記。
+- 新規「Finding.notes ハンドオフ」節で `distill_notes(collected)` 充填と生トランスクリプト非伝播、
+  空 gather での `[]` 安全既定を記述。
+- 新規「拡張点(v1 非対象 + token-budget seam)」節で、上限トリガの文脈再初期化と tool result
+  clearing を v1 非対象とし、既存 token-budget seam（`_budget_spent` ≒ `ModelResponse.usage` 合算）への
+  接続を拡張点として明記（SECURITY-NOTES.md / COMPARISON.md へリンク）。Req 1.4 / 3.4 充足。
+- 「適用範囲と非適用」の ❌（配線していない / 将来）を ✅（本線配線済）へフリップ。
+
+### 検証（docs-only のため自動テスト無し → 整合確認に置換）
+
+- docs/ の prose を覆う自動テストは存在しない（`test_contract_drift.py` は README のみ対象）。
+- 回帰ゼロ確認: deep-research lane `uv run pytest tests/unit -q` → **52 passed**、
+  contracts `test_contract_drift.py` → **4 passed**。
+- doc 内 5 本の相対リンク（researcher.py / notes.py / deep_research.py / SECURITY-NOTES.md /
+  COMPARISON.md）が全て実ファイルへ解決することを確認。
+
+### 結果
+
+Task 4.1 完了。Req 1.4 / 3.4 / 5.1 充足。残りは 4.2（README 追記）/ 4.3（verification.md 反映）。
+
+---
+
+## Task 4.2 — deep-research README 本線昇格反映（2026-06-25）
+
+_Requirements:_ 3.4, 5.1 / _Boundary:_ `patterns/deep-research/README.md`
+
+### Plan
+
+README の該当節へ本線昇格の準拠状況と token-budget seam 拡張点を追記する。1.2 で挿入済みの
+契約正本ブロック（drift parser 対象の python fence）には触れない。
+
+### Do
+
+- パイプライン table 直後に新規 `## コンテキストエンジニアリング（compaction / structured
+  note-taking の本線昇格）` 節を追加。`digest_fn` DI seam（既定 `_results_digest` byte 互換、
+  `compact_digest` opt-in、既存 seam 規律に整合）、compression が full `_results_digest` 維持
+  （citation grounding 保全）、`Finding.notes = distill_notes(collected)` 凝縮ハンドオフ、
+  拡張点（上限トリガ文脈再初期化・tool result clearing は v1 非対象 → 既存 token-budget seam へ
+  接続しエスカレートする段階化）を記述。docs/context-engineering.md と SECURITY-NOTES.md へリンク。
+- researcher row（パイプライン table）の決定論シーム列へ `digest_fn` ポインタを 1 句追記
+  （reflect ループ記述箇所からの導線、下記節への参照）。
+
+### 検証（docs-only → 整合 + 不変条件確認に置換）
+
+- **契約正本ブロック不変**: `test_contract_drift.py` → **4 passed**（canonical fence 無改変を機械確認）。
+- 回帰ゼロ: deep-research lane `uv run pytest tests/unit -q` → **52 passed**。
+- 新規 README リンク 2 本（`../../docs/context-engineering.md` / `../SECURITY-NOTES.md`）が
+  実ファイルへ解決することを確認。
+
+### 結果
+
+Task 4.2 完了。Req 3.4 / 5.1 充足。残りは 4.3（verification.md の観点5 反映）で major task 4 完了予定。
+
+---
+
+## Task 4.3 — verification.md 観点5 実装済反映（2026-06-25）
+
+_Requirements:_ 5.2 / _Boundary:_ `specs/best-practices-review/verification.md`
+
+### Plan
+
+ベストプラクティス検証の観点別テーブル第 5 行「コンテキストエンジニアリング」と「主な検証ポイント」
+節の P2 bullet を、本 spec で本線配線済みである実態へ反映する。
+
+### Do
+
+- **観点別テーブル第 5 行（L33）**: 状況「compaction / note-taking は未実装」「✅/△ 部分的」を、
+  compaction(`digest_fn` DI seam・dedup/score cap/truncate)+ structured note-taking(`ResearchNote`
+  契約 + `Finding.notes` 凝縮ハンドオフ)を本線配線済（既定 byte 互換 / `compact_digest` opt-in、
+  Spec 010）「✅ 一致」へ更新。根拠に `docs/context-engineering.md` / `specs/010-context-engineering/spec.md`
+  を追加。
+- **「主な検証ポイント」P2 bullet（L42）**: 「spec→実装ギャップ ... 未実装 → P2」を「本線昇格 ...
+  既定 byte 互換 / opt-in 注入、compression は full digest 維持 → P2 実装済（Spec 010）」へ更新。
+- **Summary（L22-23、plan 明記外だが整合維持）**: 「伸びしろ ... context engineering の spec→実装」が
+  フリップした ✅ 行と矛盾するため、(1) ツール設計 = P1 実装済・(2) context engineering = P2 実装済
+  （Spec 010）と更新。adversarial review が拾う内部矛盾の解消であり scope creep ではない。
+
+### 検証（review doc → 整合 + 不変条件確認に置換）
+
+- review prose を覆う自動テストは無い（コード非変更）。回帰ゼロ: deep-research lane **52 passed**、
+  contracts `test_contract_drift.py` **4 passed**。
+- 追加参照パス（`docs/context-engineering.md` / `specs/010-context-engineering/spec.md` /
+  `patterns/TOOL-DESIGN-NOTES.md`）の実在を確認。既存行スタイル（backtick code span）を踏襲。
+
+### 結果
+
+Task 4.3 完了。Req 5.2 充足。**major task 4 完了**（4.1 docs / 4.2 README / 4.3 verification.md）。
+本 spec 010 の全 4 major task・全 11 サブタスク完了。
