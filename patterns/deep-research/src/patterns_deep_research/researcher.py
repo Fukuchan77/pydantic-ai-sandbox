@@ -24,8 +24,11 @@ from pydantic_ai import Agent
 from pydantic_ai.models.instrumented import instrument_model
 
 from patterns_deep_research.compression import map_citations
+from patterns_deep_research.notes import distill_notes
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from patterns_contracts import SearchResult, SubQuestion
     from pydantic_ai.models import Model
     from pydantic_ai.models.instrumented import InstrumentationSettings
@@ -64,7 +67,7 @@ class _FindingDraft(BaseModel):
     cited_sources: list[str] = Field(description="Source identifiers actually used (>=1).")
 
 
-def _results_digest(results: list[SearchResult]) -> str:
+def _results_digest(results: Sequence[SearchResult]) -> str:
     """Render gathered results as a stable prompt block (source/locator/snippet)."""
     if not results:
         return "(no results gathered yet)"
@@ -81,6 +84,7 @@ async def run_subquestion(
     max_iterations: int = 3,
     top_k: int = 5,
     instrumentation: InstrumentationSettings | None = None,
+    digest_fn: Callable[[Sequence[SearchResult]], str] = _results_digest,
 ) -> Finding:
     """Run the bounded search→read→reflect loop for one subquestion (Req 4.2-4.4).
 
@@ -94,6 +98,11 @@ async def run_subquestion(
         top_k: Per-search result cap (unbounded-consumption guard, Req 7). Must be >= 1.
         instrumentation: Optional ``InstrumentationSettings``; when set every model
             call emits ``gen_ai.*`` spans. ``None`` runs uninstrumented.
+        digest_fn: Seam that renders the gathered results into the **reflect** turn's
+            prompt block. Defaults to ``_results_digest`` (byte-compatible current
+            behaviour); inject ``notes.compact_digest`` to opt into note-based
+            compaction (Spec 010 Req 1.1-1.2). The compression turn always uses the
+            full ``_results_digest`` to preserve citation grounding (ADR-A).
 
     Returns:
         A :class:`~patterns_contracts.Finding` with the grounded summary, the
@@ -128,8 +137,7 @@ async def run_subquestion(
         iterations = index + 1
         action = (
             await action_agent.run(
-                f"Subquestion: {subquestion.description}\n\n"
-                f"Results so far:\n{_results_digest(collected)}"
+                f"Subquestion: {subquestion.description}\n\nResults so far:\n{digest_fn(collected)}"
             )
         ).output
         if action.query.strip():
@@ -156,6 +164,9 @@ async def run_subquestion(
         subquestion=subquestion,
         summary=draft.summary,
         citations=citations,
+        # Hand off distilled notes, never the raw transcript (Spec 010 Req 2.2);
+        # distill_notes([]) is [] so an empty gather stays the safe default.
+        notes=distill_notes(collected),
         iterations=iterations,
         truncated=truncated,
     )
