@@ -39,9 +39,15 @@ from patterns_deep_research.report import write_report
 from patterns_deep_research.researcher import run_subquestion
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Sequence
 
-    from patterns_contracts import Finding, ProgressEvent, ResearchReport, SubQuestion
+    from patterns_contracts import (
+        Finding,
+        ProgressEvent,
+        ResearchReport,
+        SearchResult,
+        SubQuestion,
+    )
     from pydantic_ai.models import Model
     from pydantic_ai.models.instrumented import InstrumentationSettings
 
@@ -61,6 +67,7 @@ async def run_deep_research(
     clarify: bool = False,
     instrumentation: InstrumentationSettings | None = None,
     on_event: Callable[[ProgressEvent], Awaitable[None]] | None = None,
+    digest_fn: Callable[[Sequence[SearchResult]], str] | None = None,
 ) -> ResearchReport:
     """Run the full Deep Research pipeline for ``query`` (Req 4.1).
 
@@ -82,6 +89,10 @@ async def run_deep_research(
             uninstrumented.
         on_event: Optional async progress callback receiving the ``ProgressEvent``
             union (brief → plan → researcher_started* → finding_ready* → report_ready).
+        digest_fn: Optional reflect-loop digest seam threaded to every sub-researcher
+            (Spec 010 Req 1.1-1.2). ``None`` (default) leaves each researcher on its own
+            ``_results_digest`` default — byte-compatible current behaviour; inject
+            ``notes.compact_digest`` to opt the whole run into note-based compaction.
 
     Returns:
         A :class:`~patterns_contracts.ResearchReport` whose ``findings`` hold at most
@@ -121,13 +132,26 @@ async def run_deep_research(
 
     async def _research(subquestion: SubQuestion) -> Finding:
         await _emit(ResearcherStartedEvent(subquestion=subquestion.description))
-        finding = await run_subquestion(
-            subquestion,
-            model=resolved,
-            search=search,
-            max_iterations=max_iterations,
-            top_k=top_k,
-        )
+        # Forward the seam only when injected so an un-opted run keeps the
+        # researcher's own ``_results_digest`` default (research.py never imports
+        # that private symbol; the researcher owns its reflect-digest default).
+        if digest_fn is None:
+            finding = await run_subquestion(
+                subquestion,
+                model=resolved,
+                search=search,
+                max_iterations=max_iterations,
+                top_k=top_k,
+            )
+        else:
+            finding = await run_subquestion(
+                subquestion,
+                model=resolved,
+                search=search,
+                max_iterations=max_iterations,
+                top_k=top_k,
+                digest_fn=digest_fn,
+            )
         await _emit(
             FindingReadyEvent(
                 subquestion=subquestion.description,
