@@ -86,6 +86,28 @@ search→read→reflect の反復ループを回して引用付き `Finding` を
 > BeeAI / Langflow / Dify）との比較・ハイブリッド活用方針は
 > [deep-research/COMPARISON.md](deep-research/COMPARISON.md)。
 
+## 横断レイヤー（評価グレーダ / outcome+behavior 多軸採点）
+
+RAG・SSE・Deep Research が個別の応用レイヤであるのに対し、**評価グレーダは
+複数パターンに跨る横断契約**である。outcome（最終成果物）と behavior（過程・
+振る舞い）を**分離**して多軸採点する共有契約 `GradeReport` を `patterns_contracts`
+の単一実体として定義し、evaluator-optimizer / deep-research / autonomous-agent の
+3 パターンが同一契約を参照する。ランタイム収束ゲートと eval グレーダの定義
+ドリフトを 1 点で防ぐ（Spec 011）。
+
+| 横断契約 | 構成 | レーン横断 | 状態 |
+|---|---|---|---|
+| **評価グレーダ（outcome+behavior 多軸採点）** | `Rating`（1–5 + `unknown`）→ `AxisScore`（criterion / rating / 非空 rationale）→ `GradeReport`（outcome/behavior 分離 + partial-credit `aggregate`）＋ `Judge[SubjectT]` 注入シーム | evaluator-optimizer / deep-research / autonomous-agent | ✅ [EVAL-GRADERS.md](EVAL-GRADERS.md) |
+
+> 評価グレーダは個別パターン固有でない**真に横断的**な契約なので、6 パターン
+> README とは別に横断 README [EVAL-GRADERS.md](EVAL-GRADERS.md) が正本を所有し、
+> 同一ドリフトテスト（`patterns/contracts/tests/unit/test_contract_drift.py` の
+> `_README_PATHS` に `eval-graders` を登録）で正本＝パッケージ実体の一致を検知する
+> （ADR-1）。独立 judge による self-eval バイアス回避は実装規律（物理分離・別モデル
+> 注入）で担保し、契約は採点結果のデータ形状＋`judge_id` 最小メタに留める（ADR-3）。
+> `GradeReport` はオフライン/CI の多軸採点レイヤであり、各パターンのランタイム収束
+> ゲート（`OptimizationResult` 等）を置換しない（後方互換 / ADR-4）。
+
 ## フレームワーク比較（本イテレーションで実測した差異）
 
 | 比較軸 | PydanticAI (v2 Beta) | BeeAI Framework (0.1.x) | LlamaIndex Workflows (0.14.x) |
