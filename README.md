@@ -4,7 +4,7 @@ A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + 
 
 > **学習パス上の位置づけ / Learning path:** このリポは IBM × Anthropic 公式準拠の統一学習
 > パスの **Stage 4–5（参照/本番化・ガバナンス）**です。基礎から学ぶ場合は入口の
-> [`agentic-ai-bootcamp`](../agentic-ai-bootcamp/README.md)（Stage 0–3）から。本リポの歩き方は
+> [`agentic-ai-bootcamp`](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/README.md)（Stage 0–3）から。本リポの歩き方は
 > [`docs/learning-path.md`](docs/learning-path.md)、運用/ガバナンスは
 > [`docs/governance-and-scale.md`](docs/governance-and-scale.md)。
 

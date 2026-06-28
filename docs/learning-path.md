@@ -2,10 +2,10 @@
 
 このリポジトリ（`pydantic-ai-sandbox`）は、2 リポを貫く**統一学習パス**の
 **Stage 4–5（参照/本番化・ガバナンス）**です。基礎〜応用（Stage 0–3）は入口の
-[`agentic-ai-bootcamp`](../../agentic-ai-bootcamp/README.md) で学んでください。
+[`agentic-ai-bootcamp`](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/README.md) で学んでください。
 
 > 統一パスの全体像と公式ソース対応表（入口）：
-> **[agentic-ai-bootcamp / docs/learning-path.md](../../agentic-ai-bootcamp/docs/learning-path.md)**
+> **[agentic-ai-bootcamp / docs/learning-path.md](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/docs/learning-path.md)**
 
 ---
 
@@ -22,7 +22,7 @@ bootcamp で学んだパターンを、**3 フレームワーク横断**（Pydan
 | RAG（検索→生成→引用検証）| [`patterns/rag/`](../patterns/rag/README.md) |
 | SSE 配信（エージェントイベント）| [`patterns/sse/`](../patterns/sse/README.md) |
 | Deep Research（マルチエージェント）| [`patterns/deep-research/`](../patterns/deep-research/README.md) |
-| 評価グレーダ（outcome+behavior、3 パターン横断契約）| [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（main にマージ済・drift 検証あり、Spec 011）（→ bootcamp [Lesson 11](../../agentic-ai-bootcamp/lessons/11-evals/README.md)）|
+| 評価グレーダ（outcome+behavior、3 パターン横断契約）| [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（main にマージ済・drift 検証あり、Spec 011）（→ bootcamp [Lesson 11](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/lessons/11-evals/README.md)）|
 | ツール設計 / コンテキスト工学（compaction は deep-research 本流）| [`docs/tool-design.md`](tool-design.md) ・ [`docs/context-engineering.md`](context-engineering.md) |
 
 > 対応する公式ソース（Anthropic building-effective-agents / writing-tools / context-engineering /

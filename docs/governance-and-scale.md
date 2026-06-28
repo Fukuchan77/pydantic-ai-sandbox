@@ -39,7 +39,7 @@
 タイムアウト・lockfile + pip-audit + dependabot・gitleaks 全域）にマッピング済み。Stage 5 の
 セキュリティはまずここを読むこと。自律性が上がるほど OWASP の主戦場（autonomous-agent）になります。
 
-> 自律性レベルと有界性の関係は bootcamp 側 [`agent-types.md`](../../agentic-ai-bootcamp/docs/agent-types.md) §3 を参照。
+> 自律性レベルと有界性の関係は bootcamp 側 [`agent-types.md`](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/docs/agent-types.md) §3 を参照。
 
 ---
 
@@ -68,7 +68,7 @@ PoC から**規模化**へ進む際の組織的論点：ガバナンス体制・
 
 **本リポジトリでの接点:**
 - **配信**：`patterns/sse`（型付きイベント → `EventSourceResponse` → 切断時の確実停止）。
-  bootcamp の [Lesson 10 — Production](../../agentic-ai-bootcamp/lessons/10-production/README.md)（FastAPI + SSE）が入口。
+  bootcamp の [Lesson 10 — Production](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/lessons/10-production/README.md)（FastAPI + SSE）が入口。
 - **可観測性**：各パターンの `observability.py`（OTel スパン）と [`docs/context-engineering.md`](context-engineering.md)。
   Spec 010 で **structured note-taking / compaction が deep-research のメインラインに昇格**（`ResearchNote` /
   `Finding.notes` を contracts 化）し、長時間実行の文脈肥大を本流で抑制する。
@@ -79,4 +79,4 @@ PoC から**規模化**へ進む際の組織的論点：ガバナンス体制・
 ## まとめ / Where to go
 - セキュリティ詳細 → [`patterns/SECURITY-NOTES.md`](../patterns/SECURITY-NOTES.md)
 - 評価の本番契約 → [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（`GradeReport` / `AxisScore` / `Judge[SubjectT]`、Spec 011）
-- 学習パス全体 → [`learning-path.md`](learning-path.md) / bootcamp [`docs/learning-path.md`](../../agentic-ai-bootcamp/docs/learning-path.md)
+- 学習パス全体 → [`learning-path.md`](learning-path.md) / bootcamp [`docs/learning-path.md`](https://github.com/Fukuchan77/agentic-ai-bootcamp/blob/main/docs/learning-path.md)
