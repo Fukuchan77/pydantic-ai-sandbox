@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from patterns_contracts import AxisScore, GradeReport
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RequestUsage
@@ -26,10 +27,16 @@ from pydantic_ai.usage import RequestUsage
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from patterns_contracts import Rating, ResearchNote, ResearchReport
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo
 
-__all__ = ["plan_payload", "scripted_model"]
+__all__ = [
+    "FakeResearchReportJudge",
+    "faithfulness_rating_for",
+    "plan_payload",
+    "scripted_model",
+]
 
 _DEFAULT_ACTION: dict[str, Any] = {"query": "deep research multi-agent", "enough": True}
 _DEFAULT_FINDING: dict[str, Any] = {
@@ -107,3 +114,71 @@ def scripted_model(
         return ModelResponse(parts=[TextPart(text)], usage=usage)
 
     return FunctionModel(_respond, model_name=model_name)
+
+
+def faithfulness_rating_for(notes: Sequence[ResearchNote]) -> Rating:
+    """Map distilled-note signal to a faithfulness ``Rating`` (Spec 011 Req 2.4).
+
+    Evidence-deficient input maps to ``"unknown"`` -- never a silent numeric
+    score: an empty notebook, or notes whose ``key_point`` is empty/whitespace
+    only (the distiller emits an empty key point from a blank snippet), carry no
+    signal to ground faithfulness on. Otherwise the rating scales with the share
+    of notes that survived distillation with a non-blank key point (full signal
+    -> ``"5"``, partial -> ``"3"``); the numeric scale is illustrative while the
+    Unknown discipline is the tested contract.
+
+    Args:
+        notes: The distilled ``ResearchNote``s gathered for the graded subject.
+
+    Returns:
+        ``"unknown"`` when no note carries a non-blank key point, else a discrete
+        numeric rating reflecting the grounded share.
+    """
+    grounded = sum(1 for note in notes if note.key_point.strip())
+    if grounded == 0:
+        return "unknown"
+    return "5" if grounded == len(notes) else "3"
+
+
+class FakeResearchReportJudge:
+    """Deterministic independent ``Judge[ResearchReport]`` for hermetic lane evals.
+
+    Scores a ``ResearchReport`` into the shared ``GradeReport`` with no network
+    I/O (Spec 011 Req 3.2/4.1). Outcome axes are scripted; the behavior
+    faithfulness axis is derived from the report's distilled ``Finding.notes``
+    via :func:`faithfulness_rating_for`, so the Req 2.4 Unknown-mapping
+    discipline runs through the very helper the test pins directly rather than a
+    verdict baked into this fake (no tautology). ``judge_id`` records provenance
+    so a graded report is attributable to an independent grader (Req 3.3).
+    """
+
+    def __init__(self, *, judge_id: str = "fake-research-judge") -> None:
+        """Store the provenance id stamped onto every produced ``GradeReport``."""
+        self._judge_id = judge_id
+
+    async def grade(self, subject: ResearchReport, /) -> GradeReport:
+        """Grade ``subject`` into an outcome+behavior ``GradeReport`` (helper-driven faithfulness)."""
+        notes = [note for finding in subject.findings for note in finding.notes]
+        grounded = sum(1 for note in notes if note.key_point.strip())
+        return GradeReport(
+            outcome_scores=[
+                AxisScore(
+                    criterion="completeness",
+                    rating="4",
+                    rationale=f"{len(subject.findings)} finding(s) address the brief objective.",
+                ),
+            ],
+            behavior_scores=[
+                AxisScore(
+                    criterion="faithfulness",
+                    rating=faithfulness_rating_for(notes),
+                    rationale=(
+                        f"{grounded}/{len(notes)} distilled notes carry a grounded key point"
+                        if notes
+                        else "no distilled notes gathered; faithfulness is evidence-deficient"
+                    ),
+                ),
+            ],
+            aggregate=round(grounded / len(notes), 2) if notes else 0.0,
+            judge_id=self._judge_id,
+        )
