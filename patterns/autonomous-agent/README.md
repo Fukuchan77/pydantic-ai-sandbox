@@ -101,6 +101,14 @@ allow-list = 注入シーム）として受け取る。公式原則（namespacin
   不能なため、境界内ローカルフェイク（llamaindex `_RawScriptedLLM` 等）で補う。
 - 正常完了 + 4契約違反系（許可リスト違反→停止 / 承認拒否 / 予算超過 /
   max_iterations 打切）を3レーン共通で網羅。
+- **オフライン多軸 eval（outcome+behavior グレーダ）**: ガードレール遵守
+  （`stop_reason` / `allowed_tools` / `approval_hook` / budget）を **behavior 軸**
+  （`tool_use_discipline` / `guardrail_adherence`）で、最終回答品質を **outcome 軸**で
+  採点するオフライン eval を [pydantic-ai](../frameworks/pydantic-ai/) の `tests/` が
+  決定論フェイク `Judge` で `AgentRunResult` に対しネットワークゼロ検証する（Spec 011）。
+  共有グレーダ契約の正本・rating rubric・独立 judge 規律は横断 README
+  [EVAL-GRADERS.md](../EVAL-GRADERS.md) が所有し、本パターンは**参照のみ**
+  （`GradeReport` 系をここに再宣言しない＝one-README 不変条件）。
 
 ### 可観測性
 

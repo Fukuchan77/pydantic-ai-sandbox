@@ -33,7 +33,7 @@ reflect ループへの本線配線(Spec 010)に反映されている。
 | 3 | ツール設計 | Writing tools: 厳格データモデル / 入力検証 / token 効率 / namespacing / `response_format` | 型強制(`output_type` + `contracts/`)・実行前入力検証に加え、token 効率 / namespacing / `response_format` を規約化(`TOOL-DESIGN-NOTES.md`)し PydanticAI lane の `directory_*` デモで実演(P1 実装済) | ✅ 一致 | `patterns/TOOL-DESIGN-NOTES.md`, `patterns/frameworks/pydantic-ai/.../tool_design.py`, autonomous-agent README |
 | 4 | ガードレール / セキュリティ | OWASP Agentic AI Top 10(Excessive Agency / Unbounded Consumption / Insecure Tool Use) | 4 ガードレール + fan-out 上限を明示マッピング | ✅ 強い実装 | `patterns/SECURITY-NOTES.md` |
 | 5 | コンテキストエンジニアリング | sub-agent / context quarantine / compaction / note-taking | deep-research が sub-agent・並列 researcher→合成に加え、compaction(`digest_fn` DI seam・dedup / score cap / truncate)と structured note-taking(`ResearchNote` 契約 + `Finding.notes` 凝縮ハンドオフ)を reflect ループへ本線配線(既定 byte 互換 / `compact_digest` opt-in、Spec 010) | ✅ 一致 | `patterns/deep-research/README.md`, `docs/context-engineering.md`, `specs/010-context-engineering/spec.md` |
-| 6 | 評価(Evals) | Generator/Evaluator 分離・独立 judge・outcome+behavior・hermetic | 物理分離、ネットワークフリーテスト、契約レベル assertion | ✅ 準拠 | `patterns/frameworks/*/tests/`, `contracts/tests/unit/test_contract_drift.py` |
+| 6 | 評価(Evals) | Generator/Evaluator 分離・独立 judge・outcome+behavior・hermetic | 物理分離 + ネットワークフリーテストに加え、outcome+behavior の多軸グレーダ契約 `GradeReport`(`Rating` 1–5 + 証拠不足 `unknown` / 非空 rationale / partial-credit `aggregate` / 独立 `Judge[SubjectT]` 注入シーム)を `patterns_contracts` に**単一ソース**化。横断 README `EVAL-GRADERS.md` が正本を所有しドリフトテストで実体一致を担保、evaluator-optimizer / autonomous-agent / deep-research の hermetic eval が同一契約を参照(Spec 011) | ✅ 一致 | `patterns/EVAL-GRADERS.md`, `patterns/frameworks/pydantic-ai/tests/`, `patterns/deep-research/tests/`, `contracts/tests/unit/test_contract_drift.py` |
 | 7 | フレームワーク横断 | 同一契約を複数 framework で検証 | PydanticAI / BeeAI / LlamaIndex 3 lane + 契約ドリフトテスト | ✅ 好例 | `patterns/frameworks/`, `patterns/contracts/` |
 | 8 | プロバイダ非依存 | モデル ID ハードコード回避・env 駆動 | ModelFactory(4 プロバイダ + fallback)、env 駆動 | ✅ 一致 | `src/pydantic_ai_sandbox/llm/factory.py`, `config.py` |
 
@@ -47,6 +47,13 @@ reflect ループへの本線配線(Spec 010)に反映されている。
   維持し citation grounding を保全。→ 改善提案 P2 実装済(Spec 010)。
 - **AWS 参照**: 公式参照に AWS(Bedrock Agents / Well-Architected GenAI Lens)を追加し、本リポジトリの
   ガードレール/プロバイダ非依存設計との対応関係を明記。→ 改善提案 P3 実装済(下記 References)。
+- **評価グレーダの単一ソース化**: outcome+behavior の多軸採点を共有契約 `GradeReport`(`Rating`
+  1–5 + 証拠不足 `unknown` / 非空 rationale / partial-credit `aggregate` / 独立 `Judge[SubjectT]`
+  注入シーム)として依存ゼロの `patterns_contracts` へ純加算し、横断 README `EVAL-GRADERS.md` を
+  正本・単一点ドリフトテストへ登録。evaluator-optimizer / autonomous-agent / deep-research の
+  hermetic eval が同一契約を参照し、ランタイム収束ゲート(`OptimizationResult` 等は無改変)とは
+  別レイヤ(オフライン/CI 採点)で併存(後方互換)。独立性は型制約でなく実装規律(物理分離・別モデル
+  注入)で担保し、契約は純データ + `judge_id` 最小メタに留める。→ 改善提案 P4 実装済(Spec 011)。
 
 ## References
 
