@@ -22,8 +22,8 @@ bootcamp で学んだパターンを、**3 フレームワーク横断**（Pydan
 | RAG（検索→生成→引用検証）| [`patterns/rag/`](../patterns/rag/README.md) |
 | SSE 配信（エージェントイベント）| [`patterns/sse/`](../patterns/sse/README.md) |
 | Deep Research（マルチエージェント）| [`patterns/deep-research/`](../patterns/deep-research/README.md) |
-| 評価グレーダ（outcome+behavior）| `specs/011-eval-graders`（→ bootcamp [Lesson 11](../../agentic-ai-bootcamp/lessons/11-evals/README.md)）|
-| ツール設計 / コンテキスト工学 | [`docs/tool-design.md`](tool-design.md) ・ [`docs/context-engineering.md`](context-engineering.md) |
+| 評価グレーダ（outcome+behavior、3 パターン横断契約）| [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（main にマージ済・drift 検証あり、Spec 011）（→ bootcamp [Lesson 11](../../agentic-ai-bootcamp/lessons/11-evals/README.md)）|
+| ツール設計 / コンテキスト工学（compaction は deep-research 本流）| [`docs/tool-design.md`](tool-design.md) ・ [`docs/context-engineering.md`](context-engineering.md) |
 
 > 対応する公式ソース（Anthropic building-effective-agents / writing-tools / context-engineering /
 > demystifying-evals、IBM architecture patterns）は bootcamp 側の対応表を参照。

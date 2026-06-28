@@ -25,8 +25,8 @@
 - `patterns/autonomous-agent` の **ツール許可リスト（`allowed_tools`、最小権限）** と
   `stop_reason="disallowed_tool"`（許可外ツールはハード停止）— 型レベルで「何を許したか」を固定。
   → [`patterns/SECURITY-NOTES.md`](../patterns/SECURITY-NOTES.md) の autonomous-agent → OWASP マッピング。
-- 監査証跡の発想は `patterns/EVAL-GRADERS`（`specs/011-eval-graders`）の **rationale 必須・judge 出自メタ**
-  にも通底（誰が・なぜその判断をしたか）。
+- 監査証跡の発想は [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（Spec 011・main マージ済）の
+  **非空 `rationale` 必須**と **`judge_id`（judge 出自の最小メタ）** にも通底（誰が・なぜその判断をしたか）。
 
 ---
 
@@ -70,11 +70,13 @@ PoC から**規模化**へ進む際の組織的論点：ガバナンス体制・
 - **配信**：`patterns/sse`（型付きイベント → `EventSourceResponse` → 切断時の確実停止）。
   bootcamp の [Lesson 10 — Production](../../agentic-ai-bootcamp/lessons/10-production/README.md)（FastAPI + SSE）が入口。
 - **可観測性**：各パターンの `observability.py`（OTel スパン）と [`docs/context-engineering.md`](context-engineering.md)。
+  Spec 010 で **structured note-taking / compaction が deep-research のメインラインに昇格**（`ResearchNote` /
+  `Finding.notes` を contracts 化）し、長時間実行の文脈肥大を本流で抑制する。
 - **有界性**：`max_iterations` / `budget_exceeded` / タイムアウト（autonomous-agent 契約）。
 
 ---
 
 ## まとめ / Where to go
 - セキュリティ詳細 → [`patterns/SECURITY-NOTES.md`](../patterns/SECURITY-NOTES.md)
-- 評価の本番契約 → `specs/011-eval-graders`（`GradeReport`）
+- 評価の本番契約 → [`patterns/EVAL-GRADERS.md`](../patterns/EVAL-GRADERS.md)（`GradeReport` / `AxisScore` / `Judge[SubjectT]`、Spec 011）
 - 学習パス全体 → [`learning-path.md`](learning-path.md) / bootcamp [`docs/learning-path.md`](../../agentic-ai-bootcamp/docs/learning-path.md)
