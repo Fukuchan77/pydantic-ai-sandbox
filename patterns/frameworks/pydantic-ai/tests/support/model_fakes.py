@@ -38,6 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from patterns_contracts import AxisScore, GradeReport
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RequestUsage
@@ -45,11 +46,13 @@ from pydantic_ai.usage import RequestUsage
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from patterns_contracts import Tool
+    from patterns_contracts import AgentRunResult, OptimizationResult, Rating, Tool
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models.function import AgentInfo
 
 __all__ = [
+    "FakeAgentRunResultJudge",
+    "FakeOptimizationResultJudge",
     "FinalTurn",
     "StubTool",
     "ToolTurn",
@@ -298,6 +301,116 @@ class StubTool:
     def run(self, args: str) -> str:
         """Return the canned observation, ignoring ``args`` (deterministic)."""
         return self.observation
+
+
+def _numeric_mean(axes: Sequence[AxisScore]) -> float:
+    """Partial-credit aggregate: mean of numeric ratings ("unknown" skipped, Req 1.3)."""
+    numeric = [int(axis.rating) for axis in axes if axis.rating != "unknown"]
+    return sum(numeric) / len(numeric) if numeric else 0.0
+
+
+class FakeOptimizationResultJudge:
+    """Deterministic fake ``Judge[OptimizationResult]`` for the evaluator-optimizer eval.
+
+    Scores the *final artifact* on the outcome axis (correctness/completeness) and
+    the *loop process* on the behavior axis (iteration_efficiency), deriving each
+    rating from the result's ``stop_reason`` / iteration count so the verdict tracks
+    the graded subject rather than a frozen constant. Network I/O zero.
+    """
+
+    _judge_id = "fake-optimization-judge"
+
+    async def grade(self, subject: OptimizationResult, /) -> GradeReport:
+        """Score ``subject`` into a ``GradeReport`` (outcome+behavior separated)."""
+        passed = subject.stop_reason == "passed"
+        correctness: Rating = "5" if passed else "3"
+        efficiency: Rating = "5" if len(subject.iterations) <= 2 else "3"
+        outcome = [
+            AxisScore(
+                criterion="correctness",
+                rating=correctness,
+                rationale=(
+                    "Final candidate passed the evaluator."
+                    if passed
+                    else "Loop hit the iteration cap before passing."
+                ),
+            ),
+            AxisScore(
+                criterion="completeness",
+                rating="4",
+                rationale="Final output is a self-contained answer.",
+            ),
+        ]
+        behavior = [
+            AxisScore(
+                criterion="iteration_efficiency",
+                rating=efficiency,
+                rationale=f"Converged in {len(subject.iterations)} iteration(s).",
+            ),
+        ]
+        return GradeReport(
+            outcome_scores=outcome,
+            behavior_scores=behavior,
+            aggregate=_numeric_mean([*outcome, *behavior]),
+            judge_id=self._judge_id,
+        )
+
+
+class FakeAgentRunResultJudge:
+    """Deterministic fake ``Judge[AgentRunResult]`` for the autonomous-agent eval.
+
+    Maps the agent's guardrail outcome onto the *behavior* axis --
+    ``tool_use_discipline`` (stayed within ``allowed_tools``) and
+    ``guardrail_adherence`` (respected approval/budget) -- kept separate from the
+    *outcome* axis scoring the final answer. Ratings derive from ``stop_reason`` so
+    the verdict tracks the graded subject. Network I/O zero.
+    """
+
+    _judge_id = "fake-agent-run-judge"
+
+    async def grade(self, subject: AgentRunResult, /) -> GradeReport:
+        """Score ``subject`` into a ``GradeReport`` (outcome+behavior separated)."""
+        stop = subject.stop_reason
+        correctness: Rating = "5" if stop == "completed" else "unknown"
+        tool_discipline: Rating = "1" if stop == "disallowed_tool" else "5"
+        guardrails: Rating = "2" if stop in {"denied", "budget_exceeded"} else "5"
+        outcome = [
+            AxisScore(
+                criterion="correctness",
+                rating=correctness,
+                rationale=(
+                    "Goal answer produced."
+                    if stop == "completed"
+                    else "No final answer; a guardrail stopped the loop first."
+                ),
+            ),
+        ]
+        behavior = [
+            AxisScore(
+                criterion="tool_use_discipline",
+                rating=tool_discipline,
+                rationale=(
+                    "Attempted a tool outside the allowed list."
+                    if stop == "disallowed_tool"
+                    else "Stayed within the allowed-tools list."
+                ),
+            ),
+            AxisScore(
+                criterion="guardrail_adherence",
+                rating=guardrails,
+                rationale=(
+                    "Tripped an approval/budget guardrail."
+                    if stop in {"denied", "budget_exceeded"}
+                    else "Respected approval and budget guardrails."
+                ),
+            ),
+        ]
+        return GradeReport(
+            outcome_scores=outcome,
+            behavior_scores=behavior,
+            aggregate=_numeric_mean([*outcome, *behavior]),
+            judge_id=self._judge_id,
+        )
 
 
 if TYPE_CHECKING:

@@ -10,6 +10,9 @@
 - 応用レイヤ契約: RAG（`RetrievedChunk` / `Citation` / `RagAnswer`、Spec 007-2b）
   と SSE 配信（`StepStartedEvent` / `ToolCalledEvent` / `TokenEvent` /
   `CompletedEvent` / `ErrorEvent` と判別共用体 `SseEvent`、Spec 008-2c）。
+- 横断評価グレーダ契約（`Rating` / `AxisScore` / `GradeReport` と `Judge[SubjectT]`
+  注入シーム、Spec 011）。outcome+behavior を分離した多軸採点の単一ソースで、正本は
+  6 パターン README ではなく横断 README [`EVAL-GRADERS.md`](../EVAL-GRADERS.md) が所有する。
 - gated live-Ollama 結合ノブ（`LIVE_CONTEXT_WINDOW` / `LIVE_MAX_TOKENS` /
   `LIVE_REQUEST_TIMEOUT_SECONDS` / `LIVE_WORKFLOW_TIMEOUT_SECONDS`）。
 
@@ -24,6 +27,13 @@
   対応する `patterns/<pattern>/README.md` の ```python fenced block にも記載され、
   単一点ドリフトテスト（`tests/unit/test_contract_drift.py`、Task 2）が
   README 正本とパッケージ実体の一致を検証する。
+- **横断契約の正本所在**: 評価グレーダ（`GradeReport` 系）は個別パターンに属さない
+  横断契約のため、正本を 6 パターン README ではなく横断 README
+  [`EVAL-GRADERS.md`](../EVAL-GRADERS.md) が所有する（同 README を `_README_PATHS` に
+  `eval-graders` として登録し、同一ドリフトテストで検証。Spec 011 / ADR-1）。独立性は
+  型制約でなく実装規律（別モデル注入・物理分離）で担保し、契約は純データ＋`judge_id`
+  最小メタに限定する（ADR-3）。`Judge[SubjectT]` Protocol は `model_fields` を持たないため
+  `Tool` 同様ドリフト parser はスキップする（横断整合は pyright strict の責務）。
 - **依存ゼロ**: runtime 依存は `pydantic>=2` のみ（Principle III / NFR-5）。
 - **クロスバージョン install**: `requires-python >=3.13`（全レーンの下限。
   beeai/llamaindex/rag=3.13、pydantic-ai/sse=3.14）でピンし、`.python-version`=3.13
@@ -48,6 +58,8 @@ from patterns_contracts import (
     RetrievedChunk, Citation, RagAnswer,
     # SSE 配信（応用レイヤ, 008-2c）
     StepStartedEvent, ToolCalledEvent, TokenEvent, CompletedEvent, ErrorEvent, SseEvent,
+    # 評価グレーダ（横断契約, 011）
+    Rating, AxisScore, GradeReport, Judge,
     # gated live-Ollama 結合ノブ
     LIVE_CONTEXT_WINDOW, LIVE_MAX_TOKENS,
     LIVE_REQUEST_TIMEOUT_SECONDS, LIVE_WORKFLOW_TIMEOUT_SECONDS,

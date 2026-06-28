@@ -56,6 +56,7 @@ _README_PATHS: dict[str, Path] = {
     "rag": _PATTERNS_DIR / "rag" / "README.md",
     "sse": _PATTERNS_DIR / "sse" / "README.md",
     "deep-research": _PATTERNS_DIR / "deep-research" / "README.md",
+    "eval-graders": _PATTERNS_DIR / "EVAL-GRADERS.md",
 }
 
 

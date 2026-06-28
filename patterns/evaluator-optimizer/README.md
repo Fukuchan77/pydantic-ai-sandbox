@@ -66,6 +66,13 @@ async def run_evaluator_optimizer(
   レーンが**テスト境界ローカル**の記録フェイク（`_recording_model` /
   `_RecordingChatModel` / `_RecordingLLM`）で「2回目 generator プロンプトが
   1回目 evaluator feedback + 前 candidate を含む」をアサートする。
+- **オフライン多軸 eval（outcome+behavior グレーダ）**: ランタイムの収束ゲート
+  （`verdict` / `stop_reason`）とは**別レイヤ**で、`OptimizationResult` を
+  outcome+behavior の多軸 `GradeReport` で採点するオフライン eval を
+  [pydantic-ai](../frameworks/pydantic-ai/) の `tests/` が決定論フェイク `Judge` で
+  ネットワークゼロ検証する（Spec 011）。共有グレーダ契約の正本・rating rubric・独立
+  judge 規律は横断 README [EVAL-GRADERS.md](../EVAL-GRADERS.md) が所有し、本パターンは
+  **参照のみ**（`GradeReport` 系をここに再宣言しない＝one-README 不変条件）。
 
 ### 可観測性
 
