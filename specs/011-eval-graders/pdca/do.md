@@ -189,3 +189,49 @@
   Task 3.2（deep-research）と同じ性質を pydantic-ai レーンでも実測確認。
 - Task 4（major）完了: pydantic-ai レーン ×2 パターンが同一 `GradeReport`/`Judge` を import・構築できることを
   hermetic eval で固定（R2.1/3.1/3.2/4.1/4.2）。残は Task 5（docs 同期）のみ。
+
+---
+
+## Task 5.1 — ドキュメント同期（索引・import 面・各パターン評価節参照）
+
+- **性質**: ドキュメントのみ（boundary は README ×5、`.py` 無改変）。RED-GREEN は退化形 —
+  検証ゲートは「ドリフトテスト + 契約スイートが緑維持（= one-README 不変条件 / R4.3 が保たれた証拠）」。
+- **変更 5 ファイル**:
+  - `patterns/README.md`: 「横断レイヤー（評価グレーダ）」節を新設（応用レイヤ RAG/SSE/Deep Research の後）。
+    横断契約表 + ADR-1/3/4 の要点（横断 README 正本所有・実装規律での独立性担保・後方互換）を散文化。
+  - `patterns/contracts/README.md`: 先頭インベントリへ eval-graders 契約 bullet、import 面コードブロックへ
+    `Rating, AxisScore, GradeReport, Judge` 追記、設計方針へ「横断契約の正本所在」bullet（`Judge` parser スキップ理由含む）。
+  - `evaluator-optimizer` / `autonomous-agent` / `deep-research` README: 各 `テスト` 節へ「オフライン多軸 eval」bullet を追記。
+    **`## パターン契約` 正本ブロックは無改変**（参照のみ・`GradeReport` 系を再宣言しない＝one-README 不変条件遵守）。
+- **検証ゲート（契約レーン緑）**:
+  - `uv run pytest tests/unit/test_contract_drift.py -v` → `4 passed`（class/field/literal/one-README 全緑）。
+  - `uv run pytest --cov` → `51 passed` / `Total coverage: 100.00%`（floor 85 充足、後方互換 = 既存契約テスト無改変緑）。
+  - R5.1 参照存在チェック: README ×5 すべてに `EVAL-GRADERS.md` 参照あり（2/2/1/1/1 件）。
+  - markdown のみ改変ゆえ ruff/pyright（Python 対象）は不影響。
+
+### Learnings
+
+- 3 パターン README への参照追記は `テスト` 節（必須4セクション内、`## パターン契約` 正本ブロックの後方）へ限定。
+  ドリフト parser は `## パターン契約` 直後の最初の `python` fence のみ読むため、prose の inline `GradeReport` 等は不干渉。
+- `contracts/README.md` は `_README_PATHS` 非登録 + `## パターン契約` 見出し無しゆえ、import 面コードブロックへの
+  シンボル追記はドリフト検査の対象外（安全に列挙可能）。
+
+---
+
+## Task 5.2 — verification.md 観点6 へ単一ソース化反映
+
+- **性質**: spec ドキュメントのみ（boundary `specs/best-practices-review/verification.md` ×1、`.py` 無改変）。
+- **変更**:
+  - 観点6（評価）テーブル行: 本リポジトリ状況へ「outcome+behavior 多軸グレーダ `GradeReport` の単一ソース化
+    （`Rating` 1–5 + `unknown` / 非空 rationale / partial-credit `aggregate` / `Judge[SubjectT]` 注入シーム）+
+    EVAL-GRADERS.md 正本 + ドリフト検証 + 3 パターン hermetic eval 参照」を追記。評価 ✅準拠 → **✅一致** へ格上げ。
+    主な根拠へ `patterns/EVAL-GRADERS.md` / pydantic-ai・deep-research の `tests/` を追加。
+  - 「主な検証ポイント」へ評価グレーダ単一ソース化の bullet（→ 改善提案 P4 実装済 / Spec 011）を追加。
+- **検証ゲート**: ⚠️ no automated command — `verification.md` は `specs/` 配下でどのテストも parse しない
+  （`grep -rl` で test 参照ゼロを確認、ヒットは SECURITY-NOTES.md の doc クロス参照のみ）。
+  回帰確認として `cd patterns/contracts && uv run pytest` → `51 passed`（Task 5.1 から無変化、後方互換維持）。
+
+### Learnings
+
+- doc-only タスクでも「参照は prose に限定、正本ブロック無改変」を守ればドリフトテストは無干渉で緑維持できる。
+- Task 5（major）完了 → 011-eval-graders 全タスク完了。次フェーズは `/sdd-validate-impl`。

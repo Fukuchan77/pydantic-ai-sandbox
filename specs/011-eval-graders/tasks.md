@@ -144,16 +144,22 @@ _Requirements:_ 5.1, 5.2
 EVAL-GRADERS.md を索引・import 面へ追加し、各パターン README の評価節へ参照を追記、
 verification.md 観点6 へ単一ソース化を反映する（契約再宣言はしない・参照のみ）。
 
-- [ ] 5.1 `patterns/README.md` 索引へ EVAL-GRADERS.md を追加、`patterns/contracts/README.md` の import 面・設計方針へ eval-graders 契約を追記、evaluator-optimizer / autonomous-agent / deep-research の各 README 評価節へ EVAL-GRADERS.md 参照を追記する（`GradeReport` 系は再宣言せず参照のみ = one-README 不変条件遵守）。
+- [x] 5.1 `patterns/README.md` 索引へ EVAL-GRADERS.md を追加、`patterns/contracts/README.md` の import 面・設計方針へ eval-graders 契約を追記、evaluator-optimizer / autonomous-agent / deep-research の各 README 評価節へ EVAL-GRADERS.md 参照を追記する（`GradeReport` 系は再宣言せず参照のみ = one-README 不変条件遵守）。
   _Boundary:_ `patterns/README.md`, `patterns/contracts/README.md`, `patterns/evaluator-optimizer/README.md`, `patterns/autonomous-agent/README.md`, `patterns/deep-research/README.md`
   _Depends:_ 2
   _Requirements:_ 5.1
-- [ ] 5.2 `specs/best-practices-review/verification.md` の観点6（評価）へ outcome+behavior グレーダの単一ソース化を反映する。
+- [x] 5.2 `specs/best-practices-review/verification.md` の観点6（評価）へ outcome+behavior グレーダの単一ソース化を反映する。
   _Boundary:_ `specs/best-practices-review/verification.md`
   _Depends:_ 2
   _Requirements:_ 5.2
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- ドキュメント専用タスク（boundary は README/spec doc のみ、`.py` 無改変）。one-README 不変条件は
+  「参照は prose 節（5.1 は各パターンの `テスト` 節）に限定し `## パターン契約` 正本ブロックは無改変」で遵守。
+  ドリフト parser は正本ブロックの最初の `python` fence のみ読むため、prose の inline `GradeReport` 等は不干渉。
+- 検証ゲートの所在差: 5.1 は登録 README（`_README_PATHS`）を触るためドリフトテストが load-bearing（4 passed /
+  全契約 51 passed・cov 100%）。5.2 の `verification.md` は `specs/` 配下で **どのテストも parse しない**ため
+  自動ゲート無し（⚠️ no automated command）。回帰確認として契約スイート 51 passed を再実行し無変化を担保。
+- 観点6 を ✅準拠 → ✅一致 へ格上げ（単一ソース化 `GradeReport` + EVAL-GRADERS.md 正本 + ドリフト検証 +
+  3 パターン hermetic eval 参照）。Spec 011 = 改善提案 P4 を verification.md の単一検証記録へ接続。

@@ -162,6 +162,14 @@ Anthropic「Effective context engineering for AI agents」の **compaction** と
 - **実 Ollama 結合**: `RUN_INTEGRATION_PATTERNS=1` でゲート（既定は ライブモデル × `FakeSearchProvider`）。
   ライブ検索は第2フラグ `RUN_INTEGRATION_SEARCH=1` のみ。契約形状（`ResearchReport` に finding≥1 /
   citation≥1 / span≥1）だけアサートし、正確な文言は禁止（非決定的な実モデルゆえ、決定論はフェイクの所掌）。
+- **オフライン多軸 eval（outcome+behavior グレーダ）**: `ResearchReport`（`Finding.notes` 含む）を
+  outcome+behavior の多軸 `GradeReport` で採点するオフライン eval を `tests/` が決定論フェイク
+  `Judge[ResearchReport]` でネットワークゼロ検証する（Spec 011）。`ResearchNote.key_point` が空/低信号の
+  とき faithfulness 軸を silent にスコアせず `"unknown"`（証拠不足）へマップする規律は純粋ヘルパ
+  `faithfulness_rating_for` に閉じ、空/非空の両分岐を直接テストする（R2.4、台本焼き込みによる同義反復を回避）。
+  共有グレーダ契約の正本・rating rubric・独立 judge 規律は横断 README
+  [EVAL-GRADERS.md](../EVAL-GRADERS.md) が所有し、本パターンは**参照のみ**
+  （`GradeReport` 系をここに再宣言しない＝one-README 不変条件）。
 
 ### 可観測性
 
