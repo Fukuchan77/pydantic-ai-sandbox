@@ -113,19 +113,25 @@ pydantic-ai レーンの evaluator-optimizer / autonomous-agent が同一 `Grade
 import・構築できることを hermetic eval テストで検証する。決定論フェイク `Judge` をレーンの
 `tests/support/` に置く。
 
-- [ ] 4.1 失敗 eval テストを先行作成する（ネットワーク I/O ゼロ）。`test_eval_graders_evaluator_optimizer.py`（`OptimizationResult` を採点）と `test_eval_graders_autonomous_agent.py`（`AgentRunResult` を behavior 軸 tool_use_discipline / guardrail_adherence で採点）。いずれも `from patterns_contracts import GradeReport, Judge` の参照と構築形状を検証する。**赤を確認する。**
+- [x] 4.1 失敗 eval テストを先行作成する（ネットワーク I/O ゼロ）。`test_eval_graders_evaluator_optimizer.py`（`OptimizationResult` を採点）と `test_eval_graders_autonomous_agent.py`（`AgentRunResult` を behavior 軸 tool_use_discipline / guardrail_adherence で採点）。いずれも `from patterns_contracts import GradeReport, Judge` の参照と構築形状を検証する。**赤を確認する。**
   _Boundary:_ `patterns/frameworks/pydantic-ai/tests/unit/test_eval_graders_evaluator_optimizer.py`, `patterns/frameworks/pydantic-ai/tests/unit/test_eval_graders_autonomous_agent.py`
   _Depends:_ 1.2
   _Requirements:_ 4.2
-- [ ] 4.2 `tests/support/model_fakes.py` に決定論フェイク `Judge`（台本化 `GradeReport` を返す）を追加し、両テストを緑化する。
+- [x] 4.2 `tests/support/model_fakes.py` に決定論フェイク `Judge`（台本化 `GradeReport` を返す）を追加し、両テストを緑化する。
   _Boundary:_ `patterns/frameworks/pydantic-ai/tests/support/model_fakes.py`
   _Depends:_ 4.1
   _Requirements:_ 2.1, 3.1, 3.2, 4.1
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- フェイク 2 種（`FakeOptimizationResultJudge` / `FakeAgentRunResultJudge`）は採点判定を `subject.stop_reason`
+  から導出する設計とした。定数台本ではなく被採点サブジェクトに連動する決定論フェイクとなり、レーンが「自分の
+  ランタイム結果」を採点する筋を示す（ネットワーク I/O ゼロ）。
+- autonomous-agent のガードレールは outcome ではなく **behavior 軸**（`tool_use_discipline` /
+  `guardrail_adherence`）にマップ。outcome 軸は最終回答品質（`correctness` / `completeness`）に限定し物理分離を保つ。
+- `AxisScore`/`GradeReport` は runtime 構築ゆえ通常 import、`AgentRunResult`/`OptimizationResult`/`Rating` は
+  注釈専用で `TYPE_CHECKING` 下（ruff `TCH` 準拠）。`tests/support` は coverage source 外ゆえ 98 ratchet 不算入
+  （実測 99.15% 維持）。
 
 ---
 
