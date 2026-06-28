@@ -36,6 +36,7 @@ from patterns_contracts.deep_research import (
     SearchResult,
     SubQuestion,
 )
+from patterns_contracts.eval_graders import AxisScore, GradeReport, Judge, Rating
 from patterns_contracts.evaluator_optimizer import Iteration, OptimizationResult
 from patterns_contracts.live_ollama import (
     LIVE_CONTEXT_WINDOW,
@@ -70,6 +71,7 @@ __all__ = [
     "AgentRunResult",
     "AgentStep",
     "ApprovalHook",
+    "AxisScore",
     "Branch",
     "BriefReadyEvent",
     "ChainResult",
@@ -80,13 +82,16 @@ __all__ = [
     "Finding",
     "FindingReadyEvent",
     "GateOutcome",
+    "GradeReport",
     "Iteration",
+    "Judge",
     "OptimizationResult",
     "OrchestratedResult",
     "ParallelResult",
     "PlanReadyEvent",
     "ProgressEvent",
     "RagAnswer",
+    "Rating",
     "ReportReadyEvent",
     "ResearchBrief",
     "ResearchNote",
