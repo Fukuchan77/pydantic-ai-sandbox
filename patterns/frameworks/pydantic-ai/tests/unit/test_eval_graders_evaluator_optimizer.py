@@ -55,6 +55,34 @@ async def test_fake_judge_grades_optimization_result_into_gradereport() -> None:
     assert graded.judge_id is not None  # provenance stamped (R3.3)
 
 
+def _capped_result() -> OptimizationResult:
+    """Build a result that hit the iteration cap without passing (non-happy path)."""
+    return OptimizationResult(
+        iterations=[
+            Iteration(index=i, candidate=f"draft {i}", verdict="revise", feedback="not yet")
+            for i in range(3)
+        ],
+        final_output="The last, still-imperfect candidate.",
+        stop_reason="max_iterations",
+    )
+
+
+async def test_fake_judge_derives_lower_ratings_when_loop_failed_to_converge() -> None:
+    # The fake's headline property is that ratings track the subject, not a frozen
+    # constant: a max_iterations result must score correctness BELOW the passed
+    # path and flag inefficiency, exercising the else-branches the happy-path
+    # cases never reach.
+    capped = await FakeOptimizationResultJudge().grade(_capped_result())
+    passed = await FakeOptimizationResultJudge().grade(_result())
+
+    capped_correctness = next(a for a in capped.outcome_scores if a.criterion == "correctness")
+    passed_correctness = next(a for a in passed.outcome_scores if a.criterion == "correctness")
+    assert int(capped_correctness.rating) < int(passed_correctness.rating)
+
+    efficiency = next(a for a in capped.behavior_scores if a.criterion == "iteration_efficiency")
+    assert efficiency.rating == "3"  # 3 iterations > the 2-iteration efficient threshold
+
+
 async def test_fake_judge_outcome_axis_scores_the_final_artifact() -> None:
     # outcome grader = final-artifact quality (Glossary): correctness must be
     # one of the scored outcome criteria, with a discrete rating.
