@@ -21,19 +21,24 @@ outcome+behavior の多軸スコア契約（`Rating` / `AxisScore` / `GradeRepor
 注入シーム（`Judge[SubjectT]` Protocol）を依存ゼロの `patterns_contracts` に新規契約
 モジュールとして純加算し（既存契約は無改変）、パッケージ root からフラット再エクスポートする。
 
-- [ ] 1.1 契約形状の失敗テストを先行作成する（hermetic・ネットワーク I/O ゼロ）。`Rating` 語彙（`1`–`5` + `unknown`）受理、outcome/behavior 軸分離保持、`aggregate: float` の partial credit（outcome に `unknown` rating を含み behavior に数値 rating を混在させても構築可）、`rationale` 空/空白で構築拒否・loud-fail、`judge_id` 任意、inline 決定論フェイクによる `Judge` Protocol 準拠（`grade()→GradeReport`）を検証する。**赤を確認する。**
+- [x] 1.1 契約形状の失敗テストを先行作成する（hermetic・ネットワーク I/O ゼロ）。`Rating` 語彙（`1`–`5` + `unknown`）受理、outcome/behavior 軸分離保持、`aggregate: float` の partial credit（outcome に `unknown` rating を含み behavior に数値 rating を混在させても構築可）、`rationale` 空/空白で構築拒否・loud-fail、`judge_id` 任意、inline 決定論フェイクによる `Judge` Protocol 準拠（`grade()→GradeReport`）を検証する。**赤を確認する。**
   _Boundary:_ `patterns/contracts/tests/unit/test_eval_graders.py`
   _Depends:_ none
   _Requirements:_ 1.2, 1.3, 1.5, 3.1, 3.2, 4.1
-- [ ] 1.2 `eval_graders.py` に契約実体を実装し、`__init__.py` へフラット再エクスポート（`Rating` / `AxisScore` / `GradeReport` / `Judge` を `__all__` へ追加）してテストを緑化する。`Rating = Literal["1","2","3","4","5","unknown"]` 名前付きエイリアス、`AxisScore`（`criterion: str` / `rating: Rating` / `rationale: str` + 空非許可の `field_validator`）、`GradeReport`（`outcome_scores` / `behavior_scores` / `aggregate: float` / `judge_id: str | None`）、`Judge[SubjectT]` Protocol（`async def grade`）を定義する。
+- [x] 1.2 `eval_graders.py` に契約実体を実装し、`__init__.py` へフラット再エクスポート（`Rating` / `AxisScore` / `GradeReport` / `Judge` を `__all__` へ追加）してテストを緑化する。`Rating = Literal["1","2","3","4","5","unknown"]` 名前付きエイリアス、`AxisScore`（`criterion: str` / `rating: Rating` / `rationale: str` + 空非許可の `field_validator`）、`GradeReport`（`outcome_scores` / `behavior_scores` / `aggregate: float` / `judge_id: str | None`）、`Judge[SubjectT]` Protocol（`async def grade`）を定義する。
   _Boundary:_ `patterns/contracts/src/patterns_contracts/eval_graders.py`, `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ 1.1
   _Requirements:_ 1.1, 1.2, 1.3, 1.5, 2.1, 3.1, 3.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- `Rating` は col-0 名前付き Literal エイリアスとして実装し、drift parser の
+  `_collect_named_literals`（col-0 代入のみ拾う）と EVAL-GRADERS.md 正本ブロックが対称一致する設計に揃えた。
+- `Judge[SubjectT](Protocol)` は PEP 695 ジェネリック。`model_fields` を持たないため drift parser は
+  `Tool` 同様にスキップ（型整合は pyright strict の責務）。
+- **既知の sequenced-red**: 1.2 で `AxisScore`/`GradeReport`/`Rating` を `__all__` へ追加した時点で
+  drift テスト 4 本が赤化する（package 側に存在・README 未登録）。これは設計どおりで Task 2.2 が緑化する
+  （Task 1.1 の import-error 赤と同型の中間状態）。
 
 ---
 
@@ -47,19 +52,22 @@ _Requirements:_ 1.4, 1.6, 2.2, 4.3, 5.1
 「正本 == パッケージ実体」をドリフトテストで機械検証する。`Rating` 文字列 Literal 設計により
 parser は無改修で両側対称に語彙一致する。
 
-- [ ] 2.1 `patterns/EVAL-GRADERS.md` を作成する。`## パターン契約` 見出し直後の最初の `python` fence に正本ブロック（`Rating = Literal[...]` の col-0 代入 + `class AxisScore` / `class GradeReport` / `class Judge(Protocol)`）を記載し、別節に rating 1–5 各段階の rubric 文言（Vertex 方式）、outcome/behavior の criterion 例、独立 judge 規律を散文で定義する。併せて `GradeReport` をランタイム収束ゲートと併存するオフライン/CI 採点の別レイヤとして位置づける（後方互換維持）。
+- [x] 2.1 `patterns/EVAL-GRADERS.md` を作成する。`## パターン契約` 見出し直後の最初の `python` fence に正本ブロック（`Rating = Literal[...]` の col-0 代入 + `class AxisScore` / `class GradeReport` / `class Judge(Protocol)`）を記載し、別節に rating 1–5 各段階の rubric 文言（Vertex 方式）、outcome/behavior の criterion 例、独立 judge 規律を散文で定義する。併せて `GradeReport` をランタイム収束ゲートと併存するオフライン/CI 採点の別レイヤとして位置づける（後方互換維持）。
   _Boundary:_ `patterns/EVAL-GRADERS.md`
   _Depends:_ 1.2
   _Requirements:_ 1.4, 1.6, 2.2, 5.1
-- [ ] 2.2 `test_contract_drift.py` の `_README_PATHS` に `eval-graders → patterns/EVAL-GRADERS.md` を 1 行追加し（parser 本体は無改修）、ドリフトテスト + 既存契約テスト全体を緑に保つ（runtime 契約無改変を確認 = 後方互換）。**完了条件**: `OptimizationResult` / `ResearchReport` / `AgentRunResult` の既存契約テストが無改変のまま緑であることを確認する（新規テストは不要、既存スイートの緑維持で R2.2 を担保）。
+- [x] 2.2 `test_contract_drift.py` の `_README_PATHS` に `eval-graders → patterns/EVAL-GRADERS.md` を 1 行追加し（parser 本体は無改修）、ドリフトテスト + 既存契約テスト全体を緑に保つ（runtime 契約無改変を確認 = 後方互換）。**完了条件**: `OptimizationResult` / `ResearchReport` / `AgentRunResult` の既存契約テストが無改変のまま緑であることを確認する（新規テストは不要、既存スイートの緑維持で R2.2 を担保）。
   _Boundary:_ `patterns/contracts/tests/unit/test_contract_drift.py`
   _Depends:_ 2.1
   _Requirements:_ 1.6, 2.2, 4.3
 
 ### Implementation Notes
 
-<!-- Empty at generation. Implementer appends 1-3 bullet learnings after
-completing this major task. -->
+- 正本作成（2.1）→ 登録（2.2）の順で sequenced-red を解消。`_README_PATHS` に 1 行
+  （`"eval-graders": _PATTERNS_DIR / "EVAL-GRADERS.md"`）追加のみで parser 本体は無改修
+  （`Rating` 文字列 Literal 設計が両側対称を保証 = AD-1）。
+- 登録後の全体ゲート緑化を確認: drift 4 passed / lint・format・pyright 緑 / 全 51 passed・coverage 100%。
+- R2.2 後方互換: 既存契約テスト（`test_deep_research_contracts` 等）は無改変のまま緑維持を 51 passed で担保。
 
 ---
 
