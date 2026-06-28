@@ -15,6 +15,8 @@ elsewhere (the lane ``tests/support/`` fakes and ``patterns/EVAL-GRADERS.md``).
 
 from __future__ import annotations
 
+import math
+
 import pytest
 from pydantic import BaseModel, ValidationError
 
@@ -47,6 +49,8 @@ def test_rating_vocabulary_is_accepted(rating: Rating) -> None:
 
 def test_rating_rejects_out_of_vocabulary_value() -> None:
     with pytest.raises(ValidationError):
+        # Intentional out-of-vocabulary Rating to exercise the rejection path;
+        # pyright correctly flags "6" as not a Rating member, hence the ignore.
         AxisScore(criterion="correctness", rating="6", rationale="r")  # type: ignore[arg-type]
 
 
@@ -79,6 +83,15 @@ def test_outcome_and_behavior_axes_are_separated_with_partial_credit() -> None:
     assert report.outcome_scores[1].rating == "unknown"
     assert isinstance(report.aggregate, float)
     assert report.aggregate == 0.75
+
+
+@pytest.mark.parametrize("non_finite", [math.nan, math.inf, -math.inf])
+def test_aggregate_rejects_non_finite(non_finite: float) -> None:
+    # A NaN/inf aggregate is a silent footgun that propagates through any
+    # downstream comparison; reject it loudly, consistent with the rationale
+    # silent-empty ban (Req 1.5 ethos).
+    with pytest.raises(ValidationError):
+        GradeReport(outcome_scores=[], behavior_scores=[], aggregate=non_finite)
 
 
 def test_judge_id_is_optional_and_defaults_to_none() -> None:

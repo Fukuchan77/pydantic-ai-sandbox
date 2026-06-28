@@ -69,7 +69,9 @@ class GradeReport(BaseModel):
         description="Axes scoring the process/behavior (physically separated, Req 1.2).",
     )
     aggregate: float = Field(
-        description="Partial-credit aggregate score; scale is harness-defined (Req 1.3).",
+        allow_inf_nan=False,
+        description="Partial-credit aggregate score; scale is harness-defined (Req 1.3). "
+        "NaN/inf is rejected (a non-finite score would silently corrupt comparisons).",
     )
     judge_id: str | None = Field(
         default=None,

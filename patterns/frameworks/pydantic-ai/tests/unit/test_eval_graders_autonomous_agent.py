@@ -16,6 +16,7 @@ established by deep-research Task 3.1).
 
 from __future__ import annotations
 
+import pytest
 from patterns_contracts import AgentRunResult, AgentStep, GradeReport, Judge
 
 from tests.support.model_fakes import FakeAgentRunResultJudge
@@ -57,6 +58,39 @@ async def test_fake_judge_behavior_axis_scores_process_discipline() -> None:
     assert "guardrail_adherence" in behavior_criteria
     for axis in graded.behavior_scores:
         assert axis.rating in {"1", "2", "3", "4", "5", "unknown"}
+
+
+def _guardrail_stopped(stop_reason: str) -> AgentRunResult:
+    """Build a result whose loop a guardrail stopped before completion (no final answer)."""
+    return AgentRunResult(
+        steps=[AgentStep(index=0, tool="search", observation="...", budget_spent=4)],
+        final_output=None,
+        stop_reason=stop_reason,  # pyright: ignore[reportArgumentType]  # parametrized over the closed vocab
+        total_budget_spent=4,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "criterion", "expected"),
+    [
+        ("disallowed_tool", "tool_use_discipline", "1"),  # stepped outside allowed_tools
+        ("denied", "guardrail_adherence", "2"),  # approval guardrail tripped
+        ("budget_exceeded", "guardrail_adherence", "2"),  # budget guardrail tripped
+    ],
+)
+async def test_fake_judge_behavior_ratings_track_the_guardrail_that_fired(
+    stop_reason: str, criterion: str, expected: str
+) -> None:
+    # The fake derives behavior ratings from stop_reason rather than a constant:
+    # each guardrail must drive the matching axis low, and correctness must be
+    # "unknown" (no final answer to judge). These are the else-branches the
+    # happy-path "completed" case never reaches.
+    graded = await FakeAgentRunResultJudge().grade(_guardrail_stopped(stop_reason))
+
+    axis = next(a for a in graded.behavior_scores if a.criterion == criterion)
+    assert axis.rating == expected
+    correctness = next(a for a in graded.outcome_scores if a.criterion == "correctness")
+    assert correctness.rating == "unknown"
 
 
 async def test_fake_judge_conforms_to_judge_protocol_seam() -> None:

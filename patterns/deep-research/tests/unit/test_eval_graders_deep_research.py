@@ -83,6 +83,16 @@ def test_faithfulness_rating_for_grounded_key_point_is_numeric() -> None:
     assert rating in {"1", "2", "3", "4", "5"}
 
 
+def test_faithfulness_rating_for_partial_signal_is_below_full() -> None:
+    # Mixed notebook (one grounded, one blank) -> partial credit, strictly below
+    # the all-grounded score: pins the middle branch, not just the unknown/full
+    # extremes, so a regression collapsing partial into full is caught.
+    full: Rating = faithfulness_rating_for([_note("grounded point")])
+    partial: Rating = faithfulness_rating_for([_note("grounded point"), _note("")])
+    assert partial in {"1", "2", "3", "4", "5"}
+    assert int(partial) < int(full)
+
+
 async def test_fake_judge_grades_research_report_into_gradereport() -> None:
     # R2.3/4.2: the lane grades its own ResearchReport (notes included) into the
     # shared GradeReport, with outcome and behavior axes physically separated.
