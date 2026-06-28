@@ -130,3 +130,62 @@
   `TYPE_CHECKING` 下（ruff `TCH` 準拠）。`async def grade(self, subject, /)` の positional-only 一致で
   `Judge[SubjectT]` Protocol への構造的準拠を pyright strict が検証（RUF029 は preview 非選択ゆえ no-await でも緑）。
 - `tests/support/` は coverage source 外。フェイク + ヘルパ追加が 98 ratchet を割らない設計を実測で確認（100% 維持）。
+
+## Task 4.1 — pydantic-ai レーン eval 失敗テスト先行作成（RED ×2）
+
+- **State**: RED 確認済 ✅（Task 4.2 で緑化予定）
+- **成果物**（いずれも新規・hermetic・ネットワーク I/O ゼロ）:
+  - `patterns/frameworks/pydantic-ai/tests/unit/test_eval_graders_evaluator_optimizer.py`
+    — `OptimizationResult` を採点。`from patterns_contracts import GradeReport, Judge` 参照、
+    outcome/behavior 分離・`aggregate: float`・`judge_id` 出自・outcome 軸 `correctness`・
+    `Judge[OptimizationResult]` Protocol シーム準拠を検証。
+  - `patterns/frameworks/pydantic-ai/tests/unit/test_eval_graders_autonomous_agent.py`
+    — `AgentRunResult` を behavior 軸 `tool_use_discipline` / `guardrail_adherence` で採点。
+    同一 import 参照・構築形状・Protocol シーム準拠を検証。
+- **RED 証拠**: `uv run pytest --no-cov tests/unit/test_eval_graders_evaluator_optimizer.py
+  tests/unit/test_eval_graders_autonomous_agent.py`
+  → `2 errors`：`ImportError: cannot import name 'FakeOptimizationResultJudge'` /
+  `'FakeAgentRunResultJudge' from 'tests.support.model_fakes'`（フェイク judge 未実装ゆえの想定赤）。
+  deep-research Task 3.1 と同型の import-error sequenced-red。
+- **回帰確認**: 新規 2 ファイル除外のレーン unit suite は `50 passed`（非デグレ）。新規 2 ファイルは
+  lint `All checks passed!` / format 緑（`ruff format` 適用済）。
+- **既知の sequenced-red（非デグレ）**: フェイク judge 未実装ゆえ pyright/全体ゲートは赤。Task 4.2 が
+  `tests/support/model_fakes.py` に決定論フェイク `Judge[OptimizationResult]` /
+  `Judge[AgentRunResult]` を追加して緑化する設計どおりの中間状態。
+
+### Learnings
+
+- フェイク judge 名は `FakeOptimizationResultJudge` / `FakeAgentRunResultJudge` で確定（Task 4.2 が実装）。
+  deep-research の `FakeResearchReportJudge` と命名規約を揃えた。
+- autonomous-agent のガードレール（allowed_tools / approval / budget / iteration cap）は outcome ではなく
+  **behavior 軸**にマップする設計とした（`tool_use_discipline` / `guardrail_adherence`）。
+- レーン `conftest` が `ALLOW_MODEL_REQUESTS=False` を立てるため、フェイクがモデルに触れない限り I/O ゼロは自動担保。
+
+## Task 4.2 — pydantic-ai レーン 決定論フェイク judge 実装（GREEN ×2）
+
+- **State**: 両テスト緑化済 ✅
+- **成果物**: `patterns/frameworks/pydantic-ai/tests/support/model_fakes.py`
+  - `FakeOptimizationResultJudge` — `OptimizationResult` を採点。outcome 軸 `correctness`/`completeness`、
+    behavior 軸 `iteration_efficiency`。判定は `stop_reason`（passed?）と iteration 数から導出。
+  - `FakeAgentRunResultJudge` — `AgentRunResult` を採点。outcome 軸 `correctness`、behavior 軸
+    `tool_use_discipline`/`guardrail_adherence`。判定は `stop_reason`（completed / disallowed_tool /
+    denied・budget_exceeded）から導出。
+  - 共有ヘルパ `_numeric_mean`（partial-credit 集約、`"unknown"` を除外して数値 rating 平均、Req 1.3）。
+  - `__all__` へ 2 フェイクを alphabetical 追加、`AxisScore`/`GradeReport` を runtime import、
+    `AgentRunResult`/`OptimizationResult`/`Rating` を `TYPE_CHECKING` 下へ追加（ruff `TCH` 準拠）。
+- **GREEN 証拠**: `uv run pytest --no-cov tests/unit/test_eval_graders_evaluator_optimizer.py
+  tests/unit/test_eval_graders_autonomous_agent.py` → `6 passed`。
+- **検証ゲート（全レーン緑）**:
+  - `uv run ruff check .` → `All checks passed!`
+  - `uv run ruff format --check .` → `24 files already formatted`
+  - `uv run pyright` → `0 errors, 0 warnings, 0 informations`
+  - `uv run pytest --cov` → `56 passed, 6 skipped` / `Required test coverage of 98.0% reached. Total coverage: 99.15%`
+
+### Learnings
+
+- フェイク判定を `stop_reason` から導出することで「定数台本焼き込み」を回避しつつ決定論を維持。deep-research の
+  `faithfulness_rating_for` ほど厳密なヘルパ抽出は本タスク要件外（R2.4 は deep-research 固有）ゆえ、judge 内導出で十分。
+- `tests/support` は coverage source 外（`source = ["src/patterns_pydantic_ai"]`）ゆえフェイク追加は ratchet 不算入。
+  Task 3.2（deep-research）と同じ性質を pydantic-ai レーンでも実測確認。
+- Task 4（major）完了: pydantic-ai レーン ×2 パターンが同一 `GradeReport`/`Judge` を import・構築できることを
+  hermetic eval で固定（R2.1/3.1/3.2/4.1/4.2）。残は Task 5（docs 同期）のみ。
