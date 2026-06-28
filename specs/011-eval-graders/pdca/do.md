@@ -87,3 +87,46 @@
 - 横断 README は `patterns/` 直下なので `_PATTERNS_DIR / "EVAL-GRADERS.md"`（サブディレクトリ無し）。既存 6+3 件は
   `<pattern>/README.md` 形式だった点と差異。
 - Serena `replace_content` は language server 不在で失敗。コード編集は Edit へフォールバック（既読ファイルゆえ可）。
+
+## Task 3.1 — deep-research レーン失敗 eval テストを先行作成（RED）
+
+- **State**: RED 確認済 ✅（Task 3.2 で緑化予定・sequenced-red）
+- **成果物**: `patterns/deep-research/tests/unit/test_eval_graders_deep_research.py`（新規・hermetic・I/O ゼロ）
+- **被覆観点**: 共有 `GradeReport`/`Judge` を `patterns_contracts` から import し、レーン自身の
+  `ResearchReport`（`Finding.notes` 含む = R2.3）を決定論フェイク `Judge[ResearchReport]` で採点して
+  `GradeReport` 形状（outcome/behavior 軸分離・`judge_id` provenance）を検証。純粋ヘルパ
+  `faithfulness_rating_for(notes)` へ空/空白/非空 `key_point` と空 notes を直接与え、R2.4 の
+  `Unknown` 分岐（空・低信号→`"unknown"`／grounded→数値 Rating）を tested 化。フェイクはヘルパを呼ぶ
+  end-to-end 1 本で台本焼き込み（同義反復）を回避。`Judge[ResearchReport]` Protocol シーム準拠も検証。
+- **RED 証拠**: `uv run pytest --no-cov tests/unit/test_eval_graders_deep_research.py`
+  → `ImportError: cannot import name 'FakeResearchReportJudge' from 'tests.support.model_fakes'`
+  （フェイク judge・ヘルパ未実装ゆえの想定赤＝Task 1.1 と同型の import-error red）。
+- **無回帰**: 残レーン unit `53 passed`（新ファイル除外）。新ファイル lint `All checks passed!` / format 済。
+
+### Learnings
+
+- coverage source は `src/patterns_deep_research` のみ。Task 3.2 の fake judge + ヘルパは `tests/support/`
+  に置くため 98 ratchet に算入されず、契約参照テスト追加が coverage を割らない設計。
+- isort: `tests.support.*` は first-party 群（`patterns_deep_research` と同群）に並ぶ。既存 `test_research.py`
+  の import 並びに準拠。
+
+## Task 3.2 — deep-research フェイク judge + 純粋ヘルパ実装（GREEN）
+
+- **State**: 緑化完了 ✅（Task 3.1 の sequenced-red を解消）
+- **成果物**: `patterns/deep-research/tests/support/model_fakes.py` に
+  `faithfulness_rating_for(notes) -> Rating`（純関数）+ `FakeResearchReportJudge`（`Judge[ResearchReport]` 準拠）を純加算。
+- **設計**: ヘルパは grounded share で `unknown`（grounded 0）/`3`（partial）/`5`（full）を返す。フェイク `grade()` は
+  `Finding.notes` をフラット化しヘルパを呼んで faithfulness behavior 軸を導出（R2.4 をテスト直接ピンと同一経路へ通し
+  台本焼き込み＝同義反復を回避）。outcome 軸（completeness）は台本化、`judge_id` で provenance を刻む（R3.3）。
+- **GREEN 証拠**:
+  - 対象: `uv run pytest --no-cov tests/unit/test_eval_graders_deep_research.py` → `9 passed`
+  - 全体 + coverage: `62 passed, 1 skipped`、`Total coverage: 100.00%`（floor 98 超過）
+  - lint `All checks passed!` / format `27 files already formatted` / pyright `0 errors, 0 warnings`
+- **無回帰**: 既存 `plan_payload`/`scripted_model` 利用テスト（`test_research.py` 等）は無改変のまま緑維持。
+
+### Learnings
+
+- `AxisScore`/`GradeReport` は runtime 構築ゆえ通常 import、`Rating`/`ResearchNote`/`ResearchReport` は注釈専用で
+  `TYPE_CHECKING` 下（ruff `TCH` 準拠）。`async def grade(self, subject, /)` の positional-only 一致で
+  `Judge[SubjectT]` Protocol への構造的準拠を pyright strict が検証（RUF029 は preview 非選択ゆえ no-await でも緑）。
+- `tests/support/` は coverage source 外。フェイク + ヘルパ追加が 98 ratchet を割らない設計を実測で確認（100% 維持）。
