@@ -11,13 +11,9 @@
 # lane. pydantic-ai is dev/integration-only — it backs the gated Ollama
 # `run_stream_events` adapter (Task 10), never the runtime closure.
 #
-# Prerelease policy (Task 0 hand-off, do.md learning #3): pydantic-ai V2 is beta
-# and pins `pydantic-graph` to a pre-release, so `prerelease = "allow"` is
-# required for the dev closure to resolve (mirrors the pydantic-ai lane). Left
-# unbounded, `allow` also drags the *runtime* pydantic onto an alpha (2.14.0aN).
-# We keep the framework-agnostic runtime off pre-release pydantic with an
-# explicit stable upper bound below — the alpha then stays confined to nothing
-# (pydantic-graph itself rides its own pre-release pin, not pydantic's).
+# pydantic-ai V2 is now stable (2.2.0); the dev-only pin below tracks that
+# release directly and no longer needs `prerelease = "allow"`. The explicit
+# stable upper bound on the runtime pydantic is kept below regardless.
 
 [project]
 name = "patterns-sse"
@@ -39,9 +35,7 @@ dependencies = [
     "fastapi>=0.136",
     "sse-starlette>=3.4",
     # Framework-agnostic event contracts ride Pydantic. Upper-bounded to keep
-    # the runtime closure on a *stable* pydantic even though `prerelease =
-    # "allow"` (required for the dev pydantic-ai closure) would otherwise pull
-    # an alpha into this shared package (Task 0 hand-off).
+    # the runtime closure on a stable pydantic (Task 0 hand-off).
     "pydantic>=2,<2.14",
     # Observability parity with the sibling lanes (Req 7): the OTLP exporter is
     # the default span sink; `configure_tracing` (Task 8) falls back to no-op
@@ -58,7 +52,7 @@ dev = [
     # backs the gated Ollama lane. Mirrors the pydantic-ai lane's
     # `pydantic-ai-slim[openai]` (OpenAIChatModel + OllamaProvider). Never
     # imported by the framework-agnostic lane src (NFR-3).
-    "pydantic-ai-slim[openai]>=2.0.0b6",
+    "pydantic-ai-slim[openai]>=2.2.0",
     "pip-audit",
     "pyright",
     "pytest",
@@ -75,11 +69,6 @@ build-backend = "hatchling.build"
 packages = ["src/patterns_sse"]
 
 [tool.uv]
-# pydantic-ai V2 is beta; pydantic-graph ships matching pre-release pins. Mirror
-# the pydantic-ai lane's `prerelease = "allow"` so the dev closure resolves. The
-# runtime pydantic stays stable via the `<2.14` upper bound above.
-prerelease = "allow"
-
 # Path dependency to the shared contracts package. Editable so contract edits
 # (Task 2 adds `patterns_contracts.sse`) land without a re-sync; `../contracts`
 # resolves from patterns/sse/ to patterns/contracts/ — one segment shallower
