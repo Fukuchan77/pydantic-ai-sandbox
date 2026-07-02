@@ -11,7 +11,7 @@
 # lane. pydantic-ai is dev/integration-only — it backs the gated Ollama
 # `run_stream_events` adapter (Task 10), never the runtime closure.
 #
-# pydantic-ai V2 is now stable (2.2.0); the dev-only pin below tracks that
+# pydantic-ai V2 is now stable (2.3.0); the dev-only pin below tracks that
 # release directly and no longer needs `prerelease = "allow"`. The explicit
 # stable upper bound on the runtime pydantic is kept below regardless.
 
@@ -52,7 +52,7 @@ dev = [
     # backs the gated Ollama lane. Mirrors the pydantic-ai lane's
     # `pydantic-ai-slim[openai]` (OpenAIChatModel + OllamaProvider). Never
     # imported by the framework-agnostic lane src (NFR-3).
-    "pydantic-ai-slim[openai]>=2.2.0",
+    "pydantic-ai-slim[openai]>=2.3.0",
     "pip-audit",
     "pyright",
     "pytest",

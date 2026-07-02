@@ -1,22 +1,23 @@
-# Spec Req 3.5, 6.2, 10.3 / Plan §4.3 R-7 / tasks.md T12.3.
+# Spec Req 3.5, 6.2, 10.3 / Plan §4.3 R-7 / tasks.md T12.3 — trigger surface
+# since narrowed to manual-only (CI optimization: Actions usage-limit control).
 #
 # This is the ONLY lane that exercises tests/integration/test_ollama_chat_e2e.py
 # against a real `granite4.1:8b` daemon. Everything else (T11.1's gate, the
 # unit suite's `agent.override(TestModel())`) stops at the contract boundary.
 #
-# Trigger surface (Plan R-7 採用方針):
-#   1. push: main           — post-merge regression net.
-#   2. schedule: weekly cron — catches drift in upstream Ollama/granite tags.
-#   3. pull_request paths   — fires only when LLM router / agents / schemas /
-#                              integration tests / pyproject.toml change. PRs
-#                              that don't touch the provider surface get the
-#                              cheap unit-only `ci.yml` lane.
-#   4. workflow_dispatch    — manual override for reviewers.
+# Trigger surface: `workflow_dispatch` ONLY. Live 8B inference is slow and was
+# consuming the GitHub Actions usage budget, so the earlier push/cron/PR-paths
+# surface (Plan R-7) is retired. Per-PR and post-merge quality stays
+# deterministic and fast via ci.yml (unit suite + `agent.override(TestModel())`).
+# Operational rule: dispatch this lane manually from the Actions tab before/
+# after merging changes to the provider surface (src/pydantic_ai_sandbox/llm,
+# agents, schemas, tests/integration, pyproject.toml) or when bumping the
+# Ollama daemon/model tag. This trigger contract is pinned by
+# tests/unit/test_ollama_ci_workflows.py — update the guard test together with
+# any change here.
 #
-# `concurrency.cancel-in-progress: true` collapses PR-push storms to one
-# active job per ref. The cron and main-push lanes use distinct ref groups
-# (refs/heads/main vs the schedule's synthetic ref) so they never cancel
-# each other.
+# `concurrency.cancel-in-progress: true` collapses duplicate manual dispatches
+# on the same ref to one active run.
 #
 # Model caching: `granite4.1:8b` is ~5GB; pulling it on every run blows the
 # job budget. `actions/cache` keys on the workflow file's hash so a model
@@ -27,19 +28,6 @@
 name: integration-ollama
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: '37 3 * * 1'  # off-zero minute to dodge the :00 stampede
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/pydantic_ai_sandbox/llm/**'
-      - 'src/pydantic_ai_sandbox/agents/**'
-      - 'src/pydantic_ai_sandbox/schemas/**'
-      - 'tests/integration/**'
-      - 'pyproject.toml'
-      - '.github/workflows/integration-ollama.yml'
   workflow_dispatch: {}
 
 concurrency:
@@ -48,7 +36,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write  # paths-filter explainer comment on PRs
 
 # Single source of truth for the model + base URL so the cache key, the
 # `ollama pull` step, and the test env all read the same values. Changing
@@ -164,34 +151,3 @@ jobs:
           name: ollama-daemon-${{ github.run_id }}
           path: ollama-daemon.log
           retention-days: 14
-
-      # ----------------------------------------------------------------------
-      # Spec Req 6.2 reviewability: when the lane was triggered by a PR's
-      # paths filter, summarise WHICH paths matched. The summary is plain
-      # markdown so it surfaces in the PR's checks tab without an extra API
-      # round-trip. We don't actually post a PR comment (would compete with
-      # ci.yml's coverage comment); the build summary is sufficient signal.
-      # ----------------------------------------------------------------------
-      - name: Summarise trigger context
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          {
-            echo '## integration-ollama trigger explanation'
-            echo ''
-            echo 'This PR touches one of the provider/agent surfaces tracked'
-            echo 'by `paths:` in `.github/workflows/integration-ollama.yml`:'
-            echo ''
-            echo '- `src/pydantic_ai_sandbox/llm/**`'
-            echo '- `src/pydantic_ai_sandbox/agents/**`'
-            echo '- `src/pydantic_ai_sandbox/schemas/**`'
-            echo '- `tests/integration/**`'
-            echo '- `pyproject.toml`'
-            echo ''
-            echo 'Spec Req 6.2 requires the V2 Beta agent + structured output'
-            echo 'contract to be exercised against a real Ollama backend on'
-            echo 'every PR that could break it. If this lane fails, the'
-            echo 'failure is provider-side and MUST NOT be merged regardless'
-            echo 'of `ci.yml` status.'
-          } >> "$GITHUB_STEP_SUMMARY"
