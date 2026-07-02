@@ -13,7 +13,7 @@
 # framework- and search-provider-agnostic (Req 1.3 / NFR-3): the SearchProvider
 # DI seam is the only door to the outside world, never a sibling lane.
 #
-# pydantic-ai V2 is now stable (2.2.0); the pin below tracks that release
+# pydantic-ai V2 is now stable (2.3.0); the pin below tracks that release
 # directly and no longer needs `prerelease = "allow"`. The explicit `<2.14`
 # upper bound on pydantic is kept to match the contracts-shared package.
 
@@ -32,7 +32,7 @@ dependencies = [
     # Orchestration runtime (Req 1.1): the lead / researcher / report agents are
     # pydantic-ai `Agent`s. Mirrors the pydantic-ai lane's `pydantic-ai-slim[openai]`
     # (OpenAIChatModel + OllamaProvider for the gated live test).
-    "pydantic-ai-slim[openai]>=2.2.0",
+    "pydantic-ai-slim[openai]>=2.3.0",
     # Contract models ride Pydantic. Upper-bounded to match the contracts-shared
     # package's stable pydantic floor.
     "pydantic>=2,<2.14",

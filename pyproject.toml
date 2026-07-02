@@ -15,7 +15,7 @@ dependencies = [
     # meta-package, so only what the app actually uses is installed:
     #   openai  → OpenAI-compatible chat client used by the Ollama provider.
     #   logfire → instrument_pydantic_ai instrumentation (logging_setup.py).
-    "pydantic-ai-slim[logfire,openai]>=2.2.0",
+    "pydantic-ai-slim[logfire,openai]>=2.3.0",
     "pydantic-settings",
     "uvicorn",
 ]
