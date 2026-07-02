@@ -1,7 +1,10 @@
-# Spec Req 9.1, 9.3, 9.4, 9.5 / Plan §4.3 / tasks.md T12.2.
+# Spec Req 9.1, 9.3, 9.4, 9.5 / Plan §4.3 / tasks.md T12.2 — schedule surface
+# since expanded (CI optimization: scheduled jobs focus on security).
 #
 # Two-tool security lane:
-#   * pip-audit: Python dependency CVE scan (PyPI Advisory DB).
+#   * pip-audit: Python dependency CVE scan (PyPI Advisory DB) — root project
+#     AND every patterns/ lane lockfile (each lane is an independent uv
+#     project; see the patterns-pip-audit job).
 #   * gitleaks: secret scanning across the working tree + commit history.
 #
 # Python static security scanning (Req 9.2) is satisfied elsewhere — ruff's
@@ -10,11 +13,20 @@
 # Spec Q3 amendment (research.md "bandit 非導入の根拠"): standalone bandit
 # would be duplicate detection cost without coverage gain.
 #
-# Triggers: push (every commit on main + PRs), pull_request (PR-time
-# protection), and weekly cron (catches advisories filed AFTER a dependency
-# was already merged — Req 9.1's "weekly schedule"). Cron minute is
-# intentionally off-zero (Mon 02:17 UTC) to avoid the GitHub Actions
-# scheduler's :00 stampede on hour boundaries.
+# Triggers:
+#   * push / pull_request (merge-time protection): root pip-audit + gitleaks.
+#   * DAILY cron: dependency CVE scans — root uv.lock plus every patterns/
+#     lane lockfile. Unchanged lanes never re-enter patterns-ci, so the
+#     schedule is the only way a newly filed advisory against a frozen
+#     lockfile gets detected.
+#   * WEEKLY cron (Mon): gitleaks full-history scan.
+#   * workflow_dispatch: everything, on demand.
+# GitHub Actions binds all crons to the single `on.schedule` list; jobs route
+# by comparing `github.event.schedule` against a cron string, so the strings
+# in the job `if:` expressions MUST stay byte-identical to the strings below
+# (guarded by tests/unit/test_ollama_ci_workflows.py). Cron minutes are
+# intentionally off-zero to avoid the scheduler's :00 stampede on hour
+# boundaries.
 
 name: security
 
@@ -24,10 +36,14 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '17 2 * * 1'
+    - cron: '23 1 * * *'  # daily: pip-audit (root + patterns lanes)
+    - cron: '17 2 * * 1'  # weekly Mon: gitleaks full-history scan
+  workflow_dispatch: {}
 
 # Independent of ci.yml: a PR may trigger both lanes and they should not
-# cancel each other. Per-ref cancellation only inside this workflow.
+# cancel each other. Per-ref cancellation only inside this workflow. Scheduled
+# runs share group `security-refs/heads/main` with cancel-in-progress: false,
+# so the daily and weekly crons never cancel each other.
 concurrency:
   group: security-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -41,6 +57,9 @@ jobs:
     name: pip-audit (PyPI Advisory DB)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Runs on push / PR / dispatch / the daily cron; skipped on the weekly
+    # gitleaks cron (the daily cron under an hour earlier already covered it).
+    if: github.event_name != 'schedule' || github.event.schedule == '23 1 * * *'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -113,10 +132,63 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Patterns lanes are independent uv projects with independent lockfiles.
+  # patterns-ci.yml audits a lane only when a PR/push touches its paths, so an
+  # unchanged lane never learns about a newly filed advisory. This job closes
+  # that gap on the daily cron (and on demand via dispatch). push/PR are
+  # deliberately excluded: patterns-ci already audits changed lanes there.
+  # Steps mirror patterns-ci.yml's audit shape (setup-uv + `uv sync --locked` +
+  # plain `uv run pip-audit`) so a finding here reproduces locally with
+  # `mise run patterns:audit`.
+  patterns-pip-audit:
+    name: pip-audit patterns (${{ matrix.lane }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'schedule' && github.event.schedule == '23 1 * * *')
+    strategy:
+      # One lane's CVE must not hide the others' status.
+      fail-fast: false
+      matrix:
+        include:
+          - { lane: contracts,     dir: patterns/contracts }
+          - { lane: pydantic-ai,   dir: patterns/frameworks/pydantic-ai }
+          - { lane: beeai,         dir: patterns/frameworks/beeai }
+          - { lane: llamaindex,    dir: patterns/frameworks/llamaindex }
+          - { lane: rag,           dir: patterns/rag }
+          - { lane: sse,           dir: patterns/sse }
+          - { lane: deep-research, dir: patterns/deep-research }
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads each lane's .python-version and provisions the matching
+      # interpreter — same step shape as patterns-ci.yml (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.dir }}/uv.lock
+
+      # --locked: audit exactly what the lockfile pins; drift fails loudly
+      # here rather than silently re-resolving.
+      - name: Sync lane dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: pip-audit
+        run: uv run pip-audit
+
   gitleaks:
     name: gitleaks (secret scan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Runs on push / PR / dispatch (cheap merge-time protection) plus the
+    # weekly full-history cron; skipped on the daily pip-audit cron.
+    if: github.event_name != 'schedule' || github.event.schedule == '17 2 * * 1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
