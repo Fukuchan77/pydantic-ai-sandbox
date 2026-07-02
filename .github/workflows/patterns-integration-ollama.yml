@@ -1,13 +1,18 @@
 # Spec 005 Req 8.2 / plan §6 — redesigned per the CI-strategy improvement plan
-# (specs/ci-strategy-review/improvement-plan.md, items P1 + P2).
+# (specs/ci-strategy-review/improvement-plan.md, items P1 + P2), then narrowed
+# further to manual-only (CI optimization: Actions usage-limit control).
 #
-# WHY THIS IS NOT A PER-PR GATE (P1). Live 8B Ollama inference is slow,
-# non-deterministic, and environment-bound. A single per-PR job running every
-# lane sequentially against one daemon blew its 45-minute budget (beeai alone
-# was ~20min; beeai+pydantic-ai together hit the cap on a slow runner), so live
-# integration is no longer a blocking per-PR signal. per-PR coverage stays
-# deterministic and fast via patterns-ci.yml (offline unit/contracts/lint/
-# pyright/coverage). This workflow therefore has NO `pull_request:` trigger.
+# WHY THIS IS NOT AUTOMATIC AT ALL (supersedes P1's nightly + main-push
+# surface). Live 8B Ollama inference is slow, non-deterministic, and
+# environment-bound; running six lanes nightly plus on every patterns merge
+# was consuming the GitHub Actions usage budget. Trigger surface:
+# `workflow_dispatch` ONLY. Per-PR/-push quality stays deterministic and fast
+# via patterns-ci.yml (offline unit/contracts/lint/pyright/coverage).
+# Operational rule: dispatch this workflow manually from the Actions tab after
+# merges that touch patterns/ runtime surfaces or when validating an Ollama
+# daemon/model bump. This trigger contract is pinned by
+# tests/unit/test_ollama_ci_workflows.py — update the guard test together with
+# any change here.
 #
 # WHY A PER-LANE MATRIX (P2). Each lane runs in its own job with its own Ollama
 # daemon and a generous per-lane `timeout-minutes`: failures stay local to a
@@ -31,17 +36,6 @@
 name: patterns-integration-ollama
 
 on:
-  # Nightly per-lane matrix (P2). Off-zero minute; one hour after the app
-  # lane's cron. Was weekly (Mon); nightly now that each lane is isolated.
-  schedule:
-    - cron: '47 4 * * *'
-  # Post-merge signal on main only — NOT a per-PR gate (P1). A merge that
-  # touches the patterns tree re-validates the live lanes immediately.
-  push:
-    branches: [main]
-    paths:
-      - 'patterns/**'
-      - '.github/workflows/patterns-integration-ollama.yml'
   workflow_dispatch: {}
 
 permissions:
@@ -65,8 +59,8 @@ jobs:
     # 8B inference without the cross-lane contention that broke the old single
     # job; llamaindex gets the most headroom (it was the slowest to converge).
     timeout-minutes: ${{ matrix.timeout }}
-    # Job-level concurrency keyed by lane so a re-push cancels only the same
-    # lane's in-flight run, never a sibling lane.
+    # Job-level concurrency keyed by lane so a duplicate dispatch cancels only
+    # the same lane's in-flight run, never a sibling lane.
     concurrency:
       group: patterns-integration-ollama-${{ github.ref }}-${{ matrix.lane }}
       cancel-in-progress: true
