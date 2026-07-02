@@ -159,7 +159,7 @@ class Settings(BaseSettings):
         env_name = (info.field_name or "watsonx_timeout").upper()
         try:
             parsed = int(value)  # type: ignore[arg-type]  # str/int from env
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             msg = f"{env_name} must be a positive integer (seconds); got {value!r}."
             raise ValueError(msg) from None
         if parsed <= 0:
