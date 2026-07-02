@@ -17,10 +17,12 @@ dependencies = [
     # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
     # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
     "patterns-contracts",
-    # Same V2 Beta floor as the root app (Spec 005 NFR-2). The CVE-2026-25580 /
-    # CVE-2026-46678 SSRF fixes landed in v1.99.0; the 2.x beta line postdates
-    # them (patterns/SECURITY-NOTES.md).
-    "pydantic-ai-slim[openai]>=2.0.0b6",
+    # Stable V2 parity with the root app and sibling lanes (Spec 005 NFR-2).
+    # pydantic-ai V2 is stable as of 2.2.0, so this lane tracks the stable line
+    # directly and no longer needs `prerelease = "allow"` (removed under
+    # [tool.uv]). The CVE-2026-25580 / CVE-2026-46678 SSRF fixes landed in
+    # v1.99.0; the 2.x line postdates them (patterns/SECURITY-NOTES.md).
+    "pydantic-ai-slim[openai]>=2.3.0",
     "pydantic>=2",
     # Tracing surface for observability.configure_tracing (Spec 005 Req 6.1).
     "opentelemetry-sdk",
@@ -45,8 +47,6 @@ build-backend = "hatchling.build"
 packages = ["src/patterns_pydantic_ai"]
 
 [tool.uv]
-prerelease = "allow"
-
 # Path dependency to the shared contracts package (plan §lane wiring). Editable
 # so contract edits land without a re-sync; `../../contracts` resolves from
 # patterns/frameworks/pydantic-ai/ to patterns/contracts/. The contracts package

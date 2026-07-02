@@ -3,7 +3,7 @@ name = "pydantic-ai-sandbox"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     # ADR-1 (spec 002-watsonx-provider): 1.5.12 cannot import
@@ -15,7 +15,7 @@ dependencies = [
     # meta-package, so only what the app actually uses is installed:
     #   openai  → OpenAI-compatible chat client used by the Ollama provider.
     #   logfire → instrument_pydantic_ai instrumentation (logging_setup.py).
-    "pydantic-ai-slim[logfire,openai]>=2.2.0",
+    "pydantic-ai-slim[logfire,openai]>=2.3.0",
     "pydantic-settings",
     "uvicorn",
 ]
@@ -60,7 +60,7 @@ build-backend = "hatchling.build"
 packages = ["src/pydantic_ai_sandbox"]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py313"
 line-length = 100
 # patterns/ lanes are independent uv projects with their own interpreters,
 # dependency sets, and ruff/pyright configs (Spec 005 AD-1/AD-5). Excluding
@@ -117,7 +117,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pyright]
-pythonVersion = "3.14"
+pythonVersion = "3.13"
 typeCheckingMode = "strict"
 venvPath = ".venv"
 venv = "."
