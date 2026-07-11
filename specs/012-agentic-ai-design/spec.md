@@ -98,6 +98,7 @@ HITL 機構・ハーネス設計の記述は**ほぼ正確**である一方、**
 1.3 THE HITL lane SHALL import shared contract models from `patterns_contracts` via a `[tool.uv.sources]` path dependency and SHALL NOT re-declare those models inside the lane.
 1.4 WHEN the `patterns:{setup,lint,format,typecheck,test,audit}` tasks run, THE mise task family SHALL execute `patterns/hitl` after the contracts→frameworks loop as an explicit single line, not via the `frameworks/*/` glob.
 1.5 THE HITL lane SHALL enforce a test coverage floor of `fail_under = 98`.
+1.6 WHEN the lane is added, THE repository CI SHALL enumerate it explicitly wherever lanes are listed by name: a dedicated lane job in `.github/workflows/patterns-ci.yml`, a row in the `security.yml` `patterns-pip-audit` matrix (so the daily CVE cron audits the lane's frozen lockfile — the gap the 2026-07 nltk incident exposed), and dependabot monitoring consistent with existing lanes.
 
 ### Requirement 2: HITL 契約の所有とドリフト検知
 
@@ -119,6 +120,7 @@ README を正本とする)に従い、単一点でドリフト検知する。
 3.2 THE HITL lane SHALL NOT pass `instrument=True` to `Agent(...)` (unsupported in v2, raises `TypeError`); instrumentation SHALL be enabled solely through `logfire.instrument_pydantic_ai()`.
 3.3 THE agent SHALL declare at least one tool with `requires_approval=True`.
 3.4 THE agent SHALL express its guidance via `instructions` rather than `system_prompt`, so prompt text does not leak into carried-over `message_history` across resumes.
+3.5 THE agent SHALL register an `@output_validator` that enforces the deterministic approval policy: IF any action in `action_plan` carries an amount exceeding the configured risk threshold while `requires_human_approval` is `False`, THEN the validator SHALL raise `ModelRetry` with corrective natural-language feedback so the model self-corrects within the run's retry budget (the original design's §6 "検証センサー").
 
 ### Requirement 4: 承認必須ツールでの停止
 
@@ -152,6 +154,10 @@ README を正本とする)に従い、単一点でドリフト検知する。
 
 ### Requirement 8: FastAPI 停止・再開エンドポイントと状態ストア
 
+注: `/resume` の消費セマンティクス(同一 session の二重 resume、usage-limit 超過時の
+HTTP マッピング)とセッション識別子の衛生・監査証跡は
+[specs/013-agentic-ai-security](../013-agentic-ai-security/spec.md) が要件化する。
+
 **Acceptance Criteria**
 
 8.1 WHEN a client `POST`s to `/run` with a prompt, THE HITL API SHALL execute the agent and, if a `requires_approval` tool is pending, respond with the pending approval requests and a resumable `session` identifier.
@@ -182,7 +188,7 @@ README を正本とする)に従い、単一点でドリフト検知する。
 
 11.1 THE HITL integration tests SHALL be gated by `RUN_INTEGRATION_PATTERNS=1` and excluded from the default hermetic test run.
 11.2 THE HITL integration task SHALL declare `EXPECT_LIVE_TESTS=<n>` so a collected-zero or all-skipped run fails red.
-11.3 WHERE a live-model integration lane is wired into CI, THE lane SHALL be isolated into the nightly matrix and SHALL NOT carry a `pull_request:` trigger.
+11.3 WHERE a live-model integration lane is wired into CI, THE lane SHALL be isolated into the dispatch-only (or scheduled) live-integration workflows — consistent with the current policy that both Ollama live-integration workflows are `workflow_dispatch`-only — and SHALL NOT carry a `pull_request:` trigger.
 
 ### Requirement 12: モデル ID の衛生(レビュー修正 ④ 周辺 + 二層ガード)
 
@@ -215,8 +221,10 @@ README を正本とする)に従い、単一点でドリフト検知する。
 - SSRF/egress hardening and the `safe_download` code path — documented as a security note only.
 - Persistent state storage (external DB / queue) — the MVP state store is in-memory only.
 - HITL implementations in other frameworks (beeai / llamaindex) — pydantic-ai only, since `ApprovalRequired` / `DeferredToolRequests` are pydantic-ai-specific mechanisms.
+- `/resume` consumption semantics, session-identifier hygiene, approval audit trail — owned by [specs/013-agentic-ai-security](../013-agentic-ai-security/spec.md).
 
 ---
 
 _Initialized: 2026-07-11T22:37:41+0900_
 _Requirements generated: 2026-07-11_
+_Requirements updated: 2026-07-12(レビュー指摘 4 点適用: AC 1.6 / 3.5 追加、11.3 文言修正、消費セマンティクスの 013 委譲を明記)_
