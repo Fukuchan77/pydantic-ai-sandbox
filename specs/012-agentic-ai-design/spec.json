@@ -1,12 +1,12 @@
 {
   "feature_name": "012-agentic-ai-design",
   "language": "ja",
-  "phase": "requirements-generated",
+  "phase": "design-generated",
   "created_at": "2026-07-11T22:37:41+0900",
-  "updated_at": "2026-07-11T22:42:00+0900",
+  "updated_at": "2026-07-12T07:10:00+0900",
   "approvals": {
-    "requirements": { "generated": true, "approved": false },
-    "design": { "generated": false, "approved": false },
+    "requirements": { "generated": true, "approved": true },
+    "design": { "generated": true, "approved": false },
     "tasks": { "generated": false, "approved": false }
   }
 }
