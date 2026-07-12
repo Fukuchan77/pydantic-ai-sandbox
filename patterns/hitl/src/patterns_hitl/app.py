@@ -25,6 +25,22 @@ lifespan calls :func:`patterns_hitl.observability.enable_observability`
 fail-soft when set, so a broken Logfire/OTel install never blocks startup
 (R9.1); unit tests other than ``test_observability.py`` pass
 ``instrument=False`` to skip the bootstrap entirely.
+
+Spec 013 (R1.2, R2) extends both handlers with the consumption state
+machine's HTTP mapping (research.md AD-2):
+
+* An unknown, in-flight, or already-consumed ``session_id`` is a fixed,
+  content-free ``404`` -- it never echoes the id or distinguishes *why*
+  the claim failed (existence secrecy, R1.2).
+* A ``/resume`` decision naming a ``tool_call_id`` the session did not
+  actually defer is a ``409``, checked synchronously between ``claim()``
+  and the ``await`` into the harness so no tool executes and the whole
+  decision set is rejected together, not just the offending key (R2.3).
+* A budget overrun (``HitlBudgetExceededError``, raised by both
+  ``harness.start()`` and ``harness.resume()``) is a ``429`` on either
+  route; ``/run`` never persisted a session to begin with, and
+  ``/resume``'s session is already consumed by the harness before this
+  is raised (R2.4).
 """
 
 from __future__ import annotations
@@ -39,11 +55,11 @@ from fastapi import FastAPI, HTTPException
 # class-definition time even under `from __future__ import annotations`.
 from patterns_contracts import SupportOutput  # noqa: TC002  # used in a pydantic field
 from pydantic import BaseModel, model_validator
-from pydantic_ai import ToolApproved, ToolDenied
+from pydantic_ai import ToolApproved, ToolDenied, UsageLimits
 
-from .harness import HitlHarness, PendingResult
+from .harness import LIMITS, HitlBudgetExceededError, HitlHarness, PendingResult
 from .observability import enable_observability
-from .store import SessionStore
+from .store import SessionStore, UnknownSessionError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -53,6 +69,12 @@ if TYPE_CHECKING:
     from .agent import HitlDeps
 
 __all__ = ["create_app"]
+
+# Fixed, content-free bodies (spec 013 R1.2): none of these echo a session
+# id, a tool_call_id, or *why* a claim/check failed.
+_UNKNOWN_SESSION_DETAIL = "session not found"
+_PENDING_SET_VIOLATION_DETAIL = "decision does not match a pending tool call for this session"
+_BUDGET_EXCEEDED_DETAIL = "usage budget exceeded"
 
 
 class RunRequest(BaseModel):
@@ -140,10 +162,54 @@ def _to_deferred_result(decision: Decision) -> ToolApproved | ToolDenied:
     return ToolDenied()
 
 
+async def _handle_run(
+    harness: HitlHarness, body: RunRequest
+) -> CompletedResponse | PendingResponse:
+    """Start a fresh agent run from ``body.prompt`` (R8.1, R8.2, spec 013 R2.4)."""
+    try:
+        result = await harness.start(body.prompt)
+    except HitlBudgetExceededError as exc:
+        raise HTTPException(status_code=429, detail=_BUDGET_EXCEEDED_DETAIL) from exc
+    if isinstance(result, PendingResult):
+        return _to_pending_response(result)
+    return CompletedResponse(output=result.output)
+
+
+async def _handle_resume(
+    harness: HitlHarness, store: SessionStore, body: ResumeRequest
+) -> CompletedResponse | PendingResponse:
+    """Resume ``body.session_id`` with the caller's decisions (R8.3, R8.5, spec 013 R1.2/R2).
+
+    The pending-set check (``409``) runs synchronously between ``claim()``
+    and the ``await`` into the harness, so a concurrent claim on the same
+    session can never observe a half-applied decision set (research.md
+    AD-2, spec 013 R2.3).
+    """
+    try:
+        record = store.claim(body.session_id)
+    except UnknownSessionError as exc:
+        raise HTTPException(status_code=404, detail=_UNKNOWN_SESSION_DETAIL) from exc
+    if not set(body.decisions.keys()) <= record.pending_call_ids:
+        store.release(body.session_id)
+        raise HTTPException(status_code=409, detail=_PENDING_SET_VIOLATION_DETAIL)
+    decisions = {
+        tool_call_id: _to_deferred_result(decision)
+        for tool_call_id, decision in body.decisions.items()
+    }
+    try:
+        result = await harness.resume(body.session_id, decisions)
+    except HitlBudgetExceededError as exc:
+        raise HTTPException(status_code=429, detail=_BUDGET_EXCEEDED_DETAIL) from exc
+    if isinstance(result, PendingResult):
+        return _to_pending_response(result)
+    return CompletedResponse(output=result.output)
+
+
 def create_app(
     *,
     agent: Agent[HitlDeps, SupportOutput | DeferredToolRequests],
     store: SessionStore | None = None,
+    usage_limits: UsageLimits = LIMITS,
     instrument: bool = True,
 ) -> FastAPI:
     """Build the HITL FastAPI app with the agent (and optionally the store) injected.
@@ -156,6 +222,9 @@ def create_app(
         store: Where stopped runs' history and usage are carried across
             the stop/resume boundary; a fresh :class:`SessionStore` is
             created when omitted.
+        usage_limits: The budget enforced on every run this app drives;
+            overridable so tests can inject a tight budget to make the
+            ``429`` overrun path (spec 013 R2.4) deterministic.
         instrument: When ``True``, the lifespan calls
             :func:`patterns_hitl.observability.enable_observability`
             fail-soft on startup (R9.1). Tests other than
@@ -164,7 +233,8 @@ def create_app(
     Returns:
         A FastAPI app exposing ``POST /run`` and ``POST /resume``.
     """
-    harness = HitlHarness(agent, store or SessionStore())
+    resolved_store = store or SessionStore()
+    harness = HitlHarness(agent, resolved_store, usage_limits=usage_limits)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
@@ -174,35 +244,21 @@ def create_app(
 
     app = FastAPI(lifespan=_lifespan)
 
-    # Nested so each closes over the per-app `harness`; the `@app.post`
-    # decorator registers it, which pyright cannot see through.
+    # Nested so each closes over the per-app `harness`/`resolved_store`; the
+    # `@app.post` decorator registers it, which pyright cannot see through.
+    # Each delegates its actual logic to a module-level helper (above) so
+    # this factory's own cyclomatic complexity stays independent of the
+    # HTTP status mapping the helpers implement.
     @app.post("/run")
     async def run(  # pyright: ignore[reportUnusedFunction]
         body: RunRequest,
     ) -> CompletedResponse | PendingResponse:
-        """Start a fresh agent run from ``body.prompt`` (R8.1, R8.2)."""
-        result = await harness.start(body.prompt)
-        if isinstance(result, PendingResult):
-            return _to_pending_response(result)
-        return CompletedResponse(output=result.output)
+        return await _handle_run(harness, body)
 
     @app.post("/resume")
     async def resume(  # pyright: ignore[reportUnusedFunction]
         body: ResumeRequest,
     ) -> CompletedResponse | PendingResponse:
-        """Resume ``body.session_id`` with the caller's decisions (R8.3, R8.5)."""
-        decisions = {
-            tool_call_id: _to_deferred_result(decision)
-            for tool_call_id, decision in body.decisions.items()
-        }
-        try:
-            result = await harness.resume(body.session_id, decisions)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=404, detail=f"unknown session_id: {exc.args[0]}"
-            ) from exc
-        if isinstance(result, PendingResult):
-            return _to_pending_response(result)
-        return CompletedResponse(output=result.output)
+        return await _handle_resume(harness, resolved_store, body)
 
     return app

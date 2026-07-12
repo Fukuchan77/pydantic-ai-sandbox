@@ -33,9 +33,15 @@ _Requirements:_ 1.1, 1.2, 1.3, 2.1, 2.2
 
 ## 2. 消費セマンティクスの HTTP 写像(`app.py` 拡張 — **/run・/resume 両ハンドラ**)
 
-_Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/tests/unit/test_consumption.py`
+_Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/src/patterns_hitl/harness.py`, `patterns/hitl/tests/unit/test_consumption.py`
 _Depends:_ 1
 _Requirements:_ 1.2, 2.1, 2.2, 2.3, 2.4
+
+`harness.py` を境界に含める理由: store 層の状態遷移メソッド(`claim`/`settle_pending`/
+`consume`/`release`、Task 1 実装)を実際の `start()`/`resume()` フローへ配線する箇所が
+`harness.py` であり、`app.py` 側の 404/409/429 写像(2.2)はこの配線を前提とする。
+どちらの境界にも属さない配線コードとして残すより、消費セマンティクスの HTTP 写像を
+実現するタスクの境界に含める方が実態に整合する。
 
 既存違反・未カバーの是正を含む(2026-07-12 実測): ①現行 `/resume` の 404 本文は
 `detail=f"unknown session_id: {exc.args[0]}"`(`app.py:202`)で **session id と理由を
@@ -44,12 +50,12 @@ _Requirements:_ 1.2, 2.1, 2.2, 2.3, 2.4
 しか捕捉せず(`app.py:200`)、**予算超過は両経路とも現状 500** — R2.4 は "a run or resume"
 を明記しており `/run` 側も 429 写像が必須。
 
-- [ ] 2.1 失敗テストを追加する(API 層、`with TestClient(app):`)。(a) 終端後の再 `/resume` → 404、404 本文が「未知」と「消費済み」を区別せず **session id も理由も含まない固定文言**(現行 `app.py:202` の漏洩本文が消えることを負のアサートで固定)、(b) pending 集合外の `tool_call_id` を含む decisions → 409 + **どのツールも実行されない**(スパイで確認)+ 1 件でも不整合なら全体拒絶 + 409 後も session が `pending` に戻り再開可能(`release()`)、(c) 低 limit 注入で **`/resume` 中**の予算超過 → 429 + 以後同 session は 404、(d) 低 limit 注入で **`/run` 起動時**の予算超過 → 429 + session が保存されない(直後の任意 `/resume` が 404)、(e) 再 defer 応答後に旧 `tool_call_id` の判断を再送 → 409(R2.2 の旧判断再適用不能)。**赤を確認する**(現状 (a) は漏洩本文、(c)(d) は 500 のため赤になる)。並行二重実行の先勝ちは store 層(Task 1.1 の `claim()` 同期遷移)で担保。
+- [x] 2.1 失敗テストを追加する(API 層、`with TestClient(app):`)。(a) 終端後の再 `/resume` → 404、404 本文が「未知」と「消費済み」を区別せず **session id も理由も含まない固定文言**(現行 `app.py:202` の漏洩本文が消えることを負のアサートで固定)、(b) pending 集合外の `tool_call_id` を含む decisions → 409 + **どのツールも実行されない**(スパイで確認)+ 1 件でも不整合なら全体拒絶 + 409 後も session が `pending` に戻り再開可能(`release()`)、(c) 低 limit 注入で **`/resume` 中**の予算超過 → 429 + 以後同 session は 404、(d) 低 limit 注入で **`/run` 起動時**の予算超過 → 429 + session が保存されない(直後の任意 `/resume` が 404)、(e) 再 defer 応答後に旧 `tool_call_id` の判断を再送 → 409(R2.2 の旧判断再適用不能)。**赤を確認する**(現状 (a) は漏洩本文、(c)(d) は 500 のため赤になる)。並行二重実行の先勝ちは store 層(Task 1.1 の `claim()` 同期遷移)で担保。
   _Boundary:_ `patterns/hitl/tests/unit/test_consumption.py`
   _Depends:_ 1.2
   _Requirements:_ 1.2, 2.1, 2.2, 2.3, 2.4
-- [ ] 2.2 `app.py` の **`/run`・`/resume` 両ハンドラ**へ写像表(research.md AD-2)を実装しテストを緑化する: `UnknownSessionError` → 404(id・理由を含まない固定本文 — `app.py:202` の是正)、pending 外判断 → 409(**`claim()` 後・`await harness.resume()` 呼出前**に全キー ⊆ `pending_call_ids` を検査。`await` を挟まないため asyncio でも原子的。不整合は `release()` で `pending` へ戻し、どのツールも実行しない)、`HitlBudgetExceededError` → 429(`/run` は session 非保存、`/resume` は `consume()` で失効)、再 defer → 200 `PendingResponse` + `settle_pending()`。
-  _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`
+- [x] 2.2 `app.py` の **`/run`・`/resume` 両ハンドラ**へ写像表(research.md AD-2)を実装しテストを緑化する: `UnknownSessionError` → 404(id・理由を含まない固定本文 — `app.py:202` の是正)、pending 外判断 → 409(**`claim()` 後・`await harness.resume()` 呼出前**に全キー ⊆ `pending_call_ids` を検査。`await` を挟まないため asyncio でも原子的。不整合は `release()` で `pending` へ戻し、どのツールも実行しない)、`HitlBudgetExceededError` → 429(`/run` は session 非保存、`/resume` は `consume()` で失効)、再 defer → 200 `PendingResponse` + `settle_pending()`。`harness.py` を Task 1 の状態機械へ配線: `start()` は初回 `pending_call_ids` を `create()` に渡し、`resume()` は再 defer で `settle_pending()`、終端/予算超過で `consume()` を呼ぶ(旧 `update()` を廃止)。
+  _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/src/patterns_hitl/harness.py`
   _Depends:_ 2.1
   _Requirements:_ 1.2, 2.1, 2.2, 2.3, 2.4
 
