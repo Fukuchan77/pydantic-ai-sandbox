@@ -141,7 +141,7 @@ _Boundary:_ `mise.toml`, `.github/workflows/patterns-ci.yml`, `.github/workflows
 _Depends:_ 3
 _Requirements:_ 1.4, 1.6, 11.1, 11.2
 
-- [ ] 7.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に `patterns/hitl` の明示行を(contracts → frameworks glob → rag/sse/deep-research の後に)追加し、`patterns:test:integration:hitl`(`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=<n>`)を新設する。
+- [ ] 7.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に `patterns/hitl` の明示行を(contracts → frameworks glob → rag/sse/deep-research の後に)追加し、`patterns:test:integration:hitl`(`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2`)を新設する。`EXPECT_LIVE_TESTS=2` は T8.1 の live 本数(e2e 承認経路 1 本 + 拒否経路 1 本)と一致させ、空振り緑を決定論的に赤化する。
   _Boundary:_ `mise.toml`
   _Depends:_ 3.1
   _Requirements:_ 1.4, 11.1, 11.2
