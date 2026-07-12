@@ -127,3 +127,21 @@ override) と in-memory store を注入して完全 hermetic に停止/再開/de
    (phase は既に `tasks-generated`)。齟齬があれば計画側を改訂。
 2. 未着手なら `/sdd-plan 012-agentic-ai-design` で技術計画を確定 (案 A ×案 A を土台に)。
 3. G-1 (dependabot 方針) は実装前に確定させ、Req 1.6 の受入基準を一意化する。
+
+---
+
+## 解決記録(実測と design 反映、2026-07-12)
+
+上記 G-1〜G-4 / 統合課題を実測で裏取りし、`plan.md` / `research.md` / `tasks.md` へ反映済み。
+
+| ID | 事実確認(実測) | 解決(反映先) |
+|---|---|---|
+| G-1 | `dependabot.yml` pip `directories` = frameworks 3 レーンのみ(確認済み) | **方針固定(research AD-9)**: dependabot は pydantic-ai 依存レーンを個別監視(frameworks 3 + hitl を `directories` へ追加)。応用兄弟レーン未監視は本 spec スコープ外の既知ギャップ(daily security cron が補完)。R1.6 の合否 = `directories` に `/patterns/hitl` が存在すること(deterministic)。plan LaneScaffold / tasks T7.2 に明記 |
+| G-2 | **glob ではなく明示登録**: `_README_PATHS` dict への 1 行追加(`test_contract_drift.py:49`)。パーサは `## パターン契約` 直後の最初の python fence を ast で個別パース。**実測**: 計画中の正本ブロック(`ActionType` col-0 エイリアス + `ResolutionAction` + `SupportOutput`)をパーサ関数の verbatim 転写に通し、パッケージ側 introspection(実 pydantic モデル)と classes / fields / named_literals / field_literals の 4 面で**完全一致**(research I-7)。alias 参照(`action_type: ActionType`)も対称一致 | 計画変更なし。登録タスクは既存 T2.2(明示 1 行追加)で正しい |
+| G-3 | 停止/再開 2 フェーズ台本は**新手が必要だが実行確認済み**: レビュー付録の検証スクリプトで `len(messages)==1` → 承認必須ツール呼び出し、以降 → `ToolCallPart("final_result", ...)` の単一関数台本が pydantic-ai-slim 2.9.0 で動作済み(停止 run と再開 run を messages 長で判別) | research I-1 に台本の具体形を明記。T5.1 が `tests/support/function_model_scripts.py` へ転用。`TestModel(call_tools=[...])` 側は T4.1 |
+| G-4 | 検証ベースライン = **pydantic-ai-slim 2.9.0(2026-07-11 実行検証)**。レーンのフロアを `>=2.9.0` にすれば lockfile 解決版 ≥ 検証版が保証される | README(R13.3、T2.1)+ pyproject フロア(T3.1)の両方に固定。lockfile 確定後の実解決版を README へ追記 |
+| HIGH(DI シーム) | sse は `create_app(*, event_source, tracer_provider=None)`(確認済み) | **案 A 採用**: `create_app(*, agent, store=None, instrument=True)`(plan HitlApp / research AD-8 / T6.2)。tracer_provider ではなく `instrument: bool` なのは、本レーンの計装が OTel provider 注入ではなく logfire ブートストラップ(R9.1)のため — fail-soft な `enable_observability()` を lifespan で呼ぶか否かのフラグが等価の注入点。013 は同シームへ `audit_emitter=` を追加 |
+| state store 案 A(Protocol seam) | — | 採用: `SessionStore` は細い Protocol + in-memory 具象 1 つ(over-engineering 回避)。013 の状態機械拡張・将来 Durable の差し替え点として plan SessionStore に明記 |
+| H-1(第2層未走査) | `test_no_hardcoded_model_ids.py:18` は `SRC_DIR = REPO_ROOT / "src"` のみ rglob — patterns/ 未走査を確認。第1層 pre-commit は patterns を走査する(確認済み) | **T7.3 新設**(R12.2、plan ModelIdGuardSecondLayer / research AD-10): 走査対象へ `patterns/*/src` を追加。TDD は植え込みリテラルで赤確認。**事前 grep 実施済み(2026-07-12)**: 全レーン src で禁止リテラル 5 種の出現 0 件 — 拡張は既存レーンを赤化しない |
+| M-1(R12.2 未マップ) | tasks の `_Requirements:_` に 12.2 不在を確認 | T7.3 が 12.2 を保持。完了ゲートも「二層とも通過」へ更新 |
+| M-2(3.14 赤証跡) | コンテナは uv の 3.14 取得が proxy 403(実測、research I-5) | T3.2 に証跡手順を明文化: CI(patterns-ci hitl ジョブ)で赤→緑を確認し run URL をコミット/PDCA 記録へ残す(既存 3.14 レーンと同運用) |
