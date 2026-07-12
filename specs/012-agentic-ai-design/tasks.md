@@ -179,7 +179,7 @@ _Boundary:_ `patterns/README.md`, `docs/README.md`
 _Depends:_ 2, 6
 _Requirements:_ 13.1, 13.2
 
-- [ ] 9.1 `patterns/README.md` の索引へ hitl レーンを追加し(one-README 不変条件: 契約の再宣言はしない、参照のみ)、必要に応じ `docs/README.md` のガイド一覧から HITL 実装への参照を張る。
+- [x] 9.1 `patterns/README.md` の索引へ hitl レーンを追加し(one-README 不変条件: 契約の再宣言はしない、参照のみ)、必要に応じ `docs/README.md` のガイド一覧から HITL 実装への参照を張る。
   _Boundary:_ `patterns/README.md`, `docs/README.md`
   _Depends:_ 2.2, 6.2
   _Requirements:_ 13.1, 13.2
