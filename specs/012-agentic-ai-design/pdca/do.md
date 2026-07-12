@@ -546,3 +546,214 @@ Task 3.1(レーン足場)の `_Boundary:_` にのみ列挙されていた。Task
   `# pragma: no cover` が両立点。
 - 次は Task 5(`harness.py` + `store.py` + `test_stop_approve_resume.py` —
   本タスクで未カバーの 2 行を含む停止・承認・再開の全経路)。
+
+## Task 5.1 — `test_stop_approve_resume.py` + `function_model_scripts.py` の失敗テスト先行作成
+
+### API 事実確認(実装前の一次調査 — venv 直接確認)
+
+Task 4.2 で実装済みの `build_agent` を実際の `FunctionModel` 台本で動かし、
+harness/store が要求する挙動を **実行で確認**してから型を確定した
+(research.md I-1 の2フェーズ台本はそのまま転用できるが、e/f ケースは
+未検証だったため):
+
+- 停止: `result.output` が `DeferredToolRequests(approvals=[ToolCallPart(
+  tool_name='apply_discount', args={...}, tool_call_id='pyd_ai_...')])`。
+- 承認再開: `deferred_tool_results=DeferredToolResults(approvals={id:
+  ToolApproved()})` + `message_history=result.all_messages()` → 終端
+  `SupportOutput`。
+- `ToolApproved(override_args={...})` → 実行される `ToolReturnPart.content`
+  が上書き後の引数を反映(`"applied $5.00 discount to cust-1"` — 提案時の
+  `$100.00` ではない)。
+- `ToolDenied(message=...)` → 対応する `ToolReturnPart` は
+  `outcome='denied'` かつ `content` がそのまま拒否理由文字列(ツール本体は
+  未実行)。モデルはこの拒否理由を受けて別の終端応答を返す。
+- 再 defer: 再開後の1呼び出しが再び `requires_approval` ツール
+  (`escalate_to_legal`)を提案すると、2回目も `DeferredToolRequests` で
+  停止する(`len(messages)` 依存ではなく呼び出し順依存の
+  `call_counting_script` で3フェーズ化しても同じ挙動を再現)。
+- usage 通算: `UsageLimits(total_tokens_limit=80)` で 1 run 目
+  (`usage≈58 tokens`)は通るが、`usage=r1.usage` を注入した 2 run 目は
+  累積 132 tokens で `pydantic_ai.exceptions.UsageLimitExceeded` を raise
+  する(実測)。harness はこれを `HitlBudgetExceededError` へ変換する
+  (plan.md AD-4 / R7.3)。
+
+### RED
+
+`patterns_hitl.harness` / `patterns_hitl.store` は Task 5.2 まで未実装の
+ため、テストファイル作成時点で import エラーによる収集失敗を確認した:
+
+```
+$ .venv/bin/python3 -m pytest --no-cov tests/unit/test_stop_approve_resume.py -q
+ImportError while importing test module '.../tests/unit/test_stop_approve_resume.py'.
+tests/unit/test_stop_approve_resume.py:34: in <module>
+    from patterns_hitl.harness import (
+E   ModuleNotFoundError: No module named 'patterns_hitl.harness'
+Interrupted: 1 error during collection
+```
+
+### 設計(このタスクで確定 — Task 5.2 が実装する API 面)
+
+テストが先行して harness/store の公開面を確定させる(plan.md の記述は
+「`start(prompt)` / `resume(session_id, decisions)`」までで、具体的な
+コンストラクタ形状・戻り値の型は本タスクで決める):
+
+- `HitlHarness(agent, store, *, usage_limits: UsageLimits = LIMITS)` —
+  「app 内部で (agent, store) から組み立てる」(plan.md AD-8)を体現する
+  コンストラクタ。`usage_limits` はテストが低い予算を注入して(f)を
+  決定論化するための keyword-only 上書き点。
+- `PendingResult(session_id, approvals: list[ToolCallPart], history,
+  usage)` / `TerminalResult(session_id, output: SupportOutput, history,
+  usage)` — `approvals` は `ToolCallPart` をそのまま持つ(`tool_name` /
+  `args` / `tool_call_id` が既に露出済みのため、独自の `PendingApproval`
+  相当を harness 層で再定義しない — それは `app.py` の HTTP 境界写像の
+  責務)。`history` を両方に持たせることで (c)/(d) のツール実行結果検証を
+  harness の戻り値だけで完結させ、store の内部実装に依存しないテストにした。
+- `HitlBudgetExceededError` — `UsageLimitExceeded` の変換先(R7.3)。
+- 再 defer(e)は「同一 `session_id` で 2 回目の `PendingResult`」を assert
+  することで、store が `create` ではなく `update` で既存セッションを
+  更新する契約を先行ロックする。
+
+`tests/support/function_model_scripts.py` は `len(messages)` 分岐ではなく
+呼び出し回数(`state["calls"]`)で phase を進める `call_counting_script(
+*phases)` を新設 — 2フェーズの研究済み台本をそのまま3フェーズ(再 defer)
+まで一般化でき、`messages` の中身を検査するコードを一切書かずに済む。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| RED 確認 | `.venv/bin/python3 -m pytest --no-cov tests/unit/test_stop_approve_resume.py -q` | `ModuleNotFoundError: No module named 'patterns_hitl.harness'`(収集失敗 — 意図した赤) |
+| 既存テストへの回帰なし | `.venv/bin/python3 -m pytest --no-cov tests/unit -q --ignore=tests/unit/test_stop_approve_resume.py` | `7 passed` |
+| lint(新規2ファイル) | `.venv/bin/ruff check tests/unit/test_stop_approve_resume.py tests/support/function_model_scripts.py` | `All checks passed!` |
+| format(新規2ファイル) | `.venv/bin/ruff format --check tests/unit/test_stop_approve_resume.py tests/support/function_model_scripts.py` | `2 files already formatted` |
+
+pyright / レーン全体のカバレッジは harness/store が存在しない現時点では
+意味を持たない(import 未解決)ため、Task 5.2 の GREEN 後に実施する。
+
+### 範囲外(Task 5.2 へ)
+
+`harness.py`(`HitlHarness` / `PendingResult` / `TerminalResult` /
+`HitlBudgetExceededError` / `LIMITS`)と `store.py`(`SessionStore` /
+`SessionRecord`)の実装本体。
+
+### 学び
+
+- FunctionModel 台本を「`len(messages)` で phase 判定」から
+  「呼び出し回数で phase 判定」に一般化すると、2フェーズの研究済み台本を
+  書き換えずに3フェーズ(re-defer)へ拡張できる — 台本のロジックを
+  `messages` の構造に結合させないほうが、将来の追加ケース(4フェーズ以上)
+  にも耐える。
+- harness の戻り値に `history`(`result.all_messages()` 相当)を含めておくと、
+  override_args や denial のような「ツール実行の副作用」をテストが
+  store の内部状態を覗かずに検証できる — store はあくまで
+  session id → 永続状態のマッピングに専念させ、テスト用のフックを
+  store 側に増設せずに済んだ。
+- 次は Task 5.2(`harness.py` + `store.py` の実装で本タスクの赤を緑化)。
+
+## Task 5.2 — `harness.py` + `store.py` の実装(Task 5.1 の赤の緑化)
+
+### GREEN
+
+Task 5.1 で確定した公開面をそのまま実装した:
+
+- `store.py`: `SessionRecord`(`history` / `usage` の frozen dataclass)+
+  `SessionStore`(`dict[str, SessionRecord]` バッキング)。`create` は
+  `uuid4()` で id 生成、`get`/`update` は未知 id で `KeyError` を raise する
+  (`app.py` の 404 写像は Task 6 の責務)。
+- `harness.py`: `LIMITS = UsageLimits(request_limit=8, tool_calls_limit=10,
+  total_tokens_limit=20_000)`、`HitlBudgetExceededError`、
+  `PendingResult`/`TerminalResult`(いずれも frozen dataclass、`history` /
+  `usage` を持たせて (c)/(d) のツール実行結果検証を harness の戻り値だけで
+  完結させる設計)、`HitlHarness(agent, store, *, usage_limits=LIMITS)`。
+  `start`/`resume` はともに `try: await self._agent.run(...) except
+  UsageLimitExceeded as exc: raise HitlBudgetExceededError(str(exc)) from
+  exc` で捕捉・変換し、`isinstance(output, DeferredToolRequests)` で
+  `_to_result` が `PendingResult`/`TerminalResult` に分岐する。
+
+Task 5.1 の6ケース(`test_stop_approve_resume.py`)は**初回実装で全て一発合格**
+(`.venv/bin/python3 -m pytest --no-cov tests/unit/test_stop_approve_resume.py
+-v` → `6 passed`)。Task 5.1 の事前 API 実行検証(venv 直接確認)が効いた。
+
+### 型安全上のトラブルシュート(pyright strict)
+
+1. **`reportArgumentType`**(`DeferredToolResults(approvals=decisions)`):
+   `decisions: dict[str, ToolApproved | ToolDenied]` を pydantic-ai 側の
+   `approvals: dict[str, DeferredToolApprovalResult | bool]` へそのまま渡すと
+   `dict` の値型不変性(invariance)で型エラー。`Mapping` への変更は
+   相手側(pydantic-ai)のパラメータ型が `dict` 固定のため無意味 —
+   呼び出し箇所で `dict(decisions.items())` として**新規の dict リテラル式**
+   を構築し直すことで、呼び出し先の期待型に対する双方向推論
+   (bidirectional inference)を効かせて解消(ruff `C416` が推奨する書き方と
+   一致)。
+2. **テスト側 `reportUnknownParameterType`**(`_harness(*phases, ...)` の
+   `*phases` に型注釈がなかった): `*phases: ToolCallPart` を追加。
+3. **テスト側 `reportAttributeAccessIssue`**(`getattr(part, "part_kind",
+   None) == "tool-return"` で分岐した後に `part.tool_name` / `part.content`
+   / `part.outcome` へアクセス — pyright は文字列比較によるナローイングを
+   認識しない): `isinstance(part, ToolReturnPart)` へ置き換えて解消
+   (union 全体から具体型への静的ナローイングが効くようになった)。
+
+### カバレッジ ratchet(fail_under=98)を閉じるための追加テスト
+
+実装直後のカバレッジは **95.73%**(4行未達 — `agent.py:73`
+`escalate_to_legal` 本体、`harness.py:119-120` の `start()` 内
+`UsageLimitExceeded` 捕捉分岐、`store.py:91` の `update()` 内 `KeyError`
+分岐)。Task 4.2 の do.md で「Task 5 が緑化する」と予告した
+`escalate_to_legal` 本体が、Task 5.1 の再defer ケース(e)が
+「2度目の `PendingResult` が出ること」までしか検証しなかったため
+未達のまま残っていた。以下を追加して **100.00%** に到達させた
+(実装コードの変更なし、テストのみ):
+
+- (e) を拡張: 2度目の `PendingResult`(`escalate_to_legal`)をさらに
+  `ToolApproved()` で resume し、`TerminalResult` まで完走させる
+  アサーションを追加(`harness.py:73` 相当と `escalate_to_legal` 本体を
+  両方カバー)。
+- 新規 `test_start_over_budget_raises_dedicated_error`: `total_tokens_limit=1`
+  で **最初の** `start()` 自体が予算超過になる経路を検証
+  (`harness.py` の `start()` 内 `except UsageLimitExceeded` 分岐)。
+- 新規 `tests/unit/test_store.py`: `SessionStore` を harness を介さず直接
+  駆動し、`create`→`get` の往復、`update` の上書き、`get`/`update` それぞれの
+  未知 session id での `KeyError` を検証。harness は「解決済みの id にしか
+  `get`/`update` を呼ばない」ため、この2つの `KeyError` 経路は harness 経由
+  のテストからは原理的に到達不能 — store 自身の公開契約(未知 id サイレント
+  無視ではなく loud に fail)として直接ロックした。
+
+これらはコードの赤→緑ではなく既存 GREEN コードの網羅性テスト追加のため、
+厳密な RED 先行ではない(store.py/harness.py 自体は Task 5.1 の失敗テストに
+対して既に GREEN 化済み)。追加前にどのテストも通っていた実装を変更しては
+いないことを diff で確認済み。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| test(レーン全体) | `.venv/bin/python3 -m pytest --no-cov -v` | **18 passed**(Task 5.1 の6件 + 追加4件 + 既存8件、回帰なし) |
+| lint | `.venv/bin/ruff check .` | `All checks passed!`(`C416` 指摘を dict() 再構築で解消) |
+| format | `.venv/bin/ruff format --check .` | `12 files already formatted` |
+| typecheck | `.venv/bin/pyright` | `0 errors, 0 warnings, 0 informations` |
+| coverage | `.venv/bin/python3 -m pytest --cov -q` | `Required test coverage of 98.0% reached. Total coverage: 100.00%` |
+| 既存契約への回帰 | `cd patterns/contracts && uv run pytest --no-cov -q` | `66 passed`(変化なし) |
+
+### 学び
+
+- pydantic-ai の `DeferredToolResults.approvals` のような「外部ライブラリが
+  `dict[K, V]` を要求するパラメータ」に自分の狭い union 型の `dict` 変数を
+  そのまま渡すと、値型の不変性で必ず型エラーになる。`Mapping` へ切り替える
+  提案は「自分の関数の引数型」にしか効かず、相手のパラメータ型が `dict`
+  固定なら無意味 — 呼び出し箇所で dict を再構築(`dict(x.items())` や
+  dict comprehension)し、双方向型推論に相手の期待型を見せるのが実質唯一の
+  直し方。
+- 文字列の `part_kind` 比較でユニオン型を絞り込むコードは実行時には正しく
+  動いても pyright はそれを型ナローイングとして認識しない —
+  `isinstance(part, ToolReturnPart)` のような nominal type チェックに
+  置き換えるべきで、これは一般に「discriminated union を `Literal` 文字列
+  フィールドで判別する外部ライブラリの型」を扱うときに繰り返し出てくる
+  パターン(このレーンでは `agent.py` の `DeferredToolRequests`
+  `isinstance` ガードと同型)。
+- カバレッジ ratchet は「そのタスクで書いたテストが対象コードの全分岐を
+  ちょうど1回叩くか」に敏感 — 再defer ケースのように「型ガードの確認」だけ
+  を目的にしたテストは、承認後の実行経路(escalate_to_legal 本体)を
+  意図せず素通りさせがちで、都度「このテストで新しく踏んでいない分岐は
+  何か」を coverage report で確認する運用が有効だった。
+- 次は Task 6(`app.py` + `observability.py` — FastAPI app-factory と
+  `/run`・`/resume` エンドポイント)。
