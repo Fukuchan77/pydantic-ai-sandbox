@@ -168,13 +168,14 @@ run は `DeferredToolRequests` で停止 → SessionStore に `message_history` 
 - **Responsibility**: レーン足場とリポジトリ列挙面への登録。
 - **Public interface**:
   - `pyproject.toml`: sse 雛形を踏襲 — `requires-python = ">=3.14"`、
-    `pydantic-ai-slim[openai]>=2.9.0` + `fastapi` + `logfire`、
+    `pydantic-ai-slim[openai]>=2.9.0` + `fastapi>=0.136` + `logfire`、
     `[tool.uv.sources] patterns-contracts = { path = "../contracts", editable = true }`、
     ruff 同一セット / pyright strict(3.14)/ `asyncio_mode = "auto"` /
     `fail_under = 98`(R1.1, 1.2, 1.3, 1.5, 10.1)
   - `mise.toml`: `patterns:{setup,lint,format,typecheck,test,audit}` に
     `patterns/hitl` 明示行(R1.4)、`patterns:test:integration:hitl`
-    (`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=<n>`、R11.1, 11.2)
+    (`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2`、R11.1, 11.2 —
+    2 = 承認経路 e2e 1 本 + 拒否経路 1 本、tasks T8.1 と一致)
   - `.github/workflows/patterns-ci.yml`: `patterns/hitl/**` paths + 専用ジョブ(R1.6)
   - `.github/workflows/security.yml`: `patterns-pip-audit` matrix に
     `{ lane: hitl, dir: patterns/hitl }`(R1.6)
@@ -284,7 +285,9 @@ mise.toml / patterns-ci.yml / security.yml / dependabot.yml / patterns-integrati
 ## Error Handling & Edge Cases
 
 - 未知 session → `404`(R8.5。存在秘匿の強化は 013 R1.2)。
-- `UsageLimitExceeded` → harness 専用例外 → API は 5xx 系で loud(HTTP 429 写像は 013 R2.4)。
+- `UsageLimitExceeded` → harness 専用例外(`HitlBudgetExceededError`)。MVP は未捕捉時の
+  汎用 5xx で loud に露出させ(予算超過を沈黙させない)、意味的に正しい 429 への写像は
+  013 R2.4 が担う。順序: MVP=汎用 5xx → 013=429 精緻化。
 - 再開後の再 defer → 正常応答として `PendingResponse`(R6.1 の「ループ継続」相当は
   クライアント責務。型は `isinstance` 分岐で保証)。
 - テキスト終端(モデルの逸脱)→ pydantic-ai が出力リトライ → 枯渇時
