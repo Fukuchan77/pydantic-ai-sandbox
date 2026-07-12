@@ -12,6 +12,16 @@ per-request (plan.md AD-4); a budget overrun surfaces as
 :class:`HitlBudgetExceededError` rather than pydantic-ai's raw
 ``UsageLimitExceeded`` so the HTTP layer (Task 6) has a lane-owned exception
 to map.
+
+``resume`` drives the spec 013 consumption state machine
+(``store.py``'s ``settle_pending``/``consume``) rather than the plain
+``update`` Task 5.2 used: a re-defer settles the session back to
+``pending`` with the new round's ``pending_call_ids`` (R2.2), a terminal
+result or a budget overrun consumes it permanently (R2.1, R2.4). The
+pending-set membership check (409) and the ``claim``/``release`` calls
+around it are the HTTP boundary's job (``app.py``, spec 013 R2.3) --
+``resume`` itself only reads the record via ``store.get`` and trusts the
+caller already resolved a pending vs. in-flight session.
 """
 
 from __future__ import annotations
@@ -119,7 +129,9 @@ class HitlHarness:
         except UsageLimitExceeded as exc:
             raise HitlBudgetExceededError(str(exc)) from exc
         history = result.all_messages()
-        session_id = self._store.create(history, result.usage)
+        session_id = self._store.create(
+            history, result.usage, pending_call_ids=_pending_call_ids(result.output)
+        )
         return self._to_result(session_id, result.output, history, result.usage)
 
     async def resume(
@@ -142,7 +154,8 @@ class HitlHarness:
             KeyError: If ``session_id`` is unknown.
             HitlBudgetExceededError: If the resumed run exceeds
                 ``usage_limits`` once the session's carried-over usage is
-                counted in.
+                counted in. The session is consumed (permanently
+                invalidated) before this is raised (spec 013 R2.4).
         """
         record = self._store.get(session_id)
         try:
@@ -154,10 +167,20 @@ class HitlHarness:
                 usage_limits=self._usage_limits,
             )
         except UsageLimitExceeded as exc:
+            self._store.consume(session_id)
             raise HitlBudgetExceededError(str(exc)) from exc
         history = result.all_messages()
-        self._store.update(session_id, history, result.usage)
-        return self._to_result(session_id, result.output, history, result.usage)
+        outcome = self._to_result(session_id, result.output, history, result.usage)
+        if isinstance(outcome, PendingResult):
+            self._store.settle_pending(
+                session_id,
+                history=history,
+                usage=result.usage,
+                pending_call_ids=_pending_call_ids(result.output),
+            )
+        else:
+            self._store.consume(session_id)
+        return outcome
 
     def _to_result(
         self,
@@ -170,3 +193,10 @@ class HitlHarness:
         if isinstance(output, DeferredToolRequests):
             return PendingResult(session_id, list(output.approvals), history, usage)
         return TerminalResult(session_id, output, history, usage)
+
+
+def _pending_call_ids(output: SupportOutput | DeferredToolRequests) -> frozenset[str]:
+    """Extract the tool_call_id set a resume must resolve a subset of (spec 013 R2.2, R2.3)."""
+    if isinstance(output, DeferredToolRequests):
+        return frozenset(call.tool_call_id for call in output.approvals)
+    return frozenset()

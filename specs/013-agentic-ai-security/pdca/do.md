@@ -129,3 +129,133 @@ $ mise run patterns:check
 [patterns:typecheck] 0 errors, 0 warnings, 0 informations
 Finished in 20.20s   # exit code 0
 ```
+
+---
+
+### [2026-07-12 11:10] Task 2 (ConsumptionGuard: /run・/resume の HTTP 写像) Started
+
+- Objective: `app.py` の `/run`・`/resume` 両ハンドラへ research.md AD-2 の写像表を実装する
+  (`UnknownSessionError` → 404、pending 外判断 → 409、`HitlBudgetExceededError` →
+  429、再 defer → 200 + `settle_pending()`)。既存違反(`/resume` 404 本文の
+  session id 漏洩、両経路で未捕捉の予算超過)を是正する(R1.2, R2.1–2.4)。
+- Approach: `test_consumption.py`(Task 1 が作成した store 層テストと同一ファイル)
+  へ API 層(`TestClient`)のケース (a)–(e) を先行追加 → 赤確認 → `app.py` +
+  `harness.py` を実装 → 緑化。
+
+### [2026-07-12 11:20] RED confirmed
+
+- `uv run pytest tests/unit/test_consumption.py -v --no-cov` → 新規 8 件が
+  すべて失敗(既存 8 件の store 層テストは無傷で green)。失敗理由を個別に確認:
+  - (a)/未知 id 共通: `AssertionError: 'does-not-exist' not in 'unknown session_id: does-not-exist'`
+    — 現行 `app.py:202` の漏洩本文がそのまま検出された。
+  - (b) 系 3 件: `pydantic_ai.exceptions.UserError: Tool call results need to
+    be provided for all deferred tool calls. Expected: {...}, got: {...}`
+    — pending 外の `tool_call_id` を含む decisions がノーチェックで
+    `harness.resume()` まで到達し、pydantic-ai 自身が(409 ではなく)
+    ハンドルされない `UserError` を投げていた。
+  - (c)/(d): `TypeError: create_app() got an unexpected keyword argument
+    'usage_limits'` — 予算超過を再現する注入シームが存在しなかった。
+  - (e): (b) と同じ `UserError`(pending 集合チェックが無いため)。
+  - 8 failed, 8 passed — 意図した理由での赤を確認。
+
+### [2026-07-12 11:35] GREEN — harness.py + app.py 実装
+
+- `harness.py`: `start()` が `store.create(..., pending_call_ids=...)` で
+  最初の pending 集合を正しく登録するよう修正(従来は空集合のまま作成しており、
+  作成直後の 409 判定が機能しない欠落があった)。`resume()` は
+  `store.update()`(012 互換の全上書きメソッド、状態遷移を知らない)の呼び出しを
+  廃止し、結果が `PendingResult` なら `settle_pending()`(pending 集合を新ラウンドの
+  ものへ置換)、`TerminalResult` なら `consume()` を呼ぶよう変更。
+  `UsageLimitExceeded` 捕捉時は再送前に `consume()` して session を失効させる
+  (R2.4)。`store.update()` 自体は 012 の `test_store.py` が直接カバーしているため
+  未使用化による到達不能コードにはならない。
+- `app.py`: `create_app` に `usage_limits: UsageLimits = LIMITS` の注入シームを
+  追加。`/run`・`/resume` の実処理を module-level の `_handle_run` /
+  `_handle_resume` へ抽出(理由は下記 Error Encountered 参照)。
+  `_handle_resume` は `store.claim()` → `UnknownSessionError` を 404
+  (固定文言 `_UNKNOWN_SESSION_DETAIL`)、`claim()` 後・`await harness.resume()` 前に
+  `decisions.keys() <= record.pending_call_ids` を検査し不整合なら
+  `store.release()` + 409(固定文言、id/理由を含まない)、`harness.resume()` の
+  `HitlBudgetExceededError` を 429 にマップする。`_handle_run` も同じ
+  `HitlBudgetExceededError` → 429 マッピングを持つ(`/run` は失敗時に session を
+  一度も作らないため、409 相当のクリーンアップは不要)。
+- 16/16 `test_consumption.py`(既存 8 + 新規 8)green。lane 全体
+  (`test_api.py` / `test_stop_approve_resume.py` / `test_store.py` 含む)も
+  無傷(49 passed, 2 skipped integration)。
+
+### [2026-07-12 11:40] ❌ Error Encountered — ruff C901(complexity)+ format
+
+**Error**:
+1. `mise run patterns:check` → `patterns:lint`: `C901 create_app is too
+   complex (11 > 10)`(`app.py:165`)。
+2. `patterns:format`: `Would reformat: tests/unit/test_consumption.py`
+   その後 `src/patterns_hitl/app.py` も同様。
+
+**Context**: `/run`・`/resume` の分岐(try/except × 2、409 判定の if、
+`isinstance` 分岐)を `create_app` 内のネストした `@app.post` ハンドラに直接
+書いたため、ハンドラの分岐が `create_app` 自体の循環的複雑度に加算された。
+
+**Root Cause Investigation**:
+
+1. **Codebase Search**: ruff の mccabe (`C901`) は関数定義本体に現れる
+   ネスト関数の分岐も外側関数のノードグラフの一部として数える。
+   `create_app` は元々 `store or SessionStore()` 等の分岐を持っていたところに
+   Task 2 で 2 系統×複数分岐を追加したため閾値 10 を超えた。
+2. **Hypothesis**: ハンドラの実処理を module-level 関数へ抽出すれば、
+   `@app.post` に登録するネスト関数は「引数を渡して呼ぶだけ」の 1 分岐に
+   縮み、`create_app` 自身の複雑度は元の水準に戻る。抽出先の
+   `_handle_run` / `_handle_resume` はそれぞれ独立した関数として
+   複雑度が再計算されるため、個々に閾値を超えない(実測: 超えなかった)。
+
+**Solution Design**:
+
+- Approach: `_handle_run(harness, body)` / `_handle_resume(harness, store,
+  body)` を module scope に抽出し、`create_app` 内の `@app.post` ハンドラは
+  それぞれ 1 行で委譲するだけにした。フォーマット崩れは
+  `uv run ruff format <file>`(mise に fix 系タスクが無いため CLAUDE.md の
+  ツール優先順位どおり `uv run` へフォールバック)で解消。
+- Rationale: 責務(HTTP 委譲 vs ステータス写像ロジック)の分離は
+  plan.md の「ConsumptionGuard は app.py の拡張」という記述とも整合し、
+  かつテスト(`test_consumption.py`)からは `create_app()` 経由の
+  `TestClient` しか触っていないため、内部構造の変更はテストに影響しない。
+
+**Execution**: 上記 2 点を適用。
+
+**Result**: ✅ Success — `mise run patterns:check` 全レーン green
+(hitl coverage 100%、typecheck 0 errors、exit code 0)。
+
+**Learning**: ネストした FastAPI ハンドラに複数の HTTP ステータス分岐を
+直接書くと、囲む factory 関数(`create_app`)の複雑度に累積する。
+分岐が増える段階で、ハンドラ本体を module-level 関数へ抽出し、
+`@app.post` 直下は委譲 1 行に留めるのが ruff `C90` ポリシーと相性が良い。
+
+## Verification Gate Evidence (Task 2)
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_consumption.py -v --no-cov
+...
+tests/unit/test_resume_after_terminal_completion_returns_404_and_leaks_nothing PASSED
+tests/unit/test_resume_with_unknown_session_id_returns_the_same_404_body_as_consumed PASSED
+tests/unit/test_resume_with_decision_outside_pending_set_returns_409_and_runs_no_tool PASSED
+tests/unit/test_resume_with_one_bad_key_among_valid_ones_rejects_the_whole_request PASSED
+tests/unit/test_resume_after_409_leaves_the_session_pending_and_resumable PASSED
+tests/unit/test_resume_over_budget_returns_429_and_invalidates_the_session PASSED
+tests/unit/test_run_over_budget_returns_429_and_saves_no_session PASSED
+tests/unit/test_resume_after_re_defer_rejects_the_stale_tool_call_id_with_409 PASSED
+============================== 16 passed in 0.23s ==============================
+
+$ uv run pytest --no-cov   # lane 全体
+...
+======================== 49 passed, 2 skipped in 0.82s =========================
+
+$ cd /Users/Shared/codes/pydantic-ai-sandbox && mise run patterns:check
+... (全レーン)
+[patterns:test] src/patterns_hitl/app.py                91      0     16      0   100%
+[patterns:test] src/patterns_hitl/harness.py            54      0      6      0   100%
+[patterns:test] TOTAL                                  240      0     32      0   100%
+[patterns:test] Required test coverage of 98.0% reached. Total coverage: 100.00%
+[patterns:test] ======================== 49 passed, 2 skipped in 1.03s =========================
+[patterns:typecheck] == typecheck patterns/hitl
+[patterns:typecheck] 0 errors, 0 warnings, 0 informations
+Finished in 25.67s   # exit code 0
+```
