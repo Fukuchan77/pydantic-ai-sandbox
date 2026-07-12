@@ -23,7 +23,7 @@ OWASP マッピング・runbook は SECURITY-NOTES / README への文書追記 +
 flowchart TD
   subgraph lane["patterns/hitl (012 実装への差分)"]
     APP["app.py<br/>ResumeRequest extra=forbid<br/>404/409/429 写像"]
-    ST["store.py<br/>状態機械 pending→consumed<br/>uuid4 生成 · pending 集合"]
+    ST["store.py<br/>状態機械 pending→in_flight→consumed<br/>uuid4 生成 · pending 集合"]
     AUD["audit.py (新規)<br/>AuditEvent / AuditEmitter Protocol<br/>LogfireAuditEmitter (fail-soft)"]
     APP --> ST
     APP -->|1 判断 = 1 イベント| AUD
@@ -47,15 +47,20 @@ flowchart TD
 - **Responsibility**: session の生成・消費・失効の状態機械。
 - **Public interface**:
   - `new_session_id() -> str` — `uuid.uuid4()` 一元化(R1.1)
-  - `SessionRecord`: `history`, `usage`, `state: Literal["pending", "consumed"]`,
+  - `SessionRecord`: `history`, `usage`, `state: Literal["pending", "in_flight", "consumed"]`,
     `pending_call_ids: frozenset[str]`
-  - `claim(session_id) -> SessionRecord`(未知/consumed は `UnknownSessionError` —
-    呼び出し側で 404、区別情報を持たない、R1.2, R2.1)
-  - `settle_pending(session_id, history, usage, pending_call_ids)` — 再 defer 時の更新(R2.2)
-  - `consume(session_id)` — 終端/エラー時の失効(R2.1, R2.4)
-- **Owns**: 状態遷移の整合性、pending `tool_call_id` 集合の正本。
+  - `claim(session_id) -> SessionRecord`(`pending` のときのみ成功し、**同期的に**
+    `pending → in_flight` へ遷移して返す。未知 / `in_flight` / `consumed` はいずれも同一の
+    `UnknownSessionError`(区別情報を持たない、呼び出し側で 404、R1.2, R2.1)。この
+    同期遷移が並行 `/resume` の先勝ちを保証する — 2 本目の `claim()` は `in_flight` を見て 404)
+  - `settle_pending(session_id, history, usage, pending_call_ids)` — 再 defer 時に
+    `in_flight → pending` へ戻し履歴・usage・pending 集合を更新(R2.2)
+  - `consume(session_id)` — 終端/エラー時に `→ consumed` で失効(R2.1, R2.4)
+  - `release(session_id)` — 409(pending 集合外の判断)時に `in_flight → pending` を復元。
+    ツール未実行で session は再開可能のまま(R2.3)
+- **Owns**: 状態遷移の整合性(`pending`/`in_flight`/`consumed`)、pending `tool_call_id` 集合の正本、並行 `/resume` のロック。
 - **Does NOT own**: HTTP ステータス写像(app)、監査(audit)。
-- **Requirements**: 1.1, 1.2, 1.3, 2.1, 2.2
+- **Requirements**: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3
 
 ### ConsumptionGuard(`patterns/hitl/src/patterns_hitl/app.py` — 012 HitlApp の拡張)
 
@@ -68,9 +73,12 @@ flowchart TD
   - `/resume` の 404 本文は `detail=f"unknown session_id: {exc.args[0]}"`(`app.py:202`)で
     **session id と「unknown」という理由を漏洩** — R1.2 の既存違反。本コンポーネントで是正必須。
 - **Public interface**:
-  - 未知 / consumed session → `404`(本文は **id も理由も含まない固定メッセージ** —
+  - 未知 / `in_flight` / consumed session → `404`(本文は **id も理由も含まない固定メッセージ** —
     `app.py:202` の漏洩を是正、R1.2)
-  - `decisions` のキーが `pending_call_ids` 外 → `409`、**ツール実行前に**拒絶(R2.3)
+  - `decisions` のキーが `pending_call_ids` 外 → `409`。検証は **`claim()` 後・
+    `await harness.resume()` 呼出前**に app 層で全キー ⊆ `pending_call_ids` を確認する
+    (`await` を挟まないため asyncio でも原子的)。不整合なら `release()` で `pending` へ
+    戻して 409 — **どのツールも実行せず**、1 件でも外れれば全体拒絶(R2.3)
   - `HitlBudgetExceededError` → `429`。**`/run` では session を作らず**、`/resume` では
     `consume()` して以後 404(R2.4 — 両ハンドラに except を配置)
 - **Requirements**: 1.2, 2.1, 2.3, 2.4
@@ -145,9 +153,10 @@ flowchart TD
   `directories` に `/patterns/hitl` があることを assert(R9.1–9.3)。
   列挙は `patterns/` 全 uv レーンと matrix の**集合一致**で書く(research.md AD-5 A2)。
 - **前提の訂正(gap-analysis 論点 A)**: hitl は 012 実装で既に両列挙面へ登録済み
-  (`security.yml:162` / `dependabot.yml:91`、実測確認)のため、本テストは
-  **初回作成時点で緑**になる。TDD の赤は「hitl 行の一時削除(非コミット)→ red 確認 →
-  復元」で成立させ、PDCA ログに記録する(A1)。
+  (`security.yml:162` / `dependabot.yml:91`、実測確認)のため、実 YAML に対する assert は
+  **初回作成時点で緑**になる。TDD の赤は**集合一致判定を純関数へ切り出し、`hitl` を欠いた
+  合成入力を渡すと fail する負のユニットケース**で成立させる(スイート内に恒久固定、H-2)。
+  実 YAML 側は「hitl 行の一時削除(非コミット)→ red 確認 → 復元」を補助として PDCA ログに残す(A1)。
 - **Owns**: 到達性の機械検証。012 の LaneScaffold(登録の実施)とは責務分離。
 - **Requirements**: 9.1, 9.2, 9.3
 
@@ -177,7 +186,9 @@ flowchart TD
 ## Data Model
 
 - `SessionRecord`(拡張): `history: list[ModelMessage]`, `usage: RunUsage`,
-  `state: Literal["pending", "consumed"]`, `pending_call_ids: frozenset[str]`。
+  `state: Literal["pending", "in_flight", "consumed"]`, `pending_call_ids: frozenset[str]`。
+  `in_flight` は `claim()` が取得する実行中ロック — `await harness.resume()` を跨いで
+  保持され、並行 `/resume` の二重実行を防ぐ(H-1 対応)。
 - `AuditEvent`: 上記 Components の通り(判断メタデータのみ。NFR「監査イベントの
   機微情報」に対応)。
 - HTTP 写像表は research.md AD-2 を正とする。
@@ -224,8 +235,11 @@ tests/unit/test_security_workflow_lanes.py   # root、新規 (到達性ガード
 - 409(pending 外判断)は**部分適用しない** — 1 件でも不整合なら全体拒絶(R2.3)。
 - 監査エミッタの失敗は fail-soft(R3.4)、消費セマンティクスの失敗は loud(NFR の
   フェイルソフト境界)。両者を混同しない。
-- 並行 resume(同一 session への同時 POST)は `claim()` を同期区間にして
-  先勝ち・後続 404(インメモリ MVP の範囲。分散対応は out of scope)。
+- 並行 resume(同一 session への同時 POST)は `claim()` の **同期的** `pending → in_flight`
+  遷移で先勝ちにする — 2 本目の `claim()` は `in_flight` を見て 404。ロックは
+  `await harness.resume()` を跨いで保持され、終端で `consume()`、再 defer で
+  `settle_pending()`、409 で `release()` により解除される(インメモリ・単一イベント
+  ループ MVP の範囲。分散対応は out of scope)。
 - ScanReachabilityGuard は初回緑(hitl 登録済み)の回帰防止ゲート — 赤の証跡は
   一時削除手順で残す(research.md AD-5 訂正版)。
 - `/run` の予算超過 429 では **session を保存しない**(部分状態を残さない)。
