@@ -259,3 +259,159 @@ $ cd /Users/Shared/codes/pydantic-ai-sandbox && mise run patterns:check
 [patterns:typecheck] 0 errors, 0 warnings, 0 informations
 Finished in 25.67s   # exit code 0
 ```
+
+---
+
+### [2026-07-12 13:15] Task 3 (AuditTrail: `audit.py` 新設 + 注入シーム) Started
+
+- Objective: `/resume` の承認判断ごとに 1 件の構造化監査イベントを記録する
+  `audit.py` を新設し、`create_app(audit_emitter=...)` の注入シームで既定
+  `LogfireAuditEmitter`(fail-soft)へ配線する(R3.1–3.5)。
+- Approach: TDD で `test_audit_trail.py` + `tests/support/in_memory_audit.py`
+  (`InMemoryAuditEmitter` / `RaisingAuditEmitter`)を先行作成 → 赤確認 →
+  `audit.py` 実装 + `app.py` 配線 → 緑化。
+
+### [2026-07-12 13:25] RED confirmed
+
+- `uv run pytest tests/unit/test_audit_trail.py --no-cov`
+  → 収集エラー: `ModuleNotFoundError: No module named 'patterns_hitl.audit'`
+  (`test_audit_trail.py:27` の `from patterns_hitl.audit import build_audit_event`)。
+  `audit.py` が存在しないため確実に赤であることを確認。
+
+### [2026-07-12 13:40] GREEN — audit.py 実装 + app.py 配線
+
+- `audit.py`(新規): `AuditEvent`(`session_id` / `tool_call_id` / `tool_name` /
+  `decision: Literal["approved","approved_with_override","denied"]` /
+  `denial_message` / `overridden_keys: tuple[str, ...]` / `timestamp` —
+  引数の生値フィールドを持たない、R3.2/3.3)、`AuditEmitter` Protocol、
+  `LogfireAuditEmitter`(`logfire.info(...)`)、`build_audit_event(...)`
+  (Decision の生の `approved`/`override_args`/`denial_message` から
+  `AuditEvent` を組み立てる純関数 — override 時は `overridden_keys` のみ
+  記録し値は捨てる)、`emit_audit_event(emitter, event)`(fail-soft 境界を
+  1 箇所に集約 — `contextlib.suppress(Exception)`、R3.4)。
+- `app.py`: `create_app` に `audit_emitter: AuditEmitter | None = None`
+  (既定 `LogfireAuditEmitter()`)を追加。`_handle_resume` へ
+  `_tool_names_by_call_id(record.history, ...)`(`claim()` 直後の履歴に
+  残る直前ラウンドの `ToolCallPart` を走査して `tool_call_id → tool_name`
+  を再構築 — `SessionRecord` の契約を広げず app.py 内で閉じる)を追加し、
+  409 判定通過後・`await harness.resume()` 呼出前に decisions 全件へ
+  `build_audit_event` + `emit_audit_event` を適用する(「判断適用点」= 実際の
+  ツール実行結果を待たず、資格のある decisions が確定した時点)。
+- `tests/support/in_memory_audit.py`(新規): `InMemoryAuditEmitter`
+  (イベントをリストに蓄積)、`RaisingAuditEmitter`(常に例外を投げ、
+  fail-soft 境界を検証する)。
+- 5/5 `test_audit_trail.py` green: (a)/(b) approve/deny 各 1 件 ×
+  必須フィールド、(c) override は `overridden_keys` のみで生値が
+  シリアライズに現れない(HTTP 経由 + `build_audit_event` 直接呼び出しの
+  両方で検証)、(d) 例外を投げる emitter でも `/resume` は 200 で完了。
+
+### [2026-07-12 13:45] ❌ Error Encountered — テスト自体の誤検知(タイムスタンプ衝突)
+
+**Error**: `test_override_decision_records_only_the_overridden_keys` が
+`assert "5.0" not in serialized` で失敗。
+
+**Context**: override 値に `amount_usd=5.0` を使ったところ、
+`AuditEvent.timestamp` の ISO8601 マイクロ秒表記(例:
+`...05.072940Z`)に偶然 `"5.0"` という部分文字列が含まれ、
+実装の漏洩ではなく**テストのアサーションが自分自身のタイムスタンプに
+誤って一致した**ことが原因。
+
+**Root Cause Investigation**: 実装側 (`build_audit_event`) は
+`overridden_keys` のみを記録し、`override_args` の値そのものは
+どのフィールドにも渡していない(コードレビューで確認)。したがって
+漏洩は実装ではなく、テストが選んだ数値リテラルが時刻表現と衝突した
+テスト設計の問題。
+
+**Solution Design**: 衝突しにくい値(`12345.0` / `98765.0` と
+`"confidential-override-reason"` などの長い一意な文字列)へ置き換え、
+タイムスタンプの数字表現と偶然一致しないようにした。
+
+**Execution**: `test_audit_trail.py` の 2 箇所(HTTP 経由テストと
+`build_audit_event` 直接呼び出しテスト)の override 値を置き換え。
+
+**Result**: ✅ Success — 5/5 green。
+
+**Learning**: 「シリアライズに値が現れない」ことを文字列包含で検証する
+テストは、他のフィールド(特にタイムスタンプの数字表現)との偶然の
+部分文字列一致に弱い。検証用の値は十分にユニークで短い数字の並びを
+避けるべき。
+
+### [2026-07-12 13:55] ❌ Error Encountered — ruff SIM105/S110 + I001、pyright missing annotation
+
+**Error**:
+1. `patterns:lint`: `audit.py` の `try: emitter.emit(event) / except
+   Exception: pass` に `SIM105`(`contextlib.suppress` を使うべき)と
+   `S110`(try-except-pass はログを検討)。
+2. `patterns:lint`: `test_audit_trail.py` の 1 行にまとめた
+   `from tests.support.function_model_scripts import (...)` が `I001`
+   (import 未整形)。
+3. `patterns:typecheck`: `test_audit_trail.py` の `_build_app(*phases,
+   audit_emitter=...)` の `*phases` に型注釈が無く
+   `reportMissingParameterType` / `reportUnknownParameterType` /
+   `reportUnknownArgumentType`。
+4. `patterns:format`: `app.py` の未整形(import 並び変更後の再フォーマット)。
+
+**Context**: fail-soft 境界を素朴な `try/except Exception: pass` で書き、
+かつ長い import 文を 1 行にまとめ、既存テストの `*phases` 引数の
+型注釈省略パターンをそのまま模倣した結果。
+
+**Root Cause Investigation**: (1) は 012 の `observability.py` が
+`except Exception:  # noqa: BLE001` という個別 justify 済みパターンを
+使っていたのに対し、013 では ruff がより新しい `SIM105` 提案
+(`contextlib.suppress`)を追加要求していた。(2) は `ruff format`/`isort`
+の折返しルールに合わせていなかった。(3) は他の `*phases` 呼び出し
+(`test_consumption.py` 等)は同じ関数 `call_counting_script` を呼ぶが、
+pyright が `ToolCallPart` への逆伝播を要求する組み合わせで、
+本テストファイルでは型注釈を明示しないと unknown 型が伝播した。
+
+**Solution Design**: (1) `contextlib.suppress(Exception)` へ書き換え
+(justify コメントは docstring 側に「フェイルソフト境界」として明記し、
+`noqa` は不要と確認)。(2) 複数行の import へ整形
+(`ruff format` に委譲)。(3) `_build_app(*phases: ToolCallPart, ...)`
+と明示。(4) `uv run ruff format .` を実行。
+
+**Execution**: 上記を適用し再実行。
+
+**Result**: ✅ Success — `ruff check` / `ruff format --check` /
+`pyright` すべて 0 件。
+
+**Learning**: fail-soft な `try/except pass` は 012 の個別 `noqa`
+パターンより `contextlib.suppress` の方が ruff の新しい提案
+(`SIM105`)と衝突しない。テストヘルパーの `*phases` パラメータは
+呼び出し元の型が pyright strict の推論境界を超える場合、明示注釈が
+必要になることがある(委譲元と同じ書き方でも常に安全ではない)。
+
+## Verification Gate Evidence (Task 3)
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_audit_trail.py --no-cov -q
+.....
+5 passed in 0.19s
+
+$ uv run pytest tests/unit --no-cov -q   # lane 全体、regression なし
+......................................................                   [100%]
+54 passed, 1 warning in 0.64s
+
+$ uv run ruff check . && uv run ruff format --check . && uv run pyright
+All checks passed!
+23 files already formatted
+0 errors, 0 warnings, 0 informations
+
+$ uv run pytest --cov
+...
+src/patterns_hitl/audit.py              30      0      4      0   100%
+TOTAL                                  284      0     44      0   100%
+Required test coverage of 98.0% reached. Total coverage: 100.00%
+54 passed, 2 skipped, 1 warning in 1.12s
+
+$ uv run pip-audit
+No known vulnerabilities found
+
+$ cd /Users/Shared/codes/pydantic-ai-sandbox && mise run patterns:check
+... (全レーン)
+[patterns:test] TOTAL                                  284      0     44      0   100%
+[patterns:test] Required test coverage of 98.0% reached. Total coverage: 100.00%
+[patterns:typecheck] == typecheck patterns/hitl
+[patterns:typecheck] 0 errors, 0 warnings, 0 informations
+Finished in 33.13s   # exit code 0
+```
