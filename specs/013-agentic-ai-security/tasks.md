@@ -8,7 +8,9 @@ Conventions:
 - `(P)` = safe to run in parallel (no dependency, disjoint boundary).
 - Every task (major and sub) declares `_Boundary:_` and `_Depends:_`.
 - Requirement coverage lists numeric IDs only, comma-separated.
-- 前提: specs/012-agentic-ai-design/tasks.md の全タスク完了(`patterns/hitl/` が存在し全ゲート緑)。
+- 前提: specs/012-agentic-ai-design/tasks.md の全タスク完了(`patterns/hitl/` が存在し全ゲート緑)— **充足済み(2026-07-12)**。
+- 真の新規実装は §1〜§3(状態機械 + HTTP 写像 + 監査証跡)。§4 はスキーマ 1 行 + テスト、
+  §5〜§6 は文書追記 + grep ガード、§7 は初回緑の回帰防止ガード、§8 は既充足の確認。
 
 ---
 
@@ -29,17 +31,24 @@ _Requirements:_ 1.1, 1.2, 1.3, 2.1, 2.2
 
 ---
 
-## 2. 消費セマンティクスの HTTP 写像(`app.py` 拡張)
+## 2. 消費セマンティクスの HTTP 写像(`app.py` 拡張 — **/run・/resume 両ハンドラ**)
 
 _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/tests/unit/test_consumption.py`
 _Depends:_ 1
 _Requirements:_ 1.2, 2.1, 2.3, 2.4
 
-- [ ] 2.1 失敗テストを追加する(API 層、`with TestClient(app):`)。(a) 終端後の再 `/resume` → 404、404 本文が「未知」と「消費済み」を区別しない固定文言、(b) pending 集合外の `tool_call_id` を含む decisions → 409 + **どのツールも実行されない**(スパイで確認)+ 1 件でも不整合なら全体拒絶、(c) 低 limit 注入で resume 中に予算超過 → 429 + 以後同 session は 404、(d) 再 defer 応答後に旧 `tool_call_id` の判断を再送 → 409。**赤を確認する。**
+既存違反・未カバーの是正を含む(2026-07-12 実測): ①現行 `/resume` の 404 本文は
+`detail=f"unknown session_id: {exc.args[0]}"`(`app.py:202`)で **session id と理由を
+漏洩** — R1.2 違反。②`HitlBudgetExceededError` は `harness.start()`(`harness.py:120`)と
+`resume()`(`harness.py:157`)の両方から送出されるが `app.py` は `/resume` の `KeyError`
+しか捕捉せず(`app.py:200`)、**予算超過は両経路とも現状 500** — R2.4 は "a run or resume"
+を明記しており `/run` 側も 429 写像が必須。
+
+- [ ] 2.1 失敗テストを追加する(API 層、`with TestClient(app):`)。(a) 終端後の再 `/resume` → 404、404 本文が「未知」と「消費済み」を区別せず **session id も理由も含まない固定文言**(現行 `app.py:202` の漏洩本文が消えることを負のアサートで固定)、(b) pending 集合外の `tool_call_id` を含む decisions → 409 + **どのツールも実行されない**(スパイで確認)+ 1 件でも不整合なら全体拒絶、(c) 低 limit 注入で **`/resume` 中**の予算超過 → 429 + 以後同 session は 404、(d) 低 limit 注入で **`/run` 起動時**の予算超過 → 429 + session が保存されない(直後の任意 `/resume` が 404)、(e) 再 defer 応答後に旧 `tool_call_id` の判断を再送 → 409。**赤を確認する**(現状 (a) は漏洩本文、(c)(d) は 500 のため赤になる)。
   _Boundary:_ `patterns/hitl/tests/unit/test_consumption.py`
   _Depends:_ 1.2
   _Requirements:_ 1.2, 2.1, 2.3, 2.4
-- [ ] 2.2 `app.py` の `/resume` ハンドラへ写像表(research.md AD-2)を実装しテストを緑化する: `UnknownSessionError` → 404(固定本文)、pending 外判断 → 409(実行前拒絶)、`HitlBudgetExceededError` → 429 + `consume()`、再 defer → 200 `PendingResponse` + `settle_pending()`。
+- [ ] 2.2 `app.py` の **`/run`・`/resume` 両ハンドラ**へ写像表(research.md AD-2)を実装しテストを緑化する: `UnknownSessionError` → 404(id・理由を含まない固定本文 — `app.py:202` の是正)、pending 外判断 → 409(実行前拒絶)、`HitlBudgetExceededError` → 429(`/run` は session 非保存、`/resume` は `consume()` で失効)、再 defer → 200 `PendingResponse` + `settle_pending()`。
   _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`
   _Depends:_ 2.1
   _Requirements:_ 1.2, 2.1, 2.3, 2.4
@@ -129,22 +138,26 @@ _Boundary:_ `tests/unit/test_security_workflow_lanes.py`
 _Depends:_ none(012 Task 7 の列挙面登録が前提)
 _Requirements:_ 9.1, 9.2, 9.3
 
-- [ ] 7.1 `tests/unit/test_security_workflow_lanes.py` を新規作成する(`test_ollama_ci_workflows.py` と同じ YAML パース手法)。(a) `security.yml` の `patterns-pip-audit` matrix include に `{lane: hitl, dir: patterns/hitl}` が存在、(b) `dependabot.yml` の pip `directories` に `/patterns/hitl` が存在 — 欠落は **fail red**(warn ではない)。将来レーンの追い漏れも拾えるよう、`patterns/` 直下 + `patterns/frameworks/` 直下の uv レーン(pyproject.toml 保有ディレクトリ)全列挙と matrix の集合一致で書く。
+- [ ] 7.1 `tests/unit/test_security_workflow_lanes.py` を新規作成する(`test_ollama_ci_workflows.py` と同じ YAML パース手法)。(a) `security.yml` の `patterns-pip-audit` matrix include に `{lane: hitl, dir: patterns/hitl}` が存在、(b) `dependabot.yml` の pip `directories` に `/patterns/hitl` が存在 — 欠落は **fail red**(warn ではない)。将来レーンの追い漏れも拾えるよう、`patterns/` 直下 + `patterns/frameworks/` 直下の uv レーン(pyproject.toml 保有ディレクトリ)全列挙と matrix の集合一致で書く(A2)。**赤の証跡(A1)**: hitl は既に両列挙面へ登録済み(`security.yml:162` / `dependabot.yml:91`)のためテストは初回緑になる — 作業ツリー上で hitl 行を一時削除(コミットしない)して red を確認 → 復元して緑。削除→赤→復元を PDCA ログに記録する。
   _Boundary:_ `tests/unit/test_security_workflow_lanes.py`
   _Depends:_ none
   _Requirements:_ 9.1, 9.2, 9.3
 
 ### Implementation Notes
 
-- 012 Task 7.2(列挙面登録)未完了の時点でこのテストは赤 — 012 と同一 PR 系列で導入する
-  (research.md AD-5 の順序制約)。集合一致方式なら「hitl だけの一点検査」より汎用の
-  再発防止ゲートになる(contracts は matrix に `contracts` 行が既存なので包含される)。
+- **訂正(2026-07-12、gap-analysis 論点 A)**: 初版の「012 Task 7.2 未完了の時点で赤 →
+  012 と同一 PR 系列で導入」は陳腐化(012 実装完了・登録済み)。本ガードの性格は
+  初回赤の新規保護ではなく**回帰防止ゲート**であり、赤の証跡は上記 A1 手順で残す。
+- 集合一致方式なら「hitl だけの一点検査」より汎用の再発防止ゲートになる
+  (contracts は matrix に `contracts` 行が既存なので包含される)。dependabot 側の
+  集合一致は AD-9(012)の方針通り **pydantic-ai 依存レーン群**(frameworks 3 + hitl)
+  に対して行い、応用兄弟レーンの未監視は既知ギャップとして除外する。
 
 ---
 
 ## 8. 完了ゲート(全タスク後)
 
-- [ ] 8.1 レーン全ゲート緑(`mise run patterns:check` / `patterns:audit`、hitl の `fail_under = 98` 維持)+ root ユニット(`uv run pytest tests/unit/test_security_workflow_lanes.py`)緑。`pydantic-ai-slim>=2.9.0` フロアが lockfile に反映されていることを確認(R6.2)。
+- [ ] 8.1 レーン全ゲート緑(`mise run patterns:check` / `patterns:audit`、hitl の `fail_under = 98` 維持)+ root ユニット(`uv run pytest tests/unit/test_security_workflow_lanes.py`)緑。**R6.2/6.3 は既充足の回帰確認のみ**(gap-analysis 論点 B / B1): `pydantic-ai-slim[openai]>=2.9.0` フロア(`pyproject.toml:29`)と検証基準版の README 記録(`README.md:148-152`)が 012 実装時のまま緩和されていないことを確認する。フロア検証の専用テストは追加しない(downgrade は uv 解決が loud に失敗する)。
   _Boundary:_ 検証のみ(コード変更なし)
   _Depends:_ 1–7
-  _Requirements:_ 6.2
+  _Requirements:_ 6.2, 6.3

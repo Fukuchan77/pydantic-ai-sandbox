@@ -104,12 +104,19 @@ decision / denial_message / overridden_keys / timestamp`。
 `extra="forbid"` で未知フィールドは 422(R4.1, R4.3)。README に CVE ID 付きで
 設計根拠を記す(R4.4)。
 
-### AD-5: スキャン到達性は root ユニットテストで red 化
+### AD-5: スキャン到達性は root ユニットテストで再発防止(訂正版 — gap-analysis 論点 A: A1+A2 採用)
 
 `tests/unit/test_security_workflow_lanes.py`(新規): security.yml を YAML パースし
 matrix include に `patterns/hitl` 行があること、dependabot.yml の pip `directories`
-に `/patterns/hitl` があることを assert(R9.1–9.3)。012 実装前は当然 red になるため、
-**012 のレーン足場マージと同一 PR 系列で導入**する(実装順序の制約として tasks へ)。
+に `/patterns/hitl` があることを assert(R9.1–9.3)。**列挙は hitl 一点でなく
+`patterns/` 全 uv レーンと matrix の集合一致**で書く(A2 — 将来レーンの追い漏れも拾う)。
+
+**訂正(2026-07-12)**: 初版の「012 実装前は red / 012 と同一 PR 系列で導入」という前提は
+**陳腐化した** — 012 は実装完了済みで、hitl は `security.yml:162` と `dependabot.yml:91` の
+両方に登録済み(実測確認)。ガードテストは**初回作成時点で緑**になる。TDD の赤の証跡は
+**A1 の手順**で成立させる: 作業ツリー上で hitl 行を一時削除(コミットしない)→ テストが
+red になることを確認 → 復元して緑 — この 削除→赤→復元 を PDCA ログに記録する。
+本ガードの性格は「初回赤の新規保護」ではなく**回帰防止ゲート**(登録が将来剥がれたら red)。
 
 ### AD-6: SSRF/egress は WHERE 条件のガード(コードは書かない)
 

@@ -105,3 +105,16 @@ research.md AD-5 の「012 と同一 PR 系列」制約は **もはや不要**(0
   3. tasks 1/2 に app.py:202 の 404 本文是正が含まれることを確認(ズレ 4)。
   4. 上記反映後、`spec.json` の `tasks.approved` を true にして `/sdd-impl 013-agentic-ai-security` へ進む。
 - スコープ実体は **R2 状態機械 + R3 audit.py の 2 コンポーネント**に集約され、残りは低リスクな文書追記・スキーマ 1 行・grep/YAML ガードテスト。純加算・新規依存ゼロの plan 方針は維持できる。
+
+---
+
+## 解決記録(実測と design 反映、2026-07-12)
+
+上記の論点・ズレを実コードで検証し、`research.md` / `plan.md` / `tasks.md` へ反映済み。
+
+| 指摘 | 実測結果 | 反映 |
+|---|---|---|
+| 論点 A / ズレ 1(R9 の赤先行が陳腐化) | hitl は `security.yml:162`(pip-audit matrix)と `dependabot.yml:91`(pip directories)の**両方に登録済み**を確認 — ガードテストは初回緑 | **A1+A2 採用**: research AD-5 を訂正版に差し替え(「012 と同一 PR 系列」削除)、tasks 7.1 に「一時削除 → 赤確認 → 復元を PDCA ログへ」を明記、plan ScanReachabilityGuard を「回帰防止ゲート」へ再定義。dependabot 側の集合一致は AD-9 の pydantic-ai 依存レーン群に限定 |
+| 論点 B / ズレ 2・3(R6.2/6.3 既充足) | `pyproject.toml:29` に `pydantic-ai-slim[openai]>=2.9.0`、`README.md:148-152` に検証基準版が**存在済み**を確認 | **B1 採用**: plan FloorConstraint を「既充足の回帰確認」へ格下げ、tasks 8.1 を lockfile/README の緩和なし確認に変更(R6.3 を追加)。R6 の実装実体は R6.1 の SECURITY-NOTES 追記 + R6.3 文面更新に縮小。plan Summary を「真の新規実装は R2 状態機械 + R3 audit.py の 2 つ」へ更新 |
+| ズレ 4(404 本文の R1.2 既存違反) | `app.py:202` が `detail=f"unknown session_id: {exc.args[0]}"` で **session id と理由を漏洩**することを確認 | tasks §2 の前文に既存違反として明記、2.1(a) に「漏洩本文が消えることの負のアサート」、2.2 に是正実装を明記(store 層の同一 `UnknownSessionError` は 1.1(b) が担保) |
+| R2.4 の `/run` 側 429 未カバー(レビュー指摘) | `HitlBudgetExceededError` は `harness.py:120`(start)と `harness.py:157`(resume)の両方から送出、`app.py` は `/resume` の `KeyError` のみ捕捉(`app.py:200`)— **予算超過は両経路とも現状 500** を確認 | plan ConsumptionGuard を **/run・/resume 両ハンドラ**へ拡張(429 写像 + `/run` は session 非保存・`/resume` は `consume()`)、tasks 2.1 に (d) `/run` 起動時予算超過 → 429 + session 非保存ケースを追加、2.2 を両ハンドラ実装に変更 |
