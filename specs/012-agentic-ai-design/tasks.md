@@ -124,11 +124,11 @@ _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/src/pattern
 _Depends:_ 5
 _Requirements:_ 5.2, 5.3, 8.1, 8.2, 8.3, 8.5, 8.6, 9.1
 
-- [ ] 6.1 失敗テストを先行作成する。(a) `test_api.py`: `with TestClient(app):` で — `/run` 承認不要 prompt → `{status: "completed", output}` / `/run` 承認要 → `{status: "pending_approval", session_id, approvals}` / `/resume` 承認 → completed / `/resume` 拒否 → completed(代替案)/ 未知 session → 404 / `Decision` の相互排他違反(approved=True + message)→ 422。(b) `test_observability.py`: exporter/logfire 未設定環境で `create_app()` 起動が失敗しない(戻り値 False 許容)。**赤を確認する。**
+- [x] 6.1 失敗テストを先行作成する。(a) `test_api.py`: `with TestClient(app):` で — `/run` 承認不要 prompt → `{status: "completed", output}` / `/run` 承認要 → `{status: "pending_approval", session_id, approvals}` / `/resume` 承認 → completed / `/resume` 拒否 → completed(代替案)/ 未知 session → 404 / `Decision` の相互排他違反(approved=True + message)→ 422。(b) `test_observability.py`: exporter/logfire 未設定環境で `create_app()` 起動が失敗しない(戻り値 False 許容)。**赤を確認する。**
   _Boundary:_ `patterns/hitl/tests/unit/test_api.py`, `patterns/hitl/tests/unit/test_observability.py`
   _Depends:_ 5.2
   _Requirements:_ 8.6, 9.1
-- [ ] 6.2 `app.py`(**DI シーム `create_app(*, agent, store=None, instrument=True)`** — sse の keyword-only 注入署名を鏡映(plan.md HitlApp / research.md AD-8)。harness は app 内部で `(agent, store)` から組み立てる。`RunRequest` / `CompletedResponse` / `PendingResponse` / `ResumeRequest` / `Decision`(model_validator で相互排他)、`Decision` → `ToolApproved`/`ToolDenied` 写像、lifespan で `instrument=True` のとき `enable_observability(app)`)と `observability.py`(`enable_observability`: `logfire.configure` + `instrument_pydantic_ai` + `instrument_fastapi` を try/except、失敗は False 返却で続行)を実装しテストを緑化する。6.1 のテストは FunctionModel 製 agent + 素の `SessionStore()` を注入し `instrument=False` で駆動する(観測性テストのみ True)。
+- [x] 6.2 `app.py`(**DI シーム `create_app(*, agent, store=None, instrument=True)`** — sse の keyword-only 注入署名を鏡映(plan.md HitlApp / research.md AD-8)。harness は app 内部で `(agent, store)` から組み立てる。`RunRequest` / `CompletedResponse` / `PendingResponse` / `ResumeRequest` / `Decision`(model_validator で相互排他)、`Decision` → `ToolApproved`/`ToolDenied` 写像、lifespan で `instrument=True` のとき `enable_observability(app)`)と `observability.py`(`enable_observability`: `logfire.configure` + `instrument_pydantic_ai` + `instrument_fastapi` を try/except、失敗は False 返却で続行)を実装しテストを緑化する。6.1 のテストは FunctionModel 製 agent + 素の `SessionStore()` を注入し `instrument=False` で駆動する(観測性テストのみ True)。
   _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/src/patterns_hitl/observability.py`
   _Depends:_ 6.1
   _Requirements:_ 5.2, 5.3, 8.1, 8.2, 8.3, 8.5, 8.6, 9.1
