@@ -19,11 +19,11 @@ _Requirements:_ 2.1, 2.2, 2.3
 `ActionType` / `ResolutionAction` / `SupportOutput` を依存ゼロの `patterns_contracts` に
 新規契約モジュールとして純加算し(既存契約は無改変)、root からフラット再エクスポートする。
 
-- [ ] 1.1 契約形状の失敗テストを先行作成する(hermetic)。`ActionType` 閉語彙(`"DISCOUNT" | "UPGRADE" | "ESCALATE"` 受理、語彙外は ValidationError)、`ResolutionAction.amount_usd` の `ge=0` 拒否、`SupportOutput` 必須 4 フィールド(`summary_of_issue` / `reasoning` / `requires_human_approval` / `action_plan`)を検証する。**赤を確認する。**
+- [x] 1.1 契約形状の失敗テストを先行作成する(hermetic)。`ActionType` 閉語彙(`"DISCOUNT" | "UPGRADE" | "ESCALATE"` 受理、語彙外は ValidationError)、`ResolutionAction.amount_usd` の `ge=0` 拒否、`SupportOutput` 必須 4 フィールド(`summary_of_issue` / `reasoning` / `requires_human_approval` / `action_plan`)を検証する。**赤を確認する。**
   _Boundary:_ `patterns/contracts/tests/unit/test_hitl_contract.py`
   _Depends:_ none
   _Requirements:_ 2.2, 2.3
-- [ ] 1.2 `hitl.py` に契約実体を実装しテストを緑化する。`ActionType = Literal["DISCOUNT", "UPGRADE", "ESCALATE"]`(col-0 名前付きエイリアス — drift parser 対称、research.md I-3)、`ResolutionAction`(`action_type: ActionType` / `target_id: str` / `amount_usd: float = Field(ge=0)`)、`SupportOutput`。`__init__.py` の `__all__` へ 3 名を追加する。
+- [x] 1.2 `hitl.py` に契約実体を実装しテストを緑化する。`ActionType = Literal["DISCOUNT", "UPGRADE", "ESCALATE"]`(col-0 名前付きエイリアス — drift parser 対称、research.md I-3)、`ResolutionAction`(`action_type: ActionType` / `target_id: str` / `amount_usd: float = Field(ge=0)`)、`SupportOutput`。`__init__.py` の `__all__` へ 3 名を追加する。
   _Boundary:_ `patterns/contracts/src/patterns_contracts/hitl.py`, `patterns/contracts/src/patterns_contracts/__init__.py`
   _Depends:_ 1.1
   _Requirements:_ 2.1, 2.2, 2.3
@@ -41,11 +41,11 @@ _Boundary:_ `patterns/hitl/README.md`, `patterns/contracts/tests/unit/test_contr
 _Depends:_ 1
 _Requirements:_ 2.1, 2.4, 13.1, 13.2, 13.3
 
-- [ ] 2.1 `patterns/hitl/README.md` を作成する。`## パターン契約` 直後の python fence に正本ブロック(Task 1.2 と同一)を記載し、別節に: 停止・承認・再開フローの解説、Durable Execution ノート(公式統合 = Temporal / DBOS / Prefect、Restate は Restate 側 SDK)、セキュリティノート(v1 併用時 `>=1.99.0` フロア、信頼できない `message_history`/URL の SSRF リスク、`safe_download` 経路 — 実装はしない)、検証基準版(pydantic-ai-slim 2.9.0 / 2026-07-11)を記す。
+- [x] 2.1 `patterns/hitl/README.md` を作成する。`## パターン契約` 直後の python fence に正本ブロック(Task 1.2 と同一)を記載し、別節に: 停止・承認・再開フローの解説、Durable Execution ノート(公式統合 = Temporal / DBOS / Prefect、Restate は Restate 側 SDK)、セキュリティノート(v1 併用時 `>=1.99.0` フロア、信頼できない `message_history`/URL の SSRF リスク、`safe_download` 経路 — 実装はしない)、検証基準版(pydantic-ai-slim 2.9.0 / 2026-07-11)を記す。
   _Boundary:_ `patterns/hitl/README.md`
   _Depends:_ 1.2
   _Requirements:_ 2.1, 13.1, 13.2, 13.3
-- [ ] 2.2 `test_contract_drift.py` の `_README_PATHS` に `"hitl": patterns/hitl/README.md` を 1 行追加し(parser 無改修)、drift テストと既存契約テスト全体を緑に保つ。
+- [x] 2.2 `test_contract_drift.py` の `_README_PATHS` に `"hitl": patterns/hitl/README.md` を 1 行追加し(parser 無改修)、drift テストと既存契約テスト全体を緑に保つ。
   _Boundary:_ `patterns/contracts/tests/unit/test_contract_drift.py`
   _Depends:_ 2.1
   _Requirements:_ 2.4
