@@ -162,11 +162,11 @@ _Boundary:_ `patterns/hitl/tests/integration/`, `.github/workflows/patterns-inte
 _Depends:_ 6, 7
 _Requirements:_ 11.1, 11.2, 11.3, 12.1
 
-- [ ] 8.1 `tests/integration/test_ollama_hitl_e2e.py` を作成する。`RUN_INTEGRATION_PATTERNS=1` ゲート、`OLLAMA_MODEL_NAME` env 経由でモデル解決(ハードコードなし)、live モデルで 停止 → 承認 → 再開 → `SupportOutput` の e2e を最小 1 本 + 拒否 path 1 本。conftest は既存レーンの live ガード(`pytest_live_guard`)方式を踏襲し、`EXPECT_LIVE_TESTS` と本数を一致させる。
+- [x] 8.1 `tests/integration/test_ollama_hitl_e2e.py` を作成する。`RUN_INTEGRATION_PATTERNS=1` ゲート、`OLLAMA_MODEL_NAME` env 経由でモデル解決(ハードコードなし)、live モデルで 停止 → 承認 → 再開 → `SupportOutput` の e2e を最小 1 本 + 拒否 path 1 本。conftest は既存レーンの live ガード(`pytest_live_guard`)方式を踏襲し、`EXPECT_LIVE_TESTS` と本数を一致させる。
   _Boundary:_ `patterns/hitl/tests/integration/`
   _Depends:_ 6.2
   _Requirements:_ 11.1, 11.2, 12.1
-- [ ] 8.2 `patterns-integration-ollama.yml` に hitl ジョブを追加する(`workflow_dispatch` のみ — `pull_request:` トリガーを付けない)。workflow ガードテストの緑を確認する。
+- [x] 8.2 `patterns-integration-ollama.yml` に hitl ジョブを追加する(`workflow_dispatch` のみ — `pull_request:` トリガーを付けない)。workflow ガードテストの緑を確認する。
   _Boundary:_ `.github/workflows/patterns-integration-ollama.yml`
   _Depends:_ 7.2, 8.1
   _Requirements:_ 11.3
