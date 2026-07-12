@@ -203,3 +203,125 @@ Task 1.2 が作った sequenced-red(drift 4 テストが赤)を、Task 2.1 の R
 - これで Section 1〜2 完了。次は Section 3(レーン足場: 独立 uv プロジェクト、3.14、
   ゲート設定)— 本コンテナは 3.14 ローカル実行不可のため赤・緑確認は CI(hitl ジョブ)へ
   委譲する運用(tasks T3.2 / M-2)。
+
+---
+
+## Task 3.1 — レーン足場(`pyproject.toml` / `.python-version` / `__init__.py` + `py.typed`)
+
+**日付**: 2026-07-12
+**Boundary**: `patterns/hitl/pyproject.toml`, `patterns/hitl/uv.lock`, `patterns/hitl/.python-version`
+**Requirements**: 1.1, 1.2, 1.3, 1.5, 10.1
+
+### 実装(非 TDD — スキャフォールディングタスク、tasks.md に「赤を確認する」記載なし)
+
+- `patterns/hitl/.python-version` = `3.14`(sse レーンと同一ピン)。
+- `patterns/hitl/pyproject.toml` を sse レーンの雛形に(research.md I-2)新規作成。
+  - `dependencies`: `patterns-contracts`(path dep)、`pydantic-ai-slim[openai]>=2.9.0`、
+    `fastapi>=0.136`、`logfire`(tasks.md 3.1 の記載どおり、`beeai-framework` /
+    `llamaindex` は宣言しない)。
+  - `dependency-groups.dev`: `httpx` / `pip-audit` / `pyright` / `pytest` /
+    `pytest-asyncio` / `pytest-cov` / `ruff`。
+  - ゲート設定: ruff は root/sse と同一 select セット、`pyright strict`
+    (`pythonVersion = "3.14"`)、`asyncio_mode = "auto"`、`fail_under = 98`。
+  - `readme = "README.md"`(Task 2.1 で正本作成済みのため、sse 当時のように
+    `readme` 宣言を先送りする必要はない)。
+  - `[tool.uv.sources] patterns-contracts = { path = "../contracts", editable = true }`。
+- `src/patterns_hitl/__init__.py` + `src/patterns_hitl/py.typed`(PEP 561 マーカー)を作成。
+
+### 環境上の訂正(do.md 末尾の前提を更新)
+
+Task 2.2 ログ末尾は「本コンテナは 3.14 ローカル実行不可」としていたが、本タスク実行時に
+`uv python list` で `cpython-3.14.5-macos-aarch64-none` がローカル導入済みと判明
+(sse レーンの既存 `.venv` が同バージョンを使用済み)。したがって Task 3.1 の
+`uv lock` / `uv sync` / ruff / pyright はローカルで直接実行し、CI 委譲は不要だった
+(Task 3.2 のテスト実行時点で再度ローカル実行可能性を確認する)。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| lock | `cd patterns/hitl && uv lock` | `Using CPython 3.14.5` / `Resolved 79 packages in 917ms` |
+| lock 内容 | `grep -c "beeai\|llama-index\|llamaindex" uv.lock` | `0`(禁止依存の混入なし) |
+| sync | `uv sync --all-groups` | 79 パッケージ導入(`patterns-contracts` / `patterns-hitl` editable 含む) |
+| lint | `uv run ruff check .` | `All checks passed!` |
+| format | `uv run ruff format --check .` | `1 file already formatted` |
+| typecheck | `uv run pyright` | `0 errors, 0 warnings, 0 informations` |
+| 既存契約への回帰 | `cd patterns/contracts && uv run pytest --no-cov -q` | `66 passed`(Task 2.2 時点から変化なし) |
+
+### 学び
+
+- sse レーンとの差分は「README が先行済み」の一点(Task 2.1 が正本を先に作った順序の
+  違い)。`readme` フィールドを宣言できるため sse のような hatchling ビルド破損回避コメントは
+  不要。
+- 3.14 のローカル可用性は環境依存で変わりうる(mise/uv キャッシュの状態次第)。次タスク
+  (3.2 のテスト実行)でも都度確認し、不可なら tasks.md M-2 の CI 委譲手順に切り替える。
+
+---
+
+## Task 3.2 — `conftest.py` の hermetic 強制 + スモークテスト(赤→緑)
+
+**日付**: 2026-07-12
+**Boundary**: `patterns/hitl/tests/unit/conftest.py`, `patterns/hitl/tests/unit/test_smoke.py`
+**Requirements**: 10.1
+
+### 環境確認(M-2 の CI 委譲判定)
+
+Task 3.1 に続き 3.14 がローカル実行可能(`cpython-3.14.5`)なことを再確認。したがって
+本タスクの赤・緑確認もローカルで直接行い、CI(hitl ジョブ)への委譲は不要だった。
+
+### RED
+
+`tests/unit/test_smoke.py` を新規作成(conftest.py はまだ置かない)。3 テスト:
+
+- `test_patterns_hitl_imports`: `import patterns_hitl` が通ること。
+- `test_hitl_contract_importable_via_path_dependency`: `patterns_contracts` から
+  `ActionType` / `ResolutionAction` / `SupportOutput` を import し、path dependency
+  経由で契約が使えることを確認(`SupportOutput(action_plan=[ResolutionAction(...)])`
+  を構築)。
+- `test_hermetic_guard_blocks_real_model_requests_by_default`: 未実装時点では
+  `pydantic_ai.models.ALLOW_MODEL_REQUESTS` の既定値が `True`(事前に
+  `uv run python -c "from pydantic_ai import models; print(models.ALLOW_MODEL_REQUESTS)"`
+  で確認済み)なので、`is False` 検査は失敗する設計。
+
+確認コマンドと結果:
+
+```
+$ uv run pytest --no-cov tests/unit/test_smoke.py -v
+tests/unit/test_smoke.py::test_patterns_hitl_imports PASSED
+tests/unit/test_smoke.py::test_hitl_contract_importable_via_path_dependency PASSED
+tests/unit/test_smoke.py::test_hermetic_guard_blocks_real_model_requests_by_default FAILED
+  assert True is False
+1 failed, 2 passed
+```
+
+赤を確認(hermetic guard 未設定分のみが赤 — 設計どおり)。
+
+### GREEN
+
+`tests/unit/conftest.py` を新規作成(`patterns/frameworks/pydantic-ai` レーンの
+既存 conftest を雛形にそのまま踏襲 — tasks.md 3.2 の指定どおり):
+
+```python
+if os.environ.get("RUN_INTEGRATION_PATTERNS") != "1":
+    models.ALLOW_MODEL_REQUESTS = False
+```
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| test(対象ファイル、緑化後) | `uv run pytest --no-cov tests/unit/test_smoke.py -v` | **3 passed** |
+| lint | `uv run ruff check .` | 初回 `I001`(import 未整列)→ `ruff check --fix .` で解消 → `All checks passed!` |
+| format | `uv run ruff format --check .` | `3 files already formatted` |
+| typecheck | `uv run pyright` | `0 errors, 0 warnings, 0 informations` |
+| test+coverage(レーン全体) | `uv run pytest --cov -q` | `3 passed` / `src/patterns_hitl` **100%** カバレッジ(floor 98 達成) |
+| 既存契約への回帰 | `cd patterns/contracts && uv run pytest --no-cov -q` | `66 passed`(変化なし) |
+| ルート回帰 | `mise run check` | `282 passed, 4 skipped`(変化なし、patterns/ は root ゲート対象外のため無影響) |
+
+### 学び
+
+- `ruff` の isort は `patterns_contracts` を third-party 扱いする(このレーンの
+  `known-first-party` は `patterns_hitl` のみ)。`pydantic_ai` と `patterns_contracts`
+  の import 順は `--fix` に委ねればよく、手で並べ替える必要はない。
+- Section 3(レーン足場)完了。次は Section 4(`agent.py` + ポリシーセンサー、
+  4.1 の失敗テスト先行作成)。

@@ -60,11 +60,11 @@ _Requirements:_ 1.1, 1.2, 1.3, 1.5, 10.1
 
 sse レーンの pyproject を雛形に(research.md I-2)独立 uv プロジェクトを起こす。
 
-- [ ] 3.1 `pyproject.toml` / `.python-version`(3.14)/ `src/patterns_hitl/__init__.py` + `py.typed` を作成する。依存: `patterns-contracts`(`[tool.uv.sources] path = "../contracts", editable = true`)、`pydantic-ai-slim[openai]>=2.9.0`、`fastapi>=0.136`、`logfire`。dev: `pytest` / `pytest-asyncio` / `pytest-cov` / `pyright` / `ruff` / `pip-audit` / `httpx`。ゲート: ruff 同一セット、pyright strict(3.14)、`asyncio_mode = "auto"`、`fail_under = 98`。`beeai-framework` / `llamaindex` は宣言しない。`uv lock` で lockfile を生成する。
+- [x] 3.1 `pyproject.toml` / `.python-version`(3.14)/ `src/patterns_hitl/__init__.py` + `py.typed` を作成する。依存: `patterns-contracts`(`[tool.uv.sources] path = "../contracts", editable = true`)、`pydantic-ai-slim[openai]>=2.9.0`、`fastapi>=0.136`、`logfire`。dev: `pytest` / `pytest-asyncio` / `pytest-cov` / `pyright` / `ruff` / `pip-audit` / `httpx`。ゲート: ruff 同一セット、pyright strict(3.14)、`asyncio_mode = "auto"`、`fail_under = 98`。`beeai-framework` / `llamaindex` は宣言しない。`uv lock` で lockfile を生成する。
   _Boundary:_ `patterns/hitl/pyproject.toml`, `patterns/hitl/uv.lock`, `patterns/hitl/.python-version`
   _Depends:_ 1.2
   _Requirements:_ 1.1, 1.2, 1.3, 1.5, 10.1
-- [ ] 3.2 `tests/unit/conftest.py` で `pydantic_ai.models.ALLOW_MODEL_REQUESTS = False` を強制し、スモークテスト(`import patterns_hitl` + 契約 import)で足場の緑を確認する。**赤→緑の証跡(M-2)**: ローカルで 3.14 が実行不能な場合、赤・緑それぞれの確認を patterns-ci(hitl ジョブ)で行い、CI run URL をコミットメッセージまたはタスク完了記録(PDCA ログ)へ残す — sse / frameworks/pydantic-ai の既存 3.14 レーンと同じ運用。以降の全タスク(T4〜T6)の赤確認にも同手順を適用する。
+- [x] 3.2 `tests/unit/conftest.py` で `pydantic_ai.models.ALLOW_MODEL_REQUESTS = False` を強制し、スモークテスト(`import patterns_hitl` + 契約 import)で足場の緑を確認する。**赤→緑の証跡(M-2)**: ローカルで 3.14 が実行不能な場合、赤・緑それぞれの確認を patterns-ci(hitl ジョブ)で行い、CI run URL をコミットメッセージまたはタスク完了記録(PDCA ログ)へ残す — sse / frameworks/pydantic-ai の既存 3.14 レーンと同じ運用。以降の全タスク(T4〜T6)の赤確認にも同手順を適用する。
   _Boundary:_ `patterns/hitl/tests/unit/conftest.py`, `patterns/hitl/tests/unit/test_smoke.py`
   _Depends:_ 3.1
   _Requirements:_ 10.1
