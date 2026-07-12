@@ -6,14 +6,16 @@
 
 ## Summary
 
-012 の `SessionStore` に**状態機械 + CSPRNG id 生成**を足して消費セマンティクスを
-確定し(research.md AD-1/AD-2)、承認判断ごとの**マスク済み監査イベント**を注入可能な
-`AuditEmitter` シーム(既定 logfire fail-soft)で送出する(AD-3)。`/resume` は
-`extra="forbid"` + 履歴フィールド非定義で「履歴はサーバー正本」をスキーマ強制し
-(AD-4)、CVE スキャン到達性(security.yml matrix / dependabot)は root の
-workflow ガードテストで red 化する(AD-5)。SSRF/egress・依存フロア・OWASP
-マッピング・no-fix advisory runbook は SECURITY-NOTES / レーン README への
-対称追記 + grep ガードで担保する(AD-6)。新規依存ゼロ・新規基盤ゼロ。
+**真に新規の実装は 2 つ** — R2 の消費セマンティクス状態機械(012 `SessionStore` への
+拡張 + CSPRNG id 生成、research.md AD-1/AD-2)と、R3 の `audit.py` 監査証跡(注入可能な
+`AuditEmitter` シーム、既定 logfire fail-soft、AD-3)。残りは縮小済み: `/resume` の
+`extra="forbid"` はスキーマ 1 行 + テスト(AD-4)、CVE スキャン到達性は初回緑の回帰防止
+ガードテスト(AD-5 訂正版 — hitl は 012 で登録済み、赤は一時削除手順)、SSRF/egress・
+OWASP マッピング・runbook は SECURITY-NOTES / README への文書追記 + grep ガード(AD-6)、
+依存フロア(R6.2/6.3)は**既充足の確認のみ**(gap-analysis 論点 B)。あわせて既存違反
+1 件を是正する: `/resume` 404 本文の session id 漏洩(`app.py:202`、R1.2 違反)と、
+`/run`・`/resume` 両経路で未捕捉の予算超過(現状 500 → 429、R2.4)。
+新規依存ゼロ・新規基盤ゼロ。
 
 ## Architecture Overview
 
@@ -57,11 +59,20 @@ flowchart TD
 
 ### ConsumptionGuard(`patterns/hitl/src/patterns_hitl/app.py` — 012 HitlApp の拡張)
 
-- **Responsibility**: 消費セマンティクスの HTTP 写像(research.md AD-2 の表)。
+- **Responsibility**: 消費セマンティクスの HTTP 写像(research.md AD-2 の表)—
+  **`/run` と `/resume` の両ハンドラ**に適用する(R2.4 は "a run or resume" を明記)。
+- **現状の実装事実(2026-07-12 実測)**:
+  - `HitlBudgetExceededError` は `harness.start()`(`harness.py:120`)と
+    `resume()`(`harness.py:157`)の両方から送出されるが、`app.py` は `/resume` の
+    `KeyError` しか捕捉しない(`app.py:200`)→ 予算超過は**両経路とも現状 500**。
+  - `/resume` の 404 本文は `detail=f"unknown session_id: {exc.args[0]}"`(`app.py:202`)で
+    **session id と「unknown」という理由を漏洩** — R1.2 の既存違反。本コンポーネントで是正必須。
 - **Public interface**:
-  - 未知 / consumed session → `404`(本文は存在情報を含まない固定メッセージ)
+  - 未知 / consumed session → `404`(本文は **id も理由も含まない固定メッセージ** —
+    `app.py:202` の漏洩を是正、R1.2)
   - `decisions` のキーが `pending_call_ids` 外 → `409`、**ツール実行前に**拒絶(R2.3)
-  - 012 harness の usage-limit 専用例外 → `429` + `consume()`(R2.4)
+  - `HitlBudgetExceededError` → `429`。**`/run` では session を作らず**、`/resume` では
+    `consume()` して以後 404(R2.4 — 両ハンドラに except を配置)
 - **Requirements**: 1.2, 2.1, 2.3, 2.4
 
 ### AuditTrail(`patterns/hitl/src/patterns_hitl/audit.py` — 新規)
@@ -97,12 +108,17 @@ flowchart TD
   存在検査(R5.1, 5.2 の WHERE 条件が発火するまでの番人)。
 - **Requirements**: 5.1, 5.2, 5.3(README 節の存在検査)
 
-### FloorConstraint(`patterns/hitl/pyproject.toml`)
+### FloorConstraint(`patterns/hitl/pyproject.toml` — **既充足の回帰確認に格下げ**、gap-analysis 論点 B: B1 採用)
 
-- **Responsibility**: 依存フロアのゲート化。
-- **Public interface**: `pydantic-ai-slim[openai]>=2.9.0`(検証基準版をフロアに、
-  R6.2)。v1 併用フロア `>=1.99.0` は**文書要件**(SECURITY-NOTES / README、R6.1, 6.3)。
-- **Requirements**: 6.1, 6.2, 6.3
+- **Responsibility**: 依存フロアの回帰確認(新規実装ではない)。
+- **既充足の事実(2026-07-12 実測)**: `pydantic-ai-slim[openai]>=2.9.0` は 012 実装で
+  `pyproject.toml:29` に設定済み・uv.lock 反映済み(R6.2 充足)。検証基準版の README 記録も
+  `README.md:148-152` に存在(R6.3 充足)。
+- **残作業**: tasks 8.1 の lockfile 確認のみ(意図しないフロア緩和が入っていないことの
+  目視確認)。フロア検証の専用ユニットテストは追加しない(B2 却下 — downgrade は
+  uv 解決が既に loud に失敗する)。R6 の実装実体は **R6.1(SECURITY-NOTES への CVE 追記)
+  と R6.3 の文面更新(013 完了の反映)に縮小**。
+- **Requirements**: 6.2, 6.3(確認)/ 実装は SecurityNotesSync(6.1)へ
 
 ### SecurityNotesSync(`patterns/SECURITY-NOTES.md`)
 
@@ -121,11 +137,17 @@ flowchart TD
 
 ### ScanReachabilityGuard(`tests/unit/test_security_workflow_lanes.py` — root、新規)
 
-- **Responsibility**: レーン列挙面の登録漏れを red 化(nltk 事案の再発防止)。
+- **Responsibility**: レーン列挙面の登録漏れを red 化する**回帰防止ゲート**
+  (nltk 事案の再発防止)。
 - **Public interface**: `test_ollama_ci_workflows.py` と同じ YAML パース手法で
   (a) `security.yml` の `patterns-pip-audit` matrix include に
   `{lane: hitl, dir: patterns/hitl}` があること、(b) `dependabot.yml` の pip
   `directories` に `/patterns/hitl` があることを assert(R9.1–9.3)。
+  列挙は `patterns/` 全 uv レーンと matrix の**集合一致**で書く(research.md AD-5 A2)。
+- **前提の訂正(gap-analysis 論点 A)**: hitl は 012 実装で既に両列挙面へ登録済み
+  (`security.yml:162` / `dependabot.yml:91`、実測確認)のため、本テストは
+  **初回作成時点で緑**になる。TDD の赤は「hitl 行の一時削除(非コミット)→ red 確認 →
+  復元」で成立させ、PDCA ログに記録する(A1)。
 - **Owns**: 到達性の機械検証。012 の LaneScaffold(登録の実施)とは責務分離。
 - **Requirements**: 9.1, 9.2, 9.3
 
@@ -204,8 +226,10 @@ tests/unit/test_security_workflow_lanes.py   # root、新規 (到達性ガード
   フェイルソフト境界)。両者を混同しない。
 - 並行 resume(同一 session への同時 POST)は `claim()` を同期区間にして
   先勝ち・後続 404(インメモリ MVP の範囲。分散対応は out of scope)。
-- ScanReachabilityGuard は 012 レーン足場の存在に依存 → 012 と同一 PR 系列で導入
-  (research.md AD-5、tasks の順序制約)。
+- ScanReachabilityGuard は初回緑(hitl 登録済み)の回帰防止ゲート — 赤の証跡は
+  一時削除手順で残す(research.md AD-5 訂正版)。
+- `/run` の予算超過 429 では **session を保存しない**(部分状態を残さない)。
+  `/resume` の 429 は `consume()` で失効させる — 両者の差をテストで固定する。
 
 ## Constitution Compliance
 
