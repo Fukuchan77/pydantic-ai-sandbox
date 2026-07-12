@@ -20,11 +20,11 @@ _Boundary:_ `patterns/hitl/src/patterns_hitl/store.py`, `patterns/hitl/tests/uni
 _Depends:_ none(012 完了後)
 _Requirements:_ 1.1, 1.2, 1.3, 2.1, 2.2
 
-- [ ] 1.1 失敗テストを先行作成する。(a) `test_session_hygiene.py`: 同一 prompt で 2 session → 異なる非連続 id(接頭辞・連番・時刻由来でない)、id 生成が `new_session_id()` 一点に集約されている。(b) `test_consumption.py`(store 層): `claim()` は未知 id・`in_flight` id・`consumed` id のいずれでも**同一の** `UnknownSessionError`(区別情報なし)、`claim()` 成功で `pending → in_flight` へ**同期遷移**し 2 回目の `claim()` は失敗(並行先勝ち)、終端 `consume()` 後の `claim()` 失敗、再 defer の `settle_pending()` で `in_flight → pending` へ戻り pending 集合が新しい `tool_call_id` 群へ置換され旧 id が無効、`release()` で `in_flight → pending` 復元後は再 `claim()` 可能。**赤を確認する。**
+- [x] 1.1 失敗テストを先行作成する。(a) `test_session_hygiene.py`: 同一 prompt で 2 session → 異なる非連続 id(接頭辞・連番・時刻由来でない)、id 生成が `new_session_id()` 一点に集約されている。(b) `test_consumption.py`(store 層): `claim()` は未知 id・`in_flight` id・`consumed` id のいずれでも**同一の** `UnknownSessionError`(区別情報なし)、`claim()` 成功で `pending → in_flight` へ**同期遷移**し 2 回目の `claim()` は失敗(並行先勝ち)、終端 `consume()` 後の `claim()` 失敗、再 defer の `settle_pending()` で `in_flight → pending` へ戻り pending 集合が新しい `tool_call_id` 群へ置換され旧 id が無効、`release()` で `in_flight → pending` 復元後は再 `claim()` 可能。**赤を確認する。**
   _Boundary:_ `patterns/hitl/tests/unit/test_session_hygiene.py`, `patterns/hitl/tests/unit/test_consumption.py`
   _Depends:_ none
   _Requirements:_ 1.2, 1.3, 2.1, 2.2, 2.3
-- [ ] 1.2 `store.py` を拡張しテストを緑化する。`new_session_id()`(`uuid.uuid4()` 一元化)、`SessionRecord` に `state: Literal["pending", "in_flight", "consumed"]` と `pending_call_ids: frozenset[str]` を追加、`claim()`(`pending` のときのみ成功し**同期的に** `pending → in_flight`)/ `settle_pending()`(`in_flight → pending`)/ `consume()`(`→ consumed`)/ `release()`(`in_flight → pending`、409 用)の状態遷移を実装(research.md AD-1 / AD-2)。並行 resume は `claim()` の同期遷移で先勝ちにする(2 本目は `in_flight` を見て失敗)。
+- [x] 1.2 `store.py` を拡張しテストを緑化する。`new_session_id()`(`uuid.uuid4()` 一元化)、`SessionRecord` に `state: Literal["pending", "in_flight", "consumed"]` と `pending_call_ids: frozenset[str]` を追加、`claim()`(`pending` のときのみ成功し**同期的に** `pending → in_flight`)/ `settle_pending()`(`in_flight → pending`)/ `consume()`(`→ consumed`)/ `release()`(`in_flight → pending`、409 用)の状態遷移を実装(research.md AD-1 / AD-2)。並行 resume は `claim()` の同期遷移で先勝ちにする(2 本目は `in_flight` を見て失敗)。
   _Boundary:_ `patterns/hitl/src/patterns_hitl/store.py`
   _Depends:_ 1.1
   _Requirements:_ 1.1, 1.2, 2.1, 2.2, 2.3
