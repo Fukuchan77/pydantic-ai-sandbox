@@ -41,6 +41,13 @@ machine's HTTP mapping (research.md AD-2):
   route; ``/run`` never persisted a session to begin with, and
   ``/resume``'s session is already consumed by the harness before this
   is raised (R2.4).
+
+Spec 013 R3 adds one :func:`patterns_hitl.audit.build_audit_event` call
+per decision on ``/resume``, before the ``await`` into the harness --
+emission runs through :func:`patterns_hitl.audit.emit_audit_event`'s
+fail-soft boundary, so a broken ``audit_emitter`` (the default
+``LogfireAuditEmitter`` or a caller-supplied one) never blocks or fails
+the resume it is only observing (R3.4).
 """
 
 from __future__ import annotations
@@ -55,18 +62,20 @@ from fastapi import FastAPI, HTTPException
 # class-definition time even under `from __future__ import annotations`.
 from patterns_contracts import SupportOutput  # noqa: TC002  # used in a pydantic field
 from pydantic import BaseModel, model_validator
-from pydantic_ai import ToolApproved, ToolDenied, UsageLimits
+from pydantic_ai import ToolApproved, ToolCallPart, ToolDenied, UsageLimits
 
+from .audit import LogfireAuditEmitter, build_audit_event, emit_audit_event
 from .harness import LIMITS, HitlBudgetExceededError, HitlHarness, PendingResult
 from .observability import enable_observability
 from .store import SessionStore, UnknownSessionError
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncGenerator, Iterable
 
-    from pydantic_ai import Agent, DeferredToolRequests
+    from pydantic_ai import Agent, DeferredToolRequests, ModelMessage
 
     from .agent import HitlDeps
+    from .audit import AuditEmitter
 
 __all__ = ["create_app"]
 
@@ -175,15 +184,37 @@ async def _handle_run(
     return CompletedResponse(output=result.output)
 
 
+def _tool_names_by_call_id(history: list[ModelMessage], call_ids: Iterable[str]) -> dict[str, str]:
+    """Map each pending ``tool_call_id`` to its tool name by scanning the stored history.
+
+    The last ``ModelResponse`` before a stop point carries the
+    ``ToolCallPart``(s) a decision resolves; the store persists that full
+    history but not a separate tool-name index, so this rebuilds the
+    mapping on demand rather than widening ``SessionRecord``'s contract
+    (spec 013 R3.1).
+    """
+    wanted = set(call_ids)
+    names: dict[str, str] = {}
+    for message in history:
+        for part in message.parts:
+            if isinstance(part, ToolCallPart) and part.tool_call_id in wanted:
+                names[part.tool_call_id] = part.tool_name
+    return names
+
+
 async def _handle_resume(
-    harness: HitlHarness, store: SessionStore, body: ResumeRequest
+    harness: HitlHarness, store: SessionStore, audit_emitter: AuditEmitter, body: ResumeRequest
 ) -> CompletedResponse | PendingResponse:
-    """Resume ``body.session_id`` with the caller's decisions (R8.3, R8.5, spec 013 R1.2/R2).
+    """Resume ``body.session_id`` with the caller's decisions (R8.3, R8.5, spec 013 R1.2/R2/R3).
 
     The pending-set check (``409``) runs synchronously between ``claim()``
     and the ``await`` into the harness, so a concurrent claim on the same
     session can never observe a half-applied decision set (research.md
-    AD-2, spec 013 R2.3).
+    AD-2, spec 013 R2.3). One audit event is emitted per decision -- at
+    the point the decisions are about to be applied -- before that
+    ``await``, so the audit trail records what was decided independently
+    of whether the resumed run then completes, re-defers, or overruns its
+    budget (spec 013 R3.1).
     """
     try:
         record = store.claim(body.session_id)
@@ -192,6 +223,17 @@ async def _handle_resume(
     if not set(body.decisions.keys()) <= record.pending_call_ids:
         store.release(body.session_id)
         raise HTTPException(status_code=409, detail=_PENDING_SET_VIOLATION_DETAIL)
+    tool_names = _tool_names_by_call_id(record.history, body.decisions.keys())
+    for tool_call_id, decision in body.decisions.items():
+        event = build_audit_event(
+            session_id=body.session_id,
+            tool_call_id=tool_call_id,
+            tool_name=tool_names.get(tool_call_id, "unknown"),
+            approved=decision.approved,
+            override_args=decision.override_args,
+            denial_message=decision.message,
+        )
+        emit_audit_event(audit_emitter, event)
     decisions = {
         tool_call_id: _to_deferred_result(decision)
         for tool_call_id, decision in body.decisions.items()
@@ -211,6 +253,7 @@ def create_app(
     store: SessionStore | None = None,
     usage_limits: UsageLimits = LIMITS,
     instrument: bool = True,
+    audit_emitter: AuditEmitter | None = None,
 ) -> FastAPI:
     """Build the HITL FastAPI app with the agent (and optionally the store) injected.
 
@@ -229,11 +272,17 @@ def create_app(
             :func:`patterns_hitl.observability.enable_observability`
             fail-soft on startup (R9.1). Tests other than
             ``test_observability.py`` pass ``False`` to skip it.
+        audit_emitter: Where ``/resume`` sends one approval-decision audit
+            event per decision (spec 013 R3); a fresh
+            :class:`~patterns_hitl.audit.LogfireAuditEmitter` is created
+            when omitted. Tests inject an in-memory emitter to assert on
+            emitted events with zero real exporter I/O (R3.5).
 
     Returns:
         A FastAPI app exposing ``POST /run`` and ``POST /resume``.
     """
     resolved_store = store or SessionStore()
+    resolved_audit_emitter = audit_emitter or LogfireAuditEmitter()
     harness = HitlHarness(agent, resolved_store, usage_limits=usage_limits)
 
     @asynccontextmanager
@@ -259,6 +308,6 @@ def create_app(
     async def resume(  # pyright: ignore[reportUnusedFunction]
         body: ResumeRequest,
     ) -> CompletedResponse | PendingResponse:
-        return await _handle_resume(harness, resolved_store, body)
+        return await _handle_resume(harness, resolved_store, resolved_audit_emitter, body)
 
     return app

@@ -67,11 +67,11 @@ _Boundary:_ `patterns/hitl/src/patterns_hitl/audit.py`, `patterns/hitl/src/patte
 _Depends:_ 2
 _Requirements:_ 3.1, 3.2, 3.3, 3.4, 3.5
 
-- [ ] 3.1 失敗テスト `test_audit_trail.py` を先行作成する(`InMemoryAuditEmitter` 注入、実エクスポータ I/O ゼロ)。(a) approve / deny / override の各 path で判断 1 件 = イベント 1 件、(b) イベントに `session_id` / `tool_call_id` / `tool_name` / `decision` / `denial_message` / `timestamp` が載る、(c) `override_args={"amount_usd": 30.0, "reason": "x"}` で `overridden_keys == ("amount_usd", "reason")` かつイベント全体をシリアライズしても値 `30.0` / `"x"` が現れない、(d) emitter が例外を投げても resume は成功する。**赤を確認する。**
+- [x] 3.1 失敗テスト `test_audit_trail.py` を先行作成する(`InMemoryAuditEmitter` 注入、実エクスポータ I/O ゼロ)。(a) approve / deny / override の各 path で判断 1 件 = イベント 1 件、(b) イベントに `session_id` / `tool_call_id` / `tool_name` / `decision` / `denial_message` / `timestamp` が載る、(c) `override_args={"amount_usd": 30.0, "reason": "x"}` で `overridden_keys == ("amount_usd", "reason")` かつイベント全体をシリアライズしても値 `30.0` / `"x"` が現れない、(d) emitter が例外を投げても resume は成功する。**赤を確認する。**
   _Boundary:_ `patterns/hitl/tests/unit/test_audit_trail.py`, `patterns/hitl/tests/support/in_memory_audit.py`
   _Depends:_ 2.2
   _Requirements:_ 3.1, 3.2, 3.3, 3.4, 3.5
-- [ ] 3.2 `audit.py`(`AuditEvent` — 引数生値フィールドなし、`AuditEmitter` Protocol、`LogfireAuditEmitter` — fail-soft)を実装し、`create_app(audit_emitter=...)` に注入シーム(既定 = logfire 実装)を追加してテストを緑化する。送出は `/resume` の判断適用点で行う。
+- [x] 3.2 `audit.py`(`AuditEvent` — 引数生値フィールドなし、`AuditEmitter` Protocol、`LogfireAuditEmitter` — fail-soft)を実装し、`create_app(audit_emitter=...)` に注入シーム(既定 = logfire 実装)を追加してテストを緑化する。送出は `/resume` の判断適用点で行う。
   _Boundary:_ `patterns/hitl/src/patterns_hitl/audit.py`, `patterns/hitl/src/patterns_hitl/app.py`
   _Depends:_ 3.1
   _Requirements:_ 3.1, 3.2, 3.3, 3.4
