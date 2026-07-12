@@ -1189,3 +1189,147 @@ $ git status --short patterns/hitl patterns/frameworks/pydantic-ai
   拡張した 2 つの glob パスがそれぞれ独立に機能していることを取りこぼしなく検証できる。
 - Section 7(mise / patterns-ci / security.yml / dependabot / モデル ID ガード)完了。
   次は Section 8(live 統合レーン、Task 8.1〜8.2)。
+
+---
+
+## Task 8.1 — Live 統合レーン(dispatch-only Ollama e2e)
+
+**日付**: 2026-07-12
+**Boundary**: `patterns/hitl/tests/integration/`
+**Requirements**: 11.1, 11.2, 12.1
+
+### 実装
+
+`tests/integration/test_ollama_hitl_e2e.py` を新規作成(`patterns/sse/tests/integration/test_ollama_e2e.py`
+を雛形に、研究ノート I-2 の直近前例)。`tests/integration/conftest.py` は sse と同じ
+1 行再エクスポート(`patterns_contracts.pytest_live_guard`)。
+
+- `create_app(agent=build_agent(_ollama_model()), store=SessionStore(), instrument=False)`
+  を実 HTTP レイヤ(`httpx.ASGITransport`)経由で駆動 — Task 6 のハーメティックテストと
+  同一 DI シームを再利用し、live モデルだけを実体に差し替える(plan.md HitlApp)。
+- プロンプトは自由記述ではなく `apply_discount` を具体引数(`$500.00` — 既定閾値
+  `$50` 超)で明示指示する形にした。ハーメティック `FunctionModel`/`TestModel` 系の
+  スクリプト(`apply_discount_call`)と同じ「ツール呼び出しを強制しやすい」形。
+  `escalate_to_legal`(条件なし承認必須)ではなく `apply_discount` を選んだのは、
+  数値を含む具体的行動要求の方が live モデルのツール選択再現性が高いと判断したため。
+  実測(下記)でも 1 回目の試行から両ケースとも安定して `pending_approval` に到達した。
+- 承認経路 1 本 + 拒否経路 1 本(`EXPECT_LIVE_TESTS=2`, mise.toml Task 7.1 と一致)。
+  再 defer(R6.1)に対する耐性として `_run_until_completed` に最大 5 往復の
+  `/resume` ループを実装(model が複数ツールを連鎖させても loud に fail しない)。
+- モデル文字列は `OLLAMA_MODEL_NAME` env のみ(R12.1、ハードコードなし)。
+
+### RED → GREEN(実測)
+
+このコンテナは通常 Python 3.14 を uv でダウンロードできない制約があるが(research.md
+I-5)、`patterns/hitl/.venv` は既存タスクで 3.14 が実際に用意されていたため、ローカルで
+直接 RED/GREEN を確認できた(CI 迂回は不要だった)。
+
+```
+$ cd patterns/hitl && uv run pytest tests/integration -v          # ゲート未設定 = 赤の代わりに確認すべき「安全な skip」
+2 skipped                                                          # RUN_INTEGRATION_PATTERNS 未設定 → 収集は成功し、無条件 skip(false-green にならないことを確認)
+
+$ RUN_INTEGRATION_PATTERNS=1 OLLAMA_MODEL_NAME=granite4.1:8b \
+  uv run pytest tests/integration -v
+2 passed in 55.51s                                                 # 実 Ollama デーモン(granite4.1:8b)に対し初回から green
+
+$ OLLAMA_MODEL_NAME=granite4.1:8b RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2 \
+  uv run pytest tests/integration -v
+2 passed in 72.66s                                                 # mise タスクと同じ環境変数構成でも green、EXPECT_LIVE_TESTS ガードも実行数 2 を検出して通過
+
+$ mise run patterns:test:integration:hitl                          # OLLAMA_MODEL_NAME を明示しないタスク単体
+KeyError: 'OLLAMA_MODEL_NAME'                                       # 想定内(タスクは CI/手動実行時に env で供給される前提、mise.toml に組み込み値なし)
+```
+
+再実行(フォーマット適用後の再確認、非決定性への耐性チェック):
+
+```
+$ OLLAMA_MODEL_NAME=granite4.1:8b RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2 \
+  uv run pytest tests/integration -v
+2 passed in 70.91s                                                  # 2 回目も安定して green
+```
+
+### VERIFY
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| lint | `uv run ruff check .` | All checks passed! |
+| format | `uv run ruff format --check .` → 1 file reformat → 再確認 | reformat 後 `18 files already formatted` |
+| typecheck | `uv run pyright` | 0 errors, 0 warnings, 0 informations |
+| unit(回帰) | `uv run pytest --cov` | `30 passed, 2 skipped`、カバレッジ `100.00%`(unaffected) |
+| pip-audit | `uv run pip-audit` | `No known vulnerabilities found` |
+| live e2e(ゲート付き、2 回実測) | 上記 | 両方 `2 passed` |
+| root モデル ID ガード回帰 | `uv run pytest --no-cov tests/unit/test_no_hardcoded_model_ids.py -q` | `2 passed` |
+| workflow ガード回帰 | `uv run pytest --no-cov tests/unit/test_ollama_ci_workflows.py -q` | `5 passed`(Task 8.2 未着手のため hitl ジョブ言及なし、想定どおり無変化) |
+
+### 学び
+
+- Task 3.2 の実装ノートが想定していた「ローカル 3.14 実行不能」制約は、このコンテナの
+  現状の `patterns/hitl/.venv` では解消済みだった — CI 迂回の記録要件（M-2）を機械的に
+  適用する前に、まず実際にローカル実行を試すことで、実測の RED→GREEN 証跡を得られた。
+- live e2e のツール強制は「意味的な指示」(legal risk を匂わせる)より「具体的な数値
+  つきの行動要求」の方が再現性が高い、というハーメティックテスト側の設計判断
+  (`apply_discount_call` が既定)をそのまま live プロンプトにも転用するのが妥当。
+- Section 8 は Task 8.1 完了、Task 8.2(`patterns-integration-ollama.yml` への hitl ジョブ
+  追加 + workflow ガードテスト緑化)が残タスク。
+
+---
+
+## Task 8.2 — `patterns-integration-ollama.yml` への hitl ジョブ追加
+
+**日付**: 2026-07-12
+**Boundary**: `.github/workflows/patterns-integration-ollama.yml`
+**Requirements**: 11.3
+
+### 実装(非 TDD — CI 設定ファイルの列挙面追加タスク、tasks.md に「赤を確認する」記載なし。Task 7.2 と同型)
+
+`jobs.e2e.strategy.matrix.include` の `deep-research` 行の直後(既存 6 レーンの末尾)に
+hitl エントリを追加(config-only、コード変更なし):
+
+```yaml
+- lane: hitl
+  dir: patterns/hitl
+  task: 'patterns:test:integration:hitl'
+  embed: false
+  timeout: 60
+```
+
+- `embed: false` — hitl は rag と異なり埋め込みモデルを使わない(sse/beeai/pydantic-ai/
+  deep-research と同じ)。
+- `timeout: 60` — 他の非 llamaindex レーンと同じ既定値。Task 8.1 のローカル実測
+  (`EXPECT_LIVE_TESTS=2`、2 テスト計 55〜73 秒)から、CI のモデル pull ステップは
+  別ステップ(タイムアウト対象外)であり、`mise run patterns:test:integration:hitl`
+  自体の実行時間は 60 分の枠に十分収まる。
+- ワークフロー冒頭のコメント(6 レーン言及、L7/L32)は変更していない — L7 は
+  「redesign 前の旧 nightly 体制が 6 レーン走らせていた」という**過去の事実**の記述、
+  L32 の「six contract-level e2e cases per framework lane」は frameworks/ 3 レーン限定の
+  記述で、いずれも hitl 追加によって不正確化しない(事前に文脈を再読して確認)。
+- ジョブレベル concurrency(`matrix.lane` キー)・per-lane cache key
+  (`${{ matrix.lane }}` サフィックス)は既存の汎用式がそのまま hitl にも適用される
+  ため、hitl 用の追記は不要(sse/deep-research 追加時と同じ)。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| YAML 構文 + matrix 反映確認 | `uv run python -c "import yaml; ...; assert 'hitl' in lanes"` | `['beeai', 'pydantic-ai', 'llamaindex', 'rag', 'sse', 'deep-research', 'hitl']` / `OK` |
+| workflow ガードへの回帰 | `uv run pytest --no-cov tests/unit/test_ollama_ci_workflows.py -v` | **5 passed**(`workflow_dispatch` 単一トリガー・concurrency 網羅の両方を維持したまま hitl 追加を許容) |
+| ルート回帰(全体) | `mise run check` | **282 passed, 4 skipped**(変化なし) |
+
+新設 `hitl` matrix エントリ自体(daemon 起動 → model pull → `mise run
+patterns:test:integration:hitl` 実行)は GitHub Actions ランナー上でのみ実際に走る
+(ローカルではワークフロー実行系の E2E 検証はできない、Task 7.2 と同じ制約)。YAML
+構文検証 + 既存ガードテスト緑維持がローカルで確認可能な決定論的な検証範囲。
+
+### 学び
+
+- 既存の `test_ollama_ci_workflows.py` はレーン数に非依存な構造的invariant
+  (トリガー種別・concurrency 網羅性)のみをピン留めしているため、matrix に
+  レーンを追加するだけの変更では新規テストの追加(赤化)は要求されない —
+  Task 7.2 で確立した「config-only 追加は YAML 構文 + 既存ガード緑で十分」という
+  検証範囲の判断をそのまま踏襲した。
+- ワークフロー冒頭のコメントに数値(「6 レーン」)が出てきても、それが現在の
+  matrix サイズを指しているのか過去の体制を指しているのかを文脈で見極める必要が
+  ある — L7 は past-tense の redesign 経緯、L32 は frameworks/ サブセット限定の
+  記述であり、どちらも今回のレーン追加とは無関係だった。
+- Section 8(live 統合レーン)完了。残タスクは Section 9(Task 9.1、ドキュメント
+  索引同期)のみ。
