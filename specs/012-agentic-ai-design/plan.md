@@ -125,23 +125,33 @@ run は `DeferredToolRequests` で停止 → SessionStore に `message_history` 
 ### SessionStore(`patterns/hitl/src/patterns_hitl/store.py`)
 
 - **Responsibility**: session id → `(message_history, usage)` のインメモリ保持。
-- **Public interface**: `create(history, usage) -> str`(uuid4)、`get(session_id)`、
-  `update(session_id, history, usage)`、`pop/invalidate` は 013 が拡張。
+- **Public interface**(gap-analysis「state store 案 A」採用): 細い `SessionStore`
+  **Protocol**(`create(history, usage) -> str` / `get(session_id)` /
+  `update(session_id, history, usage)`)+ in-memory 具象 `InMemorySessionStore`
+  (uuid4 生成、MVP 実体はこれ 1 つのみ — over-engineering 回避)。
+  Protocol が 013 の状態機械拡張と将来の Durable / 永続 DB の差し替え点になる。
+  `pop/invalidate` は 013 が拡張。
 - **Owns**: プロセス内状態の正本(R8.4)。
 - **Does NOT own**: 永続化・TTL(out of scope)、消費セマンティクス(013 R2)。
 - **Requirements**: 8.4
 
 ### HitlApp(`patterns/hitl/src/patterns_hitl/app.py`)
 
-- **Responsibility**: FastAPI app-factory `create_app(...)` と 2 エンドポイント。
-- **Public interface**:
+- **Responsibility**: FastAPI app-factory と 2 エンドポイント。
+- **Public interface**(DI シーム — sse の `create_app(*, event_source, tracer_provider=None)` を鏡映、research.md AD-8 / gap-analysis HIGH):
+  - `create_app(*, agent: Agent[HitlDeps, SupportOutput | DeferredToolRequests], store: SessionStore | None = None, instrument: bool = True) -> FastAPI`
+    — harness は app 内部で `(agent, store)` から組み立てる。テストは FunctionModel/TestModel
+    製の agent と素の `SessionStore()` を注入し、実 I/O ゼロで /run→/resume 全経路を駆動する
+    (R8.6, R10.4)。`instrument=False` で計装ブートストラップを外せる(観測性テスト以外の
+    ユニットは False を注入)。013 は同シームへ `audit_emitter=` を追加する。
   - `POST /run` `{prompt}` → `200 {status: "completed", output: SupportOutput}` か
     `200 {status: "pending_approval", session_id, approvals: [{tool_call_id, tool_name, args}]}`(R8.1, 8.2)
   - `POST /resume` `{session_id, decisions: {tool_call_id: {approved: bool, override_args?, message?}}}`
     → 終端か再 defer(R8.3)。未知 session は `404`(R8.5)
-  - lifespan で `enable_observability()` を fail-soft 起動(R9.1)
+  - lifespan で `enable_observability()` を fail-soft 起動(`instrument=True` のとき、R9.1)
 - **Owns**: HTTP 形状、pydantic-ai 型 ↔ API スキーマの写像
-  (`ToolApproved(override_args=...)` / `ToolDenied(message=...)` への変換、R5.2, 5.3)。
+  (`ToolApproved(override_args=...)` / `ToolDenied(message=...)` への変換、R5.2, 5.3)、
+  app→harness→agent/store の配線。
 - **Does NOT own**: 認証・レート制限(013 で設計ノート化)、消費セマンティクス(013)。
 - **Requirements**: 5.2, 5.3, 8.1, 8.2, 8.3, 8.5, 8.6
 
@@ -168,9 +178,24 @@ run は `DeferredToolRequests` で停止 → SessionStore に `message_history` 
   - `.github/workflows/patterns-ci.yml`: `patterns/hitl/**` paths + 専用ジョブ(R1.6)
   - `.github/workflows/security.yml`: `patterns-pip-audit` matrix に
     `{ lane: hitl, dir: patterns/hitl }`(R1.6)
-  - `.github/dependabot.yml`: pip `directories` へ `/patterns/hitl`(R1.6)
+  - `.github/dependabot.yml`: pip `directories` へ `/patterns/hitl`(R1.6)。
+    **判定規則(gap-analysis G-1 / AD-9)**: dependabot は pydantic-ai 依存レーンを個別監視する
+    (現行 frameworks 3 レーン + hitl)。応用兄弟レーン(rag/sse/deep-research)の未監視は
+    本 spec のスコープ外の既知ギャップ(daily security cron が補完)。R1.6 の合否は
+    「`directories` に `/patterns/hitl` が存在すること」で決定的に判定する
   - `patterns-integration-ollama.yml`: hitl 統合ジョブ(dispatch-only、R11.3)
 - **Requirements**: 1.1–1.6, 10.1, 11.1, 11.2, 11.3
+
+### ModelIdGuardSecondLayer(`tests/unit/test_no_hardcoded_model_ids.py` — root、編集)
+
+- **Responsibility**: モデル ID 二層ガードの第2層(backing test)を新レーンへ到達させる。
+- **Public interface**: `_iter_scanned_py_files()` の走査対象を `REPO_ROOT / "src"` に加えて
+  `patterns/*/src` へ拡張する(gap-analysis H-1: 現行は root `src/` のみ rglob し、
+  patterns/ は「未スキャンゆえ自動 pass」— 第1層 pre-commit は `types: [python]` で
+  patterns を走査済みなので、第2層のみが欠けている)。
+- **Owns**: 第2層の走査範囲。禁止リテラル集合(`FORBIDDEN_MODEL_ID_LITERALS`)は無改変。
+- **Does NOT own**: pre-commit フック側(既に patterns を走査、無改変)。
+- **Requirements**: 12.2
 
 ### HermeticTests(`patterns/hitl/tests/unit/` + `tests/support/`)
 
@@ -293,5 +318,6 @@ mise.toml / patterns-ci.yml / security.yml / dependabot.yml / patterns-integrati
 | 9.1 | Observability |
 | 10.1–10.4 | HermeticTests + LaneScaffold(10.1) |
 | 11.1–11.3 | LiveIntegration + LaneScaffold |
-| 12.1–12.2 | HitlAgent(env 経由)+ LaneScaffold(hook 対象) |
+| 12.1 | HitlAgent(env 経由)+ LaneScaffold(hook 対象) |
+| 12.2 | ModelIdGuardSecondLayer(第2層走査拡張)+ pre-commit 第1層(既存・無改変) |
 | 13.1–13.3 | HitlCanon |
