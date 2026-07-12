@@ -96,16 +96,16 @@ _Requirements:_ 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 5.4, 10.3, 12.1
 
 ## 5. ハーネス + セッションストア(停止・承認・再開・予算通算)
 
-_Boundary:_ `patterns/hitl/src/patterns_hitl/harness.py`, `patterns/hitl/src/patterns_hitl/store.py`, `patterns/hitl/tests/unit/test_stop_approve_resume.py`, `patterns/hitl/tests/support/function_model_scripts.py`
+_Boundary:_ `patterns/hitl/src/patterns_hitl/harness.py`, `patterns/hitl/src/patterns_hitl/store.py`, `patterns/hitl/tests/unit/test_stop_approve_resume.py`, `patterns/hitl/tests/unit/test_store.py`, `patterns/hitl/tests/support/function_model_scripts.py`
 _Depends:_ 4
 _Requirements:_ 4.1, 4.2, 5.1, 5.2, 5.3, 6.1, 7.1, 7.2, 7.3, 8.4, 10.2, 10.4
 
-- [ ] 5.1 失敗テスト `test_stop_approve_resume.py` を先行作成する(`tests/support/function_model_scripts.py` の FunctionModel 台本駆動 — 具体形は research.md I-1 の実行確認済み 2 フェーズ台本(`len(messages)==1` → 承認必須ツール呼び出し、以降 → `ToolCallPart("final_result", ...)`)を転用。終端応答は必ず `ToolCallPart("final_result", ...)`)。ケース: (a) 停止 → `PendingResult`(`tool_name`/`args`/`tool_call_id` 露出)、(b) `ToolApproved` 再開 → ツール実行 → `SupportOutput` 終端、(c) `ToolApproved(override_args=...)` → 上書き引数で実行、(d) `ToolDenied(message=...)` → ツール未実行 + モデルが拒否理由を受けて代替終端、(e) 再開後の再 defer → 2 度目の `PendingResult`(型ガード)、(f) usage 通算 — resume に前 run の `usage` が渡り、低い `total_tokens_limit` で 2 run 目に `UsageLimitExceeded` 由来の専用例外。**赤を確認する。**
+- [x] 5.1 失敗テスト `test_stop_approve_resume.py` を先行作成する(`tests/support/function_model_scripts.py` の FunctionModel 台本駆動 — 具体形は research.md I-1 の実行確認済み 2 フェーズ台本(`len(messages)==1` → 承認必須ツール呼び出し、以降 → `ToolCallPart("final_result", ...)`)を転用。終端応答は必ず `ToolCallPart("final_result", ...)`)。ケース: (a) 停止 → `PendingResult`(`tool_name`/`args`/`tool_call_id` 露出)、(b) `ToolApproved` 再開 → ツール実行 → `SupportOutput` 終端、(c) `ToolApproved(override_args=...)` → 上書き引数で実行、(d) `ToolDenied(message=...)` → ツール未実行 + モデルが拒否理由を受けて代替終端、(e) 再開後の再 defer → 2 度目の `PendingResult`(型ガード)、(f) usage 通算 — resume に前 run の `usage` が渡り、低い `total_tokens_limit` で 2 run 目に `UsageLimitExceeded` 由来の専用例外。**赤を確認する。**
   _Boundary:_ `patterns/hitl/tests/unit/test_stop_approve_resume.py`, `patterns/hitl/tests/support/function_model_scripts.py`
   _Depends:_ 4.2
   _Requirements:_ 10.2, 10.4
-- [ ] 5.2 `store.py`(`SessionStore`: uuid4 生成 / `SessionRecord(history, usage)` の create・get・update)と `harness.py`(`start(prompt)` / `resume(session_id, decisions)` — `usage_limits=LIMITS`、resume は `message_history` + `deferred_tool_results` + `usage=stored.usage`、戻り値は `isinstance` 分岐で `TerminalResult | PendingResult`、`UsageLimitExceeded` は `HitlBudgetExceededError` へ変換)を実装しテストを緑化する。
-  _Boundary:_ `patterns/hitl/src/patterns_hitl/harness.py`, `patterns/hitl/src/patterns_hitl/store.py`
+- [x] 5.2 `store.py`(`SessionStore`: uuid4 生成 / `SessionRecord(history, usage)` の create・get・update)と `harness.py`(`start(prompt)` / `resume(session_id, decisions)` — `usage_limits=LIMITS`、resume は `message_history` + `deferred_tool_results` + `usage=stored.usage`、戻り値は `isinstance` 分岐で `TerminalResult | PendingResult`、`UsageLimitExceeded` は `HitlBudgetExceededError` へ変換)を実装しテストを緑化する。
+  _Boundary:_ `patterns/hitl/src/patterns_hitl/harness.py`, `patterns/hitl/src/patterns_hitl/store.py`, `patterns/hitl/tests/unit/test_store.py`
   _Depends:_ 5.1
   _Requirements:_ 4.1, 4.2, 5.1, 5.2, 5.3, 6.1, 7.1, 7.2, 7.3, 8.4
 
