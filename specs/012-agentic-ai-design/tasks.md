@@ -141,15 +141,15 @@ _Boundary:_ `mise.toml`, `.github/workflows/patterns-ci.yml`, `.github/workflows
 _Depends:_ 3
 _Requirements:_ 1.4, 1.6, 11.1, 11.2
 
-- [ ] 7.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に `patterns/hitl` の明示行を(contracts → frameworks glob → rag/sse/deep-research の後に)追加し、`patterns:test:integration:hitl`(`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2`)を新設する。`EXPECT_LIVE_TESTS=2` は T8.1 の live 本数(e2e 承認経路 1 本 + 拒否経路 1 本)と一致させ、空振り緑を決定論的に赤化する。
+- [x] 7.1 `mise.toml` の `patterns:{setup,lint,format,typecheck,test,audit}` に `patterns/hitl` の明示行を(contracts → frameworks glob → rag/sse/deep-research の後に)追加し、`patterns:test:integration:hitl`(`RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2`)を新設する。`EXPECT_LIVE_TESTS=2` は T8.1 の live 本数(e2e 承認経路 1 本 + 拒否経路 1 本)と一致させ、空振り緑を決定論的に赤化する。
   _Boundary:_ `mise.toml`
   _Depends:_ 3.1
   _Requirements:_ 1.4, 11.1, 11.2
-- [ ] 7.2 `.github/workflows/patterns-ci.yml` に `patterns/hitl/**` の paths トリガーと専用ジョブ(rag/sse と同型: lock --check → sync --locked → ruff → pyright → pytest → pip-audit)を追加し、`.github/workflows/security.yml` の `patterns-pip-audit` matrix に `{ lane: hitl, dir: patterns/hitl }` を、`.github/dependabot.yml` の pip `directories` に `/patterns/hitl` を追加する(**方針 = AD-9**: dependabot は pydantic-ai 依存レーンを個別監視。応用兄弟レーン未監視は既知ギャップとしてスコープ外)。既存の workflow ガードテスト(`tests/unit/test_ollama_ci_workflows.py` 等)が緑のままであることを確認する。
+- [x] 7.2 `.github/workflows/patterns-ci.yml` に `patterns/hitl/**` の paths トリガーと専用ジョブ(rag/sse と同型: lock --check → sync --locked → ruff → pyright → pytest → pip-audit)を追加し、`.github/workflows/security.yml` の `patterns-pip-audit` matrix に `{ lane: hitl, dir: patterns/hitl }` を、`.github/dependabot.yml` の pip `directories` に `/patterns/hitl` を追加する(**方針 = AD-9**: dependabot は pydantic-ai 依存レーンを個別監視。応用兄弟レーン未監視は既知ギャップとしてスコープ外)。既存の workflow ガードテスト(`tests/unit/test_ollama_ci_workflows.py` 等)が緑のままであることを確認する。
   _Boundary:_ `.github/workflows/patterns-ci.yml`, `.github/workflows/security.yml`, `.github/dependabot.yml`
   _Depends:_ 3.1
   _Requirements:_ 1.6
-- [ ] 7.3 モデル ID 二層ガードの**第2層**を新レーンへ到達させる(gap-analysis H-1 / research.md AD-10)。`tests/unit/test_no_hardcoded_model_ids.py` の `_iter_scanned_py_files()` の走査対象へ `patterns/*/src` を追加する(禁止リテラル集合は無改変)。TDD: まず走査拡張だけを入れた状態で `patterns/hitl/src` に一時ファイルで禁止リテラルを植え込み**赤を確認**(コミットしない)→ 撤去して緑を恒久化。既存レーン src が現状クリーンであることを事前 grep で確認してから拡張する。
+- [x] 7.3 モデル ID 二層ガードの**第2層**を新レーンへ到達させる(gap-analysis H-1 / research.md AD-10)。`tests/unit/test_no_hardcoded_model_ids.py` の `_iter_scanned_py_files()` の走査対象へ `patterns/*/src` を追加する(禁止リテラル集合は無改変)。TDD: まず走査拡張だけを入れた状態で `patterns/hitl/src` に一時ファイルで禁止リテラルを植え込み**赤を確認**(コミットしない)→ 撤去して緑を恒久化。既存レーン src が現状クリーンであることを事前 grep で確認してから拡張する。
   _Boundary:_ `tests/unit/test_no_hardcoded_model_ids.py`
   _Depends:_ 3.1
   _Requirements:_ 12.2
