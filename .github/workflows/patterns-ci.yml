@@ -36,6 +36,10 @@ on:
       # patterns/deep-research/ with its own dedicated job below. `patterns/**`
       # already matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/deep-research/**'
+      # The HITL harness lane (Spec 012 Req 1.6) is an independent lane at
+      # patterns/hitl/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/hitl/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   pull_request:
@@ -58,6 +62,10 @@ on:
       # patterns/deep-research/ with its own dedicated job below. `patterns/**`
       # already matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/deep-research/**'
+      # The HITL harness lane (Spec 012 Req 1.6) is an independent lane at
+      # patterns/hitl/ with its own dedicated job below. `patterns/**` already
+      # matches it, but it is listed explicitly as a first-class CI surface.
+      - 'patterns/hitl/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -332,5 +340,60 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 7.2 / 009 Req 13: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # The HITL harness lane (Spec 012 Req 1.1) is an independent uv project at
+  # patterns/hitl/ — depth 1 under patterns/, a sibling of frameworks/ / rag/ /
+  # sse/ / deep-research/, NOT an entry in the lane matrix above. Like the sse
+  # lane it gets a dedicated job mirroring the lane gates (Req 1.6) on Python
+  # 3.14 (the pydantic-ai v2 baseline the deferred-tools mechanism requires).
+  # The unit suite is offline and hermetic — conftest.py forces
+  # `models.ALLOW_MODEL_REQUESTS = False` unless RUN_INTEGRATION_PATTERNS=1
+  # (Req 10.1), so NO daemon or model pre-fetch step is needed; the live-Ollama
+  # e2e is gated by RUN_INTEGRATION_PATTERNS and runs in
+  # patterns-integration-ollama.yml. Coverage floor is the sibling-lane parity
+  # 98 (NFR-4); the lane lands at 100%.
+  hitl:
+    name: hitl
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/hitl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # uv reads patterns/hitl/.python-version (3.14) and provisions the
+      # matching interpreter — no mise needed (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/hitl/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
+
+      - name: Sync hitl dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Offline + hermetic: ALLOW_MODEL_REQUESTS=False (conftest) keeps the
+      # whole unit suite network-zero (Req 10.1); no daemon needed here.
+      - name: pytest (offline, coverage floor 98)
+        run: uv run pytest --cov --cov-report=term
+
+      # Spec 012 Req 1.6: per-lockfile dependency CVE scan.
       - name: pip-audit
         run: uv run pip-audit

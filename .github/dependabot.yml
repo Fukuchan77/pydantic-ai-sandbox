@@ -71,18 +71,24 @@ updates:
     # "Supply-chain watch operational rule" for the manual review checklist).
 
   # ---------------------------------------------------------------------------
-  # patterns/ framework lanes (Spec 005 Req 7.2 / plan §7). Each lane is an
-  # independent uv project with its own lockfile; `directories` fans the same
-  # weekly policy out to all three. pydantic-ai stays ungrouped for the same
-  # V2-Beta review reason as the root entry; beeai-framework is pinned exact
-  # (plan §8 R-1: the test fake subclasses ChatModel internals), so its bumps
-  # must surface as individual PRs too.
+  # patterns/ pydantic-ai-dependent lanes (Spec 005 Req 7.2 / plan §7; Spec 012
+  # AD-9). Each lane is an independent uv project with its own lockfile;
+  # `directories` fans the same weekly policy out to all four. pydantic-ai
+  # stays ungrouped for the same V2-Beta review reason as the root entry;
+  # beeai-framework is pinned exact (plan §8 R-1: the test fake subclasses
+  # ChatModel internals), so its bumps must surface as individual PRs too.
+  # `patterns/hitl` (Spec 012) depends directly on `pydantic-ai-slim` for its
+  # stop/approve/resume deferred-tools mechanism, so it joins this monitored
+  # set; the application sibling lanes (rag/sse/deep-research) are a known,
+  # scoped-out gap covered by the daily security.yml pip-audit cron instead
+  # (Req 1.6 decision rule: "directories に /patterns/hitl が存在すること").
   # ---------------------------------------------------------------------------
   - package-ecosystem: pip
     directories:
       - "/patterns/frameworks/pydantic-ai"
       - "/patterns/frameworks/beeai"
       - "/patterns/frameworks/llamaindex"
+      - "/patterns/hitl"
     schedule:
       interval: weekly
       day: monday

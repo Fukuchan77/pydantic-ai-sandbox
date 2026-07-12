@@ -16,6 +16,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SRC_DIR = REPO_ROOT / "src"
+PATTERNS_DIR = REPO_ROOT / "patterns"
 
 # Canonical forbidden literal set. Add to this list whenever a new model ID
 # enters the codebase via env-driven configuration; the pre-commit pygrep hook
@@ -30,10 +31,25 @@ FORBIDDEN_MODEL_ID_LITERALS: tuple[str, ...] = (
 
 
 def _iter_scanned_py_files() -> list[Path]:
-    """Yield Python source files under `src/` excluding package markers."""
-    if not SRC_DIR.exists():
-        return []
-    return [path for path in SRC_DIR.rglob("*.py") if path.name != "__init__.py"]
+    """Yield Python source files under every `src/` tree, excluding package markers.
+
+    Covers the root app's `src/` plus every `patterns/` lane's `src/` — both
+    the depth-1 app lanes (`patterns/*/src`, e.g. hitl/rag/sse) and the
+    depth-2 framework lanes (`patterns/frameworks/*/src`, e.g. pydantic-ai/
+    beeai/llamaindex). This closes gap-analysis H-1 (research.md AD-10): the
+    pre-commit `forbid-hardcoded-model-ids` hook already scans all of
+    `patterns/` (`types: [python]`, no path restriction beyond `tests/**` and
+    `src/**/config.py`), but this runtime second layer previously scanned
+    only the root `src/` — new lanes were "unscanned, so auto-pass".
+    """
+    src_dirs = [SRC_DIR, *PATTERNS_DIR.glob("*/src"), *PATTERNS_DIR.glob("frameworks/*/src")]
+    return [
+        path
+        for src_dir in src_dirs
+        if src_dir.exists()
+        for path in src_dir.rglob("*.py")
+        if path.name != "__init__.py"
+    ]
 
 
 def test_no_hardcoded_model_ids_in_src() -> None:

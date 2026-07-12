@@ -159,6 +159,7 @@ jobs:
           - { lane: rag,           dir: patterns/rag }
           - { lane: sse,           dir: patterns/sse }
           - { lane: deep-research, dir: patterns/deep-research }
+          - { lane: hitl,          dir: patterns/hitl }
     defaults:
       run:
         working-directory: ${{ matrix.dir }}
