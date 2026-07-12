@@ -32,6 +32,9 @@ dependencies = [
     # Fail-soft observability bootstrap (plan.md Observability / R9.1):
     # `logfire.instrument_pydantic_ai()` + `instrument_fastapi()`.
     "logfire",
+    # `HitlSettings` env-var loading (risk threshold / live model name),
+    # mirroring the root app's `pydantic_ai_sandbox.config.Settings` pattern.
+    "pydantic-settings>=2",
 ]
 
 [dependency-groups]

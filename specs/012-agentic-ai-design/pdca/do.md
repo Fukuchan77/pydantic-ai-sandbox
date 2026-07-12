@@ -325,3 +325,224 @@ if os.environ.get("RUN_INTEGRATION_PATTERNS") != "1":
   の import 順は `--fix` に委ねればよく、手で並べ替える必要はない。
 - Section 3(レーン足場)完了。次は Section 4(`agent.py` + ポリシーセンサー、
   4.1 の失敗テスト先行作成)。
+
+---
+
+## Task 4.1 — `agent.py` 失敗テスト先行作成(`test_output_validator.py` + `test_agent_tools.py`)
+
+**日付**: 2026-07-12
+**Boundary**: `patterns/hitl/tests/unit/test_output_validator.py`, `patterns/hitl/tests/unit/test_agent_tools.py`
+**Requirements**: 3.5, 10.3
+
+### API 事実確認(実装前の一次調査 — venv 直接確認、research.md I-1 の追認)
+
+ローカル `.venv`(pydantic-ai-slim 2.9.0 相当)で import パスを実測した:
+
+- `DeferredToolRequests` / `DeferredToolResults` / `ToolApproved` / `ToolDenied` /
+  `ApprovalRequired` / `ModelRetry` / `UnexpectedModelBehavior` / `ModelMessage` /
+  `ModelResponse` / `ToolCallPart` は `pydantic_ai` トップレベルから re-export 済み。
+  `FunctionModel` / `AgentInfo` は `pydantic_ai.models.function` のみ(トップレベル
+  未 export)。`TestModel` は `pydantic_ai.models.test`。
+- `@agent.output_validator` は `DeferredToolRequests` が出力候補から除外された後の
+  構造化出力のみを受け取る(`_output.py:476-478` で `outputs` から事前に取り除かれる)
+  — 検証対象を `SupportOutput` 1 本に限定してよい根拠。
+- `TestModel._JsonSchemaTestData._int_gen`: `minimum` のみ設定時は
+  `minimum + seed`(既定 `seed=0`)を返す。`amount_usd: float = Field(ge=0)` なら
+  自動生成値は常に `0.0` — 既定閾値(50.0)を下回ることが決定論的に保証される
+  (`apply_discount` 低額 path のテストが乱数に依存しない根拠)。
+- `Agent` の既定 `retries`(output 用)は `1`。`ModelRetry` は 1 回まで許容され、
+  2 回目の違反で `output_retries_used > 1` となり `UnexpectedModelBehavior` に
+  変換される — 追加の `retries=` 指定なしで枯渇 path を組める。
+
+### RED
+
+- `test_agent_tools.py`: `patterns_hitl.agent` から `HitlDeps` / `build_agent` を
+  import(未実装のため設計どおり赤化)。
+  - `test_approval_not_required_tool_terminates_with_support_output`:
+    `TestModel(call_tools=["search_customer_context"])` で承認不要ツールのみを
+    呼ばせ、`result.output` が `SupportOutput` になることを検証(R10.3)。
+  - `test_apply_discount_below_threshold_executes_without_approval`:
+    `TestModel(call_tools=["apply_discount"])`。上記の `_int_gen` 事実により
+    生成される `amount_usd=0.0` は既定閾値未満 → `ApprovalRequired` が発生せず
+    `SupportOutput` 終端することを検証(R5.4)。
+- `test_output_validator.py`: `patterns_hitl.agent` に加え `patterns_hitl.settings`
+  から `HitlSettings` を import(同様に未実装で赤化)。
+  - `_final_result_call()`: `ToolCallPart("final_result", {...SupportOutput
+    フィールド...})` を組み立てる共通ヘルパー(research.md I-1 の検証済み終端形)。
+  - `test_output_validator_retries_on_policy_violation_then_succeeds`:
+    `FunctionModel` 台本(`nonlocal calls` カウンタで phase 判定 — 5.1 の
+    `len(messages)` 判定とは独立の、この検証専用の単純な形)。1 回目は
+    `amount_usd = threshold + 50.0` かつ `requires_human_approval=False` で
+    ポリシー違反終端 → `ModelRetry` 想定 → 2 回目で `requires_human_approval=True`
+    に訂正した終端 → 成功。`calls == 2` で実際に 1 回リトライされたことを検証(R3.5)。
+  - `test_output_validator_exhausts_retry_budget_and_raises`: 台本が常に違反終端を
+    返し続け、`pytest.raises(UnexpectedModelBehavior)` で枯渇 path を検証(R3.5)。
+  - 違反額は `HitlSettings().risk_threshold_usd + 50.0` として算出(既定値 50.0 を
+    テストにハードコードせず、settings 側の変更に追従できるようにした)。
+
+確認コマンドと結果:
+
+```
+$ .venv/bin/python3 -m pytest tests/unit/test_output_validator.py tests/unit/test_agent_tools.py -v --no-cov
+ModuleNotFoundError: No module named 'patterns_hitl.agent'
+Interrupted: 2 errors during collection
+```
+
+赤を確認(collection-time `ModuleNotFoundError` — `agent.py` / `settings.py` 未実装が
+原因であり、Task 4.2 の GREEN 対象と一致する。1.1 / 3.2 と同型の sequenced-red)。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| test(新規ファイル) | `.venv/bin/python3 -m pytest tests/unit/test_output_validator.py tests/unit/test_agent_tools.py -v --no-cov` | RED: `ModuleNotFoundError` で collection 中断(設計どおり) |
+| test(既存スイート) | `.venv/bin/python3 -m pytest --no-cov -q --ignore=tests/unit/test_output_validator.py --ignore=tests/unit/test_agent_tools.py` | **3 passed**(既存スモークテストへの回帰なし) |
+| lint | `.venv/bin/ruff check tests/unit/test_output_validator.py tests/unit/test_agent_tools.py` | 初回 `All checks passed!` |
+| format | `.venv/bin/ruff format --check ...` → `--fix` 相当 | 初回 `test_output_validator.py` が未整形 → `ruff format` で解消 → 再チェック `2 files already formatted` |
+| typecheck(sequenced-red の追認) | `.venv/bin/pyright tests/unit/test_output_validator.py tests/unit/test_agent_tools.py` | `reportMissingImports`(`patterns_hitl.agent` / `patterns_hitl.settings`)を根に 30 件のカスケード型エラー — 未実装に起因する想定内の赤 |
+
+### 範囲外(Task 4.2 へ)
+
+`patterns_hitl/agent.py`(`HitlDeps` / `build_agent` / 3 ツール /
+`@output_validator`)と `patterns_hitl/settings.py`(`HitlSettings`)の実装は本タスクの
+スコープ外。本タスクは失敗テストの先行作成と赤確認のみ。
+
+### 学び
+
+- `TestModel` の `_JsonSchemaTestData._int_gen` の決定論性(`minimum` のみ →
+  `minimum + seed`)を使うと、ツール引数を乱数に依存させずに「閾値未満」を保証できる
+  — `apply_discount` のような条件付き承認ツールを `TestModel(call_tools=[...])` で
+  テストする際の再利用可能なパターン。
+- `@agent.output_validator` は union `output_type=[SupportOutput,
+  DeferredToolRequests]` のうち `DeferredToolRequests` を通過させない(フレームワーク
+  側で事前フィルタ)。検証関数の型を `SupportOutput` 単体に絞れる。
+- 次は Task 4.2(`agent.py` + `settings.py` の実装、本タスクの赤の緑化)。
+
+---
+
+## Task 4.2 — `settings.py` + `agent.py` の実装(Task 4.1 の赤の緑化)
+
+**日付**: 2026-07-12
+**Boundary**: `patterns/hitl/src/patterns_hitl/agent.py`, `patterns/hitl/src/patterns_hitl/settings.py`
+**Requirements**: 3.1, 3.2, 3.3, 3.4, 3.5, 4.1, 5.4, 12.1
+
+### 依存追加(実装前提)
+
+`HitlSettings` に `pydantic_settings.BaseSettings`(root `pydantic_ai_sandbox.config.Settings` と
+同じ fail-fast パターン)を採用。レーンにこの依存が無かったため `pyproject.toml` へ
+`pydantic-settings>=2` を追加し `uv lock`(→ `pydantic-settings 2.14.2` / `python-dotenv 1.2.2`
+解決)+ `uv sync --all-groups` を実行(範囲: LaneScaffold の依存面のみ、他レーン無影響)。
+
+**境界の遡及修正(2026-07-12, `/sdd-validate-impl` 指摘)**: 上記の依存追加は
+`patterns/hitl/pyproject.toml` / `uv.lock` を変更するが、これらは元の tasks.md では
+Task 3.1(レーン足場)の `_Boundary:_` にのみ列挙されていた。Task 4 の設計契約
+(agent.py/settings.py のみ)に対する実態逸脱のため、tasks.md の Task 4(見出し)と
+4.2 の `_Boundary:_` へ `pyproject.toml` / `uv.lock` を追記し契約を実態に一致させた
+(下流タスクへの影響なし — 純加算の依存追加であり既存契約を壊していない)。
+
+### GREEN
+
+- `settings.py`: `HitlSettings(BaseSettings)`、`model_config =
+  SettingsConfigDict(env_prefix="HITL_")`、`risk_threshold_usd: float = 50.0`、
+  `model_name: str | None = None`(`HITL_RISK_THRESHOLD_USD` / `HITL_MODEL_NAME`、
+  plan.md Data Model の env 名と一致)。
+- `agent.py`: `HitlDeps`(`customer_directory: Mapping[str, str] =
+  field(default_factory=dict[str, str])`)。ツール・output_validator は
+  **モジュールレベル定義 or ファクトリが返す関数**とし、`build_agent` 内の
+  decorator-closure にはしない — root `pydantic_ai_sandbox.agents.chat_agent`
+  と同型の理由(decorator でしか使われない local 関数は pyright strict の
+  `reportUnusedFunction` に引っかかる。`tools=[...]` へ渡す/`return` する形なら
+  明確に「使用されている」)。
+  - `search_customer_context(ctx, customer_id) -> str`: 承認不要、
+    `ctx.deps.customer_directory` のフェイク検索。
+  - `_make_apply_discount(risk_threshold_usd) -> Callable`: 返り値の
+    `apply_discount(ctx, target_id, amount_usd)` が `amount_usd >
+    risk_threshold_usd and not ctx.tool_call_approved` で
+    `raise ApprovalRequired`(R5.4 — 条件付き承認、静的 `requires_approval=True`
+    ではない)。
+  - `escalate_to_legal(ctx, target_id, reason) -> str` を `Tool(escalate_to_legal,
+    requires_approval=True)` として `tools=[...]` に登録(R3.3 の必須ツール)。
+  - `_make_approval_policy_validator(risk_threshold_usd) -> Callable`: 返り値
+    `enforce_approval_policy` を `agent.output_validator(...)` へ**関数呼び出しで**
+    渡す(decorator 構文ではなく)。`action_plan` のいずれかが閾値超過かつ
+    `requires_human_approval=False` なら `ModelRetry`(R3.5)。
+  - `build_agent(model)`: `Agent(model, deps_type=HitlDeps,
+    output_type=[SupportOutput, DeferredToolRequests], instructions=...,
+    tools=[...])` + `agent.output_validator(...)`。`instrument=True` は渡さない
+    (R3.2)。`instructions`(`system_prompt` 不使用、R3.4)。
+
+### 型安全上のトラブルシュート(pyright strict, 3 ラウンド)
+
+1. **`reportUnusedFunction`**(ツール 3 種 + validator を `build_agent` 内の
+   `@agent.tool` / `@agent.output_validator` デコレータ closure として定義した
+   初版で発生): decorator で登録するだけの関数は pyright から見て
+   「定義後に一度も参照されない」ため dead code 判定される。
+   → 上記のモジュールレベル関数 + ファクトリ関数(`return` で使用が明示される)
+   構成へ再設計して解消。
+2. **`reportCallIssue` / `reportArgumentType`**(`agent.output_validator` の
+   オーバーロードが `Callable[[OutputDataT], OutputDataT]` を要求 —
+   `OutputDataT` は `Agent[HitlDeps, SupportOutput | DeferredToolRequests]` の
+   型パラメータであり `SupportOutput` 単体ではない): validator の型注釈を
+   `SupportOutput | DeferredToolRequests` に広げ、`isinstance(output,
+   DeferredToolRequests)` で早期 return するガードを追加(実行時に到達しない
+   ことは Task 4.1 の do.md で確認済みの事実 — `_output.py` が
+   `DeferredToolRequests` を検証対象出力から事前除外するため。ガードは静的な
+   契約適合のためだけに存在し、`# pragma: no cover` を付して意図を明示)。
+3. **`reportUnknownVariableType`**(`HitlDeps.customer_directory` の
+   `field(default_factory=dict)` — bare `dict` は `dict[Unknown, Unknown]` に
+   推論される): `field(default_factory=dict[str, str])` へ変更(PEP 585 の
+   subscripted builtin をファクトリとして直接渡す)して解消。
+4. `Mapping` / `Model` / `Callable` はアノテーション専用(`from __future__
+   import annotations` 下で実行時未使用)のため `if TYPE_CHECKING:` ブロックへ
+   移動(ruff `TC002`/`TC003` の指示どおり)。
+
+テスト側(`test_output_validator.py`)も同じ理由で 1 箇所修正: `result.output`
+は `SupportOutput | DeferredToolRequests` 型のため、`requires_human_approval`
+へ直接アクセスする前に `assert isinstance(result.output, SupportOutput)` で
+型を narrowing する行を追加。
+
+### VERIFY(Task 自身のスコープ)
+
+| Gate | Cmd | 結果 |
+|---|---|---|
+| test(Task 4.1 対象ファイル) | `.venv/bin/python3 -m pytest tests/unit/test_output_validator.py tests/unit/test_agent_tools.py -v --no-cov` | **4 passed**(Task 4.1 の赤が緑化) |
+| test(レーン全体) | `.venv/bin/python3 -m pytest -v --no-cov` | **7 passed**(既存 `test_smoke.py` 3 件へ回帰なし) |
+| lint | `.venv/bin/ruff check .` | `All checks passed!`(3 ラウンドの `reportUnusedFunction` 対応後、I001 import 整列を 2 回 `--fix`) |
+| format | `.venv/bin/ruff format --check .` → `ruff format .` | `7 files already formatted` |
+| typecheck | `.venv/bin/pyright` | `0 errors, 0 warnings, 0 informations` |
+| 既存契約への回帰 | `cd patterns/contracts && uv run pytest --no-cov -q` | `66 passed`(変化なし) |
+
+### 既知の意図的なカバレッジ未達(→ Task 5 で緑化、設計どおりの中間状態)
+
+`.venv/bin/python3 -m pytest --cov -q` → `93.33%`(floor 98 未達、`agent.py` 92%
+— 未カバー行 2 箇所):
+
+- `escalate_to_legal` の本体(l.73): `requires_approval=True` ツールが**承認され
+  実行される**経路は harness の resume(Task 5.2)を経ないと到達しない。
+- `apply_discount` の `raise ApprovalRequired`(l.93): 閾値超過額を未承認で呼ぶ
+  経路(Task 5.1 の `test_stop_approve_resume.py` が FunctionModel 台本で直接
+  駆動する)。
+
+いずれも dead code ではなく、Task 5(ハーネス + 停止・承認・再開テスト)が
+実際に踏む経路 — tasks.md 完了ゲートの「カバレッジ fail_under = 98」は
+「全タスク後」に定義されており(Task 1.2 の `4 failed, 62 passed` 中間状態と
+同型の sequenced-gap)、本タスクの GREEN 対象(Task 4.1 の 4 テスト)は全て
+緑化済み。`isinstance(output, DeferredToolRequests)` 分岐のみ、実行時に
+到達しないことを Task 4.1 の一次調査(`_output.py:476-478`)で確認済みのため
+`# pragma: no cover` を付与し、真に閾値未達なのは上記 2 行のみに絞った。
+
+### 学び
+
+- pydantic-ai の `@agent.tool` / `@agent.output_validator` は「デコレータで
+  登録するだけ」の使い方だと pyright strict の `reportUnusedFunction` と
+  相性が悪い。root `chat_agent.py` が採用したモジュールレベル関数 +
+  `tools=[...]` 明示リストのパターンは、closure で設定値を閉じ込める必要が
+  ある場合でも「ファクトリ関数が返す」形にすれば同様に型安全に保てる
+  (このレーンの再利用可能な設計判断)。
+- `Agent[Deps, A | B]` の `output_validator` はオーバーロード解決上
+  「`A | B` を受けて `A | B` を返す」関数を要求する — 実行時に `B` が
+  除外される(`DeferredToolRequests` のような sentinel)ことをフレームワークが
+  保証していても、静的型はそれを知らない。`isinstance` ガード +
+  `# pragma: no cover` が両立点。
+- 次は Task 5(`harness.py` + `store.py` + `test_stop_approve_resume.py` —
+  本タスクで未カバーの 2 行を含む停止・承認・再開の全経路)。
