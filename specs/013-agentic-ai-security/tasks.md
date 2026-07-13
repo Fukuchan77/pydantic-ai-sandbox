@@ -89,11 +89,11 @@ _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`, `patterns/hitl/tests/unit/
 _Depends:_ none(012 完了後)
 _Requirements:_ 4.1, 4.2, 4.3
 
-- [ ] 4.1 失敗テスト `test_resume_schema.py` を先行作成する。`/resume` body に `message_history` / `usage` / `model` / 任意の未知フィールドを含めると 422、正当 body は通る、`/run` も同様に未知フィールド拒否。再開が store の履歴のみを使うこと(リクエスト由来の履歴が実行に影響しない)をスパイで検証。**赤を確認する。**
+- [x] 4.1 失敗テスト `test_resume_schema.py` を先行作成する。`/resume` body に `message_history` / `usage` / `model` / 任意の未知フィールドを含めると 422、正当 body は通る、`/run` も同様に未知フィールド拒否。再開が store の履歴のみを使うこと(リクエスト由来の履歴が実行に影響しない)をスパイで検証。**赤を確認する。**
   _Boundary:_ `patterns/hitl/tests/unit/test_resume_schema.py`
   _Depends:_ none
   _Requirements:_ 4.1, 4.2, 4.3
-- [ ] 4.2 `RunRequest` / `ResumeRequest` / `Decision` に `model_config = ConfigDict(extra="forbid")` を設定しテストを緑化する(履歴系フィールドは定義しない — 定義しないこと自体が要件)。
+- [x] 4.2 `RunRequest` / `ResumeRequest` / `Decision` に `model_config = ConfigDict(extra="forbid")` を設定しテストを緑化する(履歴系フィールドは定義しない — 定義しないこと自体が要件)。
   _Boundary:_ `patterns/hitl/src/patterns_hitl/app.py`
   _Depends:_ 4.1
   _Requirements:_ 4.1, 4.3

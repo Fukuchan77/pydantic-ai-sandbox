@@ -61,7 +61,7 @@ from fastapi import FastAPI, HTTPException
 # when it builds the model schema, so the real type must be importable at
 # class-definition time even under `from __future__ import annotations`.
 from patterns_contracts import SupportOutput  # noqa: TC002  # used in a pydantic field
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic_ai import ToolApproved, ToolCallPart, ToolDenied, UsageLimits
 
 from .audit import LogfireAuditEmitter, build_audit_event, emit_audit_event
@@ -87,7 +87,14 @@ _BUDGET_EXCEEDED_DETAIL = "usage budget exceeded"
 
 
 class RunRequest(BaseModel):
-    """Request body for ``POST /run``."""
+    """Request body for ``POST /run``.
+
+    ``extra="forbid"`` (spec 013 R4.1, R4.3): no ``message_history``,
+    ``usage``, or ``model`` field is defined here, and any unknown field
+    on the wire is a ``422`` rather than a silently-dropped extra key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     prompt: str
 
@@ -118,6 +125,8 @@ class PendingResponse(BaseModel):
 class Decision(BaseModel):
     """A caller's resolution for one pending tool call, keyed by ``tool_call_id`` in ``ResumeRequest``."""
 
+    model_config = ConfigDict(extra="forbid")
+
     approved: bool
     override_args: dict[str, Any] | None = None
     message: str | None = None
@@ -143,7 +152,17 @@ class Decision(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    """Request body for ``POST /resume``."""
+    """Request body for ``POST /resume``.
+
+    ``extra="forbid"`` (spec 013 R4.1, R4.3): no ``message_history``,
+    ``usage``, or ``model`` field is defined here -- the resumed run's
+    history and accumulated usage come exclusively from the server-side
+    ``SessionStore`` (R4.2), never from the request body -- and any
+    unknown field on the wire is a ``422`` rather than a silently-dropped
+    extra key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     session_id: str
     decisions: dict[str, Decision]
