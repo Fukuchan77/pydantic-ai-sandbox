@@ -490,3 +490,112 @@ Required test coverage of 98.0% reached. Total coverage: 100.00%
   body を送るもの)に一切影響しない — 未知フィールドを送っていた新規
   テストのみが 200→422 へ切り替わった。純加算的な変更であることが
   カバレッジ 100% 維持と 0 regression で確認できた。
+
+### [2026-07-13] Task 5.1 (EgressPolicyGuard — RED) Completed
+
+- Objective: `test_egress_policy.py` を新設する。(a) レーン `src/` 全体を
+  走査し `allow-local` / `force_download` が出現しないことを assert する
+  番人テスト(将来 URL 取得ツールを追加する実装者への red シグナル、
+  R5.1/R5.2)。(b) README に `safe_download` / egress ポリシー節(R5.3、
+  CVE-2026-46678 明記)と R4 設計根拠節(R4.4、CVE-2026-25580 明記)が
+  存在することの存在検査。
+- Approach: `test_no_hardcoded_model_ids.py` の走査パターンに倣い
+  `_iter_src_py_files()` で禁止リテラルを grep する番人テストを 1 本、
+  README の markdown 見出し(`^#{1,6}\s+...`)を正規表現で検出し次の
+  同階層以下見出しまでを本文として切り出す `_section_body()` ヘルパーを
+  新設し、見出しテキストに `safe_download|egress` / `\bR4\b` を含む節の
+  本文に必須 CVE ID / キーワードが含まれるかを検証する 2 本を追加。
+  見出し文言そのものは 5.2 実装者の裁量に委ねつつ、キー概念(節の存在 +
+  該当 CVE ID)は固定する設計。
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_egress_policy.py -v --no-cov
+tests/unit/test_egress_policy.py::test_no_egress_bypass_literals_in_src PASSED
+tests/unit/test_egress_policy.py::test_readme_documents_safe_download_egress_policy FAILED
+tests/unit/test_egress_policy.py::test_readme_documents_r4_design_rationale FAILED
+2 failed, 1 passed in 0.04s
+```
+
+- 赤の理由: 現行 README の `## セキュリティ` 節は SSRF/egress を
+  「信頼できない入力の SSRF リスク(記述のみ)」という箇条書きで触れているが、
+  `safe_download`/`egress`/`R4` を見出しテキストに含む専用節がなく、
+  `CVE-2026-46678` / `CVE-2026-25580` もどこにも記載がないため 2 件が赤。
+  番人テスト(`test_no_egress_bypass_literals_in_src`)はレーンに URL 取得
+  ツールが未実装のため構造的に緑(想定通り — 5.1 の目的は将来の bypass 検知)。
+- Regression check(既存 63 件、lane 全体): `uv run pytest tests/unit
+  --no-cov -q` → `2 failed, 63 passed`(失敗は上記 2 件のみ、既存テストに
+  regression なし)。新規ファイル単体で `ruff check` / `ruff format
+  --check` / `pyright` は 0 件。
+- Next: Task 5.2 で README の `## セキュリティ` 節を拡充し、上記 2 件を
+  緑化する(safe_download ポリシー節 + R4 設計根拠節 + authn/authz 設計
+  ノート + 検証基準版の再掲)。
+
+### [2026-07-13] Task 5.2 (EgressPolicyGuard — GREEN) Completed
+
+- Objective: `patterns/hitl/README.md` の `## セキュリティ` 節を拡充し、
+  Task 5.1 の RED 2 件を緑化する(R4.4, R5.3, R6.3)。
+- Approach: (1) `### R4 設計根拠` 節を新設 — CVE-2026-25580 を明記し、
+  「`/resume` の再開材料は常に `SessionStore` からのみ取得」+
+  `extra="forbid"` によるスキーマ遮断の二重防御を説明。(2)
+  `### SSRF / egress ポリシー(safe_download)` 節を新設 — 現状ツール未実装
+  である旨、将来ツールは `safe_download` 経路必須・`allow-local` 禁止、
+  CVE-2026-46678 を根拠として明記し、`test_egress_policy.py` への参照を
+  記載。(3) 既存の「認証・レート制限・消費セマンティクス」箇条書きを
+  「authn/authz 設計ノート」へ差し替え —「session id は認可トークンでは
+  ない。本番は認証境界の内側に置く」を明記し、かつ「013 が担う」という
+  陳腐化した記述(セッション衛生/監査証跡/消費セマンティクスは Task 1–3
+  で既に実装済み)を実態に合わせて修正。(4) `> 検証基準版(R6.3 / R13.3
+  再掲)` の blockquote を追加し、既存の「使用ライブラリと検証基準版」
+  表(pydantic-ai-slim 2.9.0 / 2026-07-11)をセキュリティ節内から参照
+  できるようにした。既存の「信頼できない入力の SSRF リスク(記述のみ)」
+  箇条書きは (1)(2) の専用節に統合し削除(重複記述の解消)。
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_egress_policy.py -v --no-cov
+tests/unit/test_egress_policy.py::test_no_egress_bypass_literals_in_src PASSED
+tests/unit/test_egress_policy.py::test_readme_documents_safe_download_egress_policy PASSED
+tests/unit/test_egress_policy.py::test_readme_documents_r4_design_rationale PASSED
+3 passed in 0.01s
+
+$ uv run pytest tests/unit --no-cov -q   # lane 全体、regression なし
+65 passed, 1 warning in 0.59s
+```
+
+## Verification Gate Evidence (Task 5.2)
+
+```
+$ cd /Users/Shared/codes/pydantic-ai-sandbox && mise run patterns:check
+... (全レーン)
+[patterns:test] == test patterns/hitl
+[patterns:test] tests/integration/test_ollama_hitl_e2e.py ss
+[patterns:test] tests/unit/test_agent_tools.py ..
+[patterns:test] tests/unit/test_api.py .........
+[patterns:test] tests/unit/test_audit_trail.py .....
+[patterns:test] tests/unit/test_consumption.py ................
+[patterns:test] tests/unit/test_egress_policy.py ...
+[patterns:test] tests/unit/test_observability.py ...
+[patterns:test] tests/unit/test_output_validator.py ..
+[patterns:test] tests/unit/test_resume_schema.py ........
+[patterns:test] tests/unit/test_session_hygiene.py ...
+[patterns:test] tests/unit/test_smoke.py ...
+[patterns:test] tests/unit/test_stop_approve_resume.py .......
+[patterns:test] tests/unit/test_store.py ....
+[patterns:test] src/patterns_hitl/app.py               108      0     24      0   100%
+[patterns:test] TOTAL                                  287      0     44      0   100%
+[patterns:test] Required test coverage of 98.0% reached. Total coverage: 100.00%
+[patterns:test] 65 passed, 2 skipped, 1 warning in 1.01s
+[patterns:typecheck] == typecheck patterns/hitl
+[patterns:typecheck] 0 errors, 0 warnings, 0 informations
+Finished in 17.53s   # exit code 0(全レーン lint/format/typecheck/test 緑)
+```
+
+- 他レーンの出力にも `error`/`fail` 文字列は残るが、いずれも既存の
+  `PydanticDeprecatedSince20` 警告(llamaindex/rag、無関係の pre-existing
+  deprecation)と `test_error_termination.py` のテスト名一致のみ —
+  regression 0 件を確認。
+- Learning: README の「存在検査」テスト(5.1)は見出しテキストの正規表現
+  一致 + 節本文への CVE ID / キーワード包含という 2 段検証にしたことで、
+  見出し文言の細部(5.2 実装時点)は書き手の裁量に委ねつつ、必須概念
+  (節の存在・CVE 番号)の欠落だけは機械的に拾える。既存の重複記述
+  (SSRF リスクの箇条書き)を専用節へ統合したことで、セキュリティ節全体の
+  一貫性も同時に改善された。

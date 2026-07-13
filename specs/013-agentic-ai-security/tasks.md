@@ -106,11 +106,11 @@ _Boundary:_ `patterns/hitl/tests/unit/test_egress_policy.py`, `patterns/hitl/REA
 _Depends:_ none(012 完了後)
 _Requirements:_ 4.4, 5.1, 5.2, 5.3, 6.3
 
-- [ ] 5.1 `test_egress_policy.py` を作成する。レーン `src/` 全体を走査し `allow-local` / `force_download` が出現しないことを assert(WHERE 条件が発火するまでの番人 — 将来 URL 取得ツールを追加する実装者への red シグナル)。README に `safe_download` ポリシー節と R4 設計根拠節が存在することの存在検査も含める。
+- [x] 5.1 `test_egress_policy.py` を作成する。レーン `src/` 全体を走査し `allow-local` / `force_download` が出現しないことを assert(WHERE 条件が発火するまでの番人 — 将来 URL 取得ツールを追加する実装者への red シグナル)。README に `safe_download` ポリシー節と R4 設計根拠節が存在することの存在検査も含める。
   _Boundary:_ `patterns/hitl/tests/unit/test_egress_policy.py`
   _Depends:_ none
   _Requirements:_ 5.1, 5.2
-- [ ] 5.2 `patterns/hitl/README.md` のセキュリティ節を拡充しテストを緑化する: R4 の設計根拠(履歴サーバー正本 = CVE-2026-25580 系経路の遮断、CVE ID 明記)、SSRF/egress ポリシー(`safe_download` 必須・`allow-local` 禁止、根拠 CVE-2026-46678)、authn/authz 設計ノート(「session id は認可トークンではない。本番は認証境界の内側に置く」)、検証基準版の再掲。
+- [x] 5.2 `patterns/hitl/README.md` のセキュリティ節を拡充しテストを緑化する: R4 の設計根拠(履歴サーバー正本 = CVE-2026-25580 系経路の遮断、CVE ID 明記)、SSRF/egress ポリシー(`safe_download` 必須・`allow-local` 禁止、根拠 CVE-2026-46678)、authn/authz 設計ノート(「session id は認可トークンではない。本番は認証境界の内側に置く」)、検証基準版の再掲。
   _Boundary:_ `patterns/hitl/README.md`
   _Depends:_ 5.1
   _Requirements:_ 4.4, 5.3, 6.3
