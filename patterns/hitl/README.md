@@ -110,15 +110,44 @@ run は `result.output` に `DeferredToolRequests`（`approvals: list[ToolCallPa
 - **v1 併用時の下限（記述のみ）**: pydantic-ai v1 を併用する場合、SSRF/XSS 系アドバイザリの
   修正を含む **`>=1.99.0`** をフロアとする。本 HITL レーンは既知アドバイザリのない v2 ライン
   （`pydantic-ai-slim>=2.9.0`）上に構築するため、この下限は v1 相互運用時の要件（R13.2）。
-- **信頼できない入力の SSRF リスク（記述のみ）**: 外部から渡る `message_history` や URL は
-  信頼できない入力として扱う。ツールがそれらの URL を fetch する経路は SSRF ベクタになり得るため、
-  egress は許可リスト経由の **`safe_download` 経路**へ集約すべき — ただし本 spec では
-  **egress 強化は実装しない**（設計ノートのみ、実装は 013 のスコープ）。
-- **認証・レート制限・消費セマンティクス**: 本 MVP のスコープ外。未知 session は `404`、
-  予算超過は loud にエラー化するにとどめ、セッション ID 衛生 / 承認監査証跡 /
-  `/resume` の消費セマンティクスは [013-agentic-ai-security](../../specs/013-agentic-ai-security/) が担う。
+- **authn/authz 設計ノート**: 本 MVP は session id の発行（`new_session_id()`）と検証
+  （`claim()` / `UnknownSessionError`）のみを行う。**session id は認可トークンではない** —
+  「誰の要求か」を保証しない単なる不透明識別子であり、本番運用ではこの手前に認証境界
+  （OAuth / mTLS / API Gateway 等）を置き、session id はその認証境界の**内側**でのみ受け付ける
+  こと。レート制限は本 MVP のスコープ外（未知 session は `404`、予算超過は `429` —
+  セッション衛生 / 承認監査証跡 / 消費セマンティクスは 013-agentic-ai-security Task 1–3 で
+  実装済み）。
 - OWASP（LLM Top 10 / Agentic AI）への詳細マッピングは
   [SECURITY-NOTES.md](../SECURITY-NOTES.md) を参照。
+
+### R4 設計根拠 — サーバー正本履歴による注入経路の遮断
+
+CVE-2026-25580（<1.56.0、信頼できない `message_history` 経由の SSRF）が示す形は、
+「クライアントが再開リクエストへ紛れ込ませた `message_history` が、検証されずにエージェントの
+実行コンテキストへ届く」という経路である。本レーンは `/resume` の再開材料
+（`message_history` / `RunUsage`）を**常に `SessionStore` からのみ**取得し
+（`harness.resume()` はリクエストボディの履歴を一切参照しない）、かつ `RunRequest` /
+`ResumeRequest` / `Decision` は `model_config = ConfigDict(extra="forbid")` で未知フィールドを
+`422` で拒絶する — `message_history` / `usage` / `model` フィールドをこれらのモデルに
+**そもそも定義しないこと自体が要件**（定義されていない以上、拒絶対象フィールドの列挙も
+不要）。この二重（サーバー正本 + スキーマ遮断）により CVE-2026-25580 系の注入経路は
+ネットワーク到達前に遮断される（R4.1–R4.4）。
+
+### SSRF / egress ポリシー（`safe_download`）
+
+本レーンには現時点で URL を fetch するツールは存在しない。将来 URL 取得ツールを追加する場合、
+その fetch は pydantic-ai v2 の **`safe_download` 経路**（またはプライベートアドレス範囲・
+クラウドメタデータエンドポイントを遮断する同等の egress ガード。IPv6 遷移形式のアドレスも
+対象）を必ず経由しなければならず、`force_download='allow-local'` のようなバイパスを本番
+コードパスで有効化してはならない（R5.1/R5.2）。根拠は **CVE-2026-46678**（IPv6 遷移形式を
+利用した SSRF ガードのバイパス）— このアドバイザリが埋め込み IPv4 アドレスの検査を要求する
+理由になっている（R5.3）。この禁止は
+[`tests/unit/test_egress_policy.py`](tests/unit/test_egress_policy.py) がレーン `src/` 全体を
+走査して回帰的に固定する（将来 URL 取得ツールを追加する実装者への red シグナル）。
+
+> **検証基準版（R6.3 / R13.3 再掲）**: 上記の設計根拠・ポリシーが前提とする挙動は
+> **pydantic-ai-slim 2.9.0 / 2026-07-11** の実行検証を基準とする（詳細は下記
+> 「使用ライブラリと検証基準版」）。
 
 ## Durable Execution（将来フェーズ / 記述のみ）
 
