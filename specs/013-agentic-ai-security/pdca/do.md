@@ -415,3 +415,78 @@ $ cd /Users/Shared/codes/pydantic-ai-sandbox && mise run patterns:check
 [patterns:typecheck] 0 errors, 0 warnings, 0 informations
 Finished in 33.13s   # exit code 0
 ```
+
+### [2026-07-13] Task 4.1 (ResumeSchemaGuard — RED) Started
+
+- Objective: `test_resume_schema.py` を先行作成し、`/resume`・`/run` の
+  未知フィールド(`message_history` / `usage` / `model` / 任意キー)が
+  現行実装(`RunRequest`/`ResumeRequest` に `extra="forbid"` 未設定)では
+  pydantic の既定 `extra="ignore"` により静かに無視され、422 ではなく
+  200 で通ってしまうことを固定する(R4.1, R4.3)。
+- Approach: `test_consumption.py`/`test_api.py` の `_build_app` +
+  `call_counting_script` パターンに倣い、(a)–(d) 未知フィールド 4 種の
+  422 期待、(e)(f) 正当 body の control(現状も 200 のまま)、(g) `/run`
+  側の同種ガード、(h) スパイ(`FunctionModel` の呼び出し回数)で
+  「拒否された /resume はモデルへ到達しない」ことを操作的に固定。
+
+### [2026-07-13] RED confirmed
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_resume_schema.py -v
+...
+FAILED test_resume_with_client_supplied_message_history_is_rejected_as_422 — assert 200 == 422
+FAILED test_resume_with_client_supplied_usage_is_rejected_as_422 — assert 200 == 422
+FAILED test_resume_with_client_supplied_model_is_rejected_as_422 — assert 200 == 422
+FAILED test_resume_with_an_arbitrary_unknown_field_is_rejected_as_422 — assert 200 == 422
+FAILED test_run_with_an_unknown_field_is_rejected_as_422 — assert 200 == 422
+FAILED test_resume_with_client_supplied_message_history_never_reaches_the_model — assert 200 == 422
+6 failed, 2 passed in 0.23s
+```
+
+- 赤の理由: 現行 `RunRequest`/`ResumeRequest` は `model_config` を持たず、
+  pydantic v2 の既定 `extra="ignore"` で未知フィールドが黙って捨てられる
+  ため、422 を期待する 6 件は 200 のまま通ってしまう。control 2 件
+  (既知フィールドのみの body)は実装前から緑 — 想定通り(4.2 の
+  `extra="forbid"` 導入後もこの 2 件は変化しないことを保証する回帰網)。
+- Regression check(既存 56 件、lane 全体): `uv run pytest tests/unit
+  --no-cov -q` → `6 failed, 56 passed`(失敗は上記 6 件のみ、既存テストに
+  regression なし)。新規ファイル単体で `ruff check` / `ruff format
+  --check` / `pyright` は 0 件。
+- Next: Task 4.2 で `RunRequest` / `ResumeRequest` / `Decision` に
+  `model_config = ConfigDict(extra="forbid")` を追加し緑化する。
+
+### [2026-07-13] Task 4.2 (ResumeSchemaGuard — GREEN) Completed
+
+- Objective: `RunRequest` / `ResumeRequest` / `Decision` に
+  `model_config = ConfigDict(extra="forbid")` を設定し、Task 4.1 の
+  RED 6 件を緑化する(R4.1, R4.3)。履歴/usage/model フィールドは
+  「定義しないこと自体が要件」のため追加しない(R4.2 は既存の構造 —
+  `harness.resume()` が store 由来の history/usage のみを使う — で
+  既に満たされている)。
+- Approach: `app.py` に `from pydantic import ConfigDict` を追加し、
+  3 モデルそれぞれの docstring 直後に `model_config = ConfigDict(extra="forbid")`
+  を挿入。挙動変更なし(GREEN 化のみ)、ロジック分岐は増やさない。
+
+```
+$ cd patterns/hitl && uv run pytest tests/unit/test_resume_schema.py -v
+8 passed in 0.18s
+
+$ uv run pytest tests/unit --no-cov -q   # lane 全体、regression なし
+62 passed in 0.62s
+
+$ uv run ruff check . && uv run ruff format --check . && uv run pyright
+All checks passed!
+24 files already formatted
+0 errors, 0 warnings, 0 informations
+
+$ uv run pytest --cov
+src/patterns_hitl/app.py               108      0     24      0   100%
+TOTAL                                  287      0     44      0   100%
+Required test coverage of 98.0% reached. Total coverage: 100.00%
+62 passed, 2 skipped, 1 warning in 0.84s
+```
+
+- Learning: `extra="forbid"` の導入は既存の全テスト(既知フィールドのみの
+  body を送るもの)に一切影響しない — 未知フィールドを送っていた新規
+  テストのみが 200→422 へ切り替わった。純加算的な変更であることが
+  カバレッジ 100% 維持と 0 regression で確認できた。
