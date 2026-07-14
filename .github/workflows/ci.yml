@@ -43,7 +43,7 @@ jobs:
         with:
           fetch-depth: 0  # full history is required for diff-coverage on PRs
 
-      # mise installs the Python 3.14 / uv versions declared in mise.toml.
+      # mise installs the Python 3.13 / uv versions declared in mise.toml.
       # `experimental: true` is required while mise's GitHub Action calls
       # un-stable subcommands; remove once the action stabilises.
       - name: Install mise + tooling

@@ -1731,7 +1731,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi" },
-    { name = "ibm-watsonx-ai", specifier = ">=1.5.13" },
+    { name = "ibm-watsonx-ai", specifier = ">=1.5.14" },
     { name = "litellm", marker = "extra == 'litellm'" },
     { name = "logfire", extras = ["fastapi", "httpx"] },
     { name = "pydantic-ai-slim", extras = ["logfire", "openai"], specifier = ">=2.3.0" },
