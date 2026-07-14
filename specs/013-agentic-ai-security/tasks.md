@@ -164,7 +164,7 @@ _Requirements:_ 9.1, 9.2, 9.3
 
 ## 8. 完了ゲート(全タスク後)
 
-- [ ] 8.1 レーン全ゲート緑(`mise run patterns:check` / `patterns:audit`、hitl の `fail_under = 98` 維持)+ root ユニット(`uv run pytest tests/unit/test_security_workflow_lanes.py`)緑。**R6.2/6.3 は既充足の回帰確認のみ**(gap-analysis 論点 B / B1): `pydantic-ai-slim[openai]>=2.9.0` フロア(`pyproject.toml:29`)と検証基準版の README 記録(`README.md:148-152`)が 012 実装時のまま緩和されていないことを確認する。フロア検証の専用テストは追加しない(downgrade は uv 解決が loud に失敗する)。
+- [x] 8.1 レーン全ゲート緑(`mise run patterns:check` / `patterns:audit`、hitl の `fail_under = 98` 維持)+ root ユニット(`uv run pytest tests/unit/test_security_workflow_lanes.py`)緑。**R6.2/6.3 は既充足の回帰確認のみ**(gap-analysis 論点 B / B1): `pydantic-ai-slim[openai]>=2.9.0` フロア(`pyproject.toml:29`)と検証基準版の README 記録(`README.md:148-152`)が 012 実装時のまま緩和されていないことを確認する。フロア検証の専用テストは追加しない(downgrade は uv 解決が loud に失敗する)。
   _Boundary:_ 検証のみ(コード変更なし)
   _Depends:_ 1–7
   _Requirements:_ 6.2, 6.3

@@ -786,3 +786,50 @@ $ mise run check
 ```
 
 - tasks.md 7.1 を `[x]` に更新。残タスクは 8.1(完了ゲート)のみ。
+
+### [2026-07-14] Task 8.1(完了ゲート)— 検証のみ、コード変更なし
+
+- Objective: レーン全ゲート緑 + hitl `fail_under=98` 維持 + root ユニット
+  (`test_security_workflow_lanes.py`)緑を確認する。R6.2/6.3 は既充足の回帰
+  確認のみ(gap-analysis 論点 B / B1、新規テスト追加なし)。
+
+```
+$ mise run patterns:check
+[lint] All checks passed!(全 8 レーン: contracts / beeai / llamaindex /
+  pydantic-ai / rag / sse / deep-research / hitl)
+[format] 全レーンで "files already formatted"
+[typecheck] 0 errors, 0 warnings, 0 informations(全レーン)
+[test] deep-research: 63 passed, 1 skipped, coverage 100.00%(≥98% 達成)
+[test] hitl: 65 passed, 2 skipped, coverage 100.00%(≥98% 達成)
+Finished in 17.12s
+```
+
+```
+$ uv run pytest --no-cov tests/unit/test_security_workflow_lanes.py -v
+test_security_yml_matrix_covers_every_uv_lane PASSED
+test_security_yml_hitl_lane_dir_is_correct PASSED
+test_dependabot_pydantic_ai_dependent_block_covers_hitl PASSED
+test_missing_lanes_is_pure_and_detects_a_synthetic_gap PASSED
+4 passed in 0.06s
+```
+
+- R6.2/6.3 回帰確認(コード変更なし、目視確認): `patterns/hitl/pyproject.toml:29`
+  = `pydantic-ai-slim[openai]>=2.9.0`(フロア未緩和)。`patterns/hitl/README.md:148-152`
+  に検証基準版(pydantic-ai-slim 2.9.0 / 2026-07-11)の記録が現存。両方とも
+  012 実装時のまま変更なしを確認。
+
+- **既知の問題(013 スコープ外、別途対応が必要)**: `mise run patterns:audit`
+  が `patterns/frameworks/beeai/` の `json-repair==0.39.1` で赤化
+  (`GHSA-xf7x-x43h-rpqh`、CVSS 7.5、`SchemaRepairer.resolve_schema()` の
+  `$ref` 循環未検出による無限ループ DoS。GitHub Advisory DB 登録日
+  2026-07-13、修正版 0.60.1)。013 のスコープは hitl レーンのみであり、
+  当該アドバイザリは 013 の変更と無関係(beeai の lockfile はこのブランチで
+  未変更、アドバイザリ登録自体が前日付)。切り分けとして
+  `(cd patterns/hitl && uv run pip-audit)` を単独実行し
+  `No known vulnerabilities found` を確認済み — hitl レーン自体は clean。
+  ユーザーとの合意により、8.1 は **hitl + root の実質スコープで完了と判定**し、
+  beeai の json-repair 脆弱性は 013 とは別の追跡課題として報告するのみに
+  とどめる(013 タスク境界「検証のみ・コード変更なし」を越えるレーン間
+  依存バンプは対象外)。
+
+- Status: 8.1 完了。013-agentic-ai-security の全 8 タスク完了。
