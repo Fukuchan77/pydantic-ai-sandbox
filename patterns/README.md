@@ -86,6 +86,26 @@ search→read→reflect の反復ループを回して引用付き `Finding` を
 > BeeAI / Langflow / Dify）との比較・ハイブリッド活用方針は
 > [deep-research/COMPARISON.md](deep-research/COMPARISON.md)。
 
+## 応用レイヤー（HITL 停止・承認・再開ハーネス）
+
+RAG・SSE・Deep Research と同じく、**HITL（Human-in-the-Loop）もワークフローパターンではない**。
+pydantic-ai v2 公式の **deferred-tools** 機構（`ApprovalRequired` → `DeferredToolRequests` →
+`ToolApproved` / `ToolDenied`）で、リスクの高いアクションを人間の承認前で**停止**し、承認判断を
+受けて**再開**する**承認フロー応用レイヤ**であり、ワークフロー6表とは別軸として索引する
+（Spec 012）。
+
+| 応用パターン | 構成 | レーン | 状態 |
+|---|---|---|---|
+| **HITL（停止・承認・再開）** | `output_type=[SupportOutput, DeferredToolRequests]` → 承認必須ツールでの停止 → `SessionStore` 保存 → 承認/拒否での再開 → 型安全な終端/再 defer 分岐 | `patterns/hitl/`（`frameworks/` 外の独立 uv レーン, Python 3.14） | ✅ [hitl/](hitl/README.md) |
+
+> HITL は `sse/` と同格の独立レーン（Python 3.14、承認者はプロセス外の UI / オペレータ）。契約
+> （`ActionType` / `ResolutionAction` / `SupportOutput`）は他パターンと同じ
+> [contracts/](contracts/README.md) に集約し、同一ドリフトテストで正本一致を検知する。
+> Durable Execution（公式統合先: Temporal / DBOS / Prefect — Restate は Restate 側 SDK）と
+> セキュリティ（v1 併用時 `>=1.99.0` フロア、信頼できない `message_history` / URL の SSRF
+> リスク、`safe_download` 経路）の設計ノートは正本 [hitl/README.md](hitl/README.md) を参照
+> （実装は [013-agentic-ai-security](../specs/013-agentic-ai-security/) のスコープ）。
+
 ## 横断レイヤー（評価グレーダ / outcome+behavior 多軸採点）
 
 RAG・SSE・Deep Research が個別の応用レイヤであるのに対し、**評価グレーダは

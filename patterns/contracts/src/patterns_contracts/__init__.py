@@ -38,6 +38,7 @@ from patterns_contracts.deep_research import (
 )
 from patterns_contracts.eval_graders import AxisScore, GradeReport, Judge, Rating
 from patterns_contracts.evaluator_optimizer import Iteration, OptimizationResult
+from patterns_contracts.hitl import ActionType, ResolutionAction, SupportOutput
 from patterns_contracts.live_ollama import (
     LIVE_CONTEXT_WINDOW,
     LIVE_MAX_TOKENS,
@@ -68,6 +69,7 @@ __all__ = [
     "LIVE_MAX_TOKENS",
     "LIVE_REQUEST_TIMEOUT_SECONDS",
     "LIVE_WORKFLOW_TIMEOUT_SECONDS",
+    "ActionType",
     "AgentRunResult",
     "AgentStep",
     "ApprovalHook",
@@ -98,6 +100,7 @@ __all__ = [
     "ResearchPlan",
     "ResearchReport",
     "ResearcherStartedEvent",
+    "ResolutionAction",
     "RetrievedChunk",
     "Route",
     "RouteDecision",
@@ -108,6 +111,7 @@ __all__ = [
     "StepStartedEvent",
     "SubQuestion",
     "SubTask",
+    "SupportOutput",
     "TaskPlan",
     "TokenEvent",
     "Tool",

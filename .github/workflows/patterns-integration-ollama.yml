@@ -99,6 +99,11 @@ jobs:
             task: 'patterns:test:integration:deep-research'
             embed: false
             timeout: 60
+          - lane: hitl
+            dir: patterns/hitl
+            task: 'patterns:test:integration:hitl'
+            embed: false
+            timeout: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4

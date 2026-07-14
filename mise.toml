@@ -84,6 +84,13 @@ run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
 # the `patterns/frameworks/*/` glob. It is an independent uv project on Python 3.13
 # (matching the rag app lane; pydantic-ai-slim supports it), so it likewise carries
 # an explicit `(cd patterns/deep-research && …)` line after the sse line in each task.
+#
+# The HITL harness lane (Spec 012 Req 1.1) lives at `patterns/hitl/` — also depth 1
+# under patterns/, a sibling of frameworks/ / rag/ / sse/ / deep-research/, NOT under
+# the `patterns/frameworks/*/` glob. It is an independent uv project on Python 3.14
+# (matching the sse/pydantic-ai lanes; pydantic-ai v2 deferred-tools mechanism), so
+# it likewise carries an explicit `(cd patterns/hitl && …)` line after the
+# deep-research line in each task.
 # ---------------------------------------------------------------------------
 
 [tasks."patterns:setup"]
@@ -97,6 +104,7 @@ done
 echo "== setup patterns/rag"; (cd patterns/rag && uv sync --all-groups)
 echo "== setup patterns/sse"; (cd patterns/sse && uv sync --all-groups)
 echo "== setup patterns/deep-research"; (cd patterns/deep-research && uv sync --all-groups)
+echo "== setup patterns/hitl"; (cd patterns/hitl && uv sync --all-groups)
 """
 
 [tasks."patterns:lint"]
@@ -110,6 +118,7 @@ done
 echo "== lint patterns/rag"; (cd patterns/rag && uv run ruff check .)
 echo "== lint patterns/sse"; (cd patterns/sse && uv run ruff check .)
 echo "== lint patterns/deep-research"; (cd patterns/deep-research && uv run ruff check .)
+echo "== lint patterns/hitl"; (cd patterns/hitl && uv run ruff check .)
 """
 
 [tasks."patterns:format"]
@@ -123,6 +132,7 @@ done
 echo "== format patterns/rag"; (cd patterns/rag && uv run ruff format --check .)
 echo "== format patterns/sse"; (cd patterns/sse && uv run ruff format --check .)
 echo "== format patterns/deep-research"; (cd patterns/deep-research && uv run ruff format --check .)
+echo "== format patterns/hitl"; (cd patterns/hitl && uv run ruff format --check .)
 """
 
 [tasks."patterns:typecheck"]
@@ -136,6 +146,7 @@ done
 echo "== typecheck patterns/rag"; (cd patterns/rag && uv run pyright)
 echo "== typecheck patterns/sse"; (cd patterns/sse && uv run pyright)
 echo "== typecheck patterns/deep-research"; (cd patterns/deep-research && uv run pyright)
+echo "== typecheck patterns/hitl"; (cd patterns/hitl && uv run pyright)
 """
 
 [tasks."patterns:test"]
@@ -149,6 +160,7 @@ done
 echo "== test patterns/rag"; (cd patterns/rag && uv run pytest --cov)
 echo "== test patterns/sse"; (cd patterns/sse && uv run pytest --cov)
 echo "== test patterns/deep-research"; (cd patterns/deep-research && uv run pytest --cov)
+echo "== test patterns/hitl"; (cd patterns/hitl && uv run pytest --cov)
 """
 
 [tasks."patterns:audit"]
@@ -157,11 +169,21 @@ run = """
 set -e
 echo "== audit patterns/contracts"; (cd patterns/contracts && uv run pip-audit)
 for d in patterns/frameworks/*/; do
-  echo "== audit $d"; (cd "$d" && uv run pip-audit)
+  args=""
+  # GHSA-xf7x-x43h-rpqh (json-repair < 0.60.1, circular-$ref infinite loop):
+  # fix unreachable in the beeai lane — beeai-framework (==0.1.39 pin, and
+  # even latest 0.1.81) caps json-repair<0.53.0. Lane-scoped suppression per
+  # the SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2). Review by 2026-10-14
+  # or on any beeai-framework bump. Tracking: issue #30.
+  if [ "$d" = "patterns/frameworks/beeai/" ]; then
+    args="--ignore-vuln GHSA-xf7x-x43h-rpqh"
+  fi
+  echo "== audit $d"; (cd "$d" && uv run pip-audit $args)
 done
 echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit)
 echo "== audit patterns/sse"; (cd patterns/sse && uv run pip-audit)
 echo "== audit patterns/deep-research"; (cd patterns/deep-research && uv run pip-audit)
+echo "== audit patterns/hitl"; (cd patterns/hitl && uv run pip-audit)
 """
 
 [tasks."patterns:check"]
@@ -178,6 +200,7 @@ done
 echo "== integration patterns/rag"; (cd patterns/rag && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 echo "== integration patterns/sse"; (cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 echo "== integration patterns/deep-research"; (cd patterns/deep-research && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
+echo "== integration patterns/hitl"; (cd patterns/hitl && RUN_INTEGRATION_PATTERNS=1 uv run pytest tests/integration)
 """
 
 # ---------------------------------------------------------------------------
@@ -223,6 +246,10 @@ run = "cd patterns/sse && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run 
 [tasks."patterns:test:integration:deep-research"]
 description = "Gated live-Ollama integration for the deep-research lane only (live model x fake search by default; set RUN_INTEGRATION_SEARCH=1 for a live backend)."
 run = "cd patterns/deep-research && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=1 uv run pytest tests/integration"
+
+[tasks."patterns:test:integration:hitl"]
+description = "Gated live-Ollama integration for the hitl lane only (EXPECT_LIVE_TESTS=2: approval-path e2e + denial-path e2e, Task 8.1)."
+run = "cd patterns/hitl && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2 uv run pytest tests/integration"
 
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
