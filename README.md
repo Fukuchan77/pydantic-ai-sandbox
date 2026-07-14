@@ -13,7 +13,7 @@ The fastest path from a fresh clone to a green quality-gate run:
 ```bash
 git clone <repo-url> pydantic-ai-sandbox
 cd pydantic-ai-sandbox
-mise install            # provisions Python 3.14 and uv (mise.toml)
+mise install            # provisions Python 3.13 and uv (mise.toml)
 mise run setup          # equivalent to: uv sync && uv run pre-commit install
 cp .env.example .env    # then fill in any secrets you need locally
 mise run check          # lint + format-check + pyright + pytest (Constitution V)
@@ -31,7 +31,7 @@ All quality gates flow through `mise` — never invoke bare `ruff` / `pyright` /
 | ----------------------------- | -------------------------------------------------------------- |
 | `mise run lint`               | `ruff check .`                                                 |
 | `mise run format`             | `ruff format --check .`                                        |
-| `mise run typecheck`          | `pyright` (strict, Python 3.14)                                |
+| `mise run typecheck`          | `pyright` (strict, Python 3.13)                                |
 | `mise run test`               | `pytest` (asyncio auto mode)                                   |
 | `mise run check`              | Aggregate gate — lint + format + typecheck + test              |
 | `mise run pre-commit:default` | Run the default pre-commit stage on all files                  |
