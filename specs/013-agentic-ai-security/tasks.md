@@ -123,15 +123,15 @@ _Boundary:_ `patterns/SECURITY-NOTES.md`
 _Depends:_ none(012 完了後)
 _Requirements:_ 6.1, 7.1, 7.2, 8.1, 8.2
 
-- [ ] 6.1 「CVE 根拠と依存フロア」表を更新する: CVE-2026-25580 / CVE-2026-46678 の既存行の対応列へ HITL レーンの対応(v2 フロア `pydantic-ai-slim>=2.9.0` + R4 スキーマ遮断)を追記し、CVE-2026-61437(Web UI XSS、<1.51.0)の行を新規追加する。**既存対応列の beta 表記の解消**(gap-analysis ズレ5): 既存 2 行の対応列は v2 を beta(`>=2.0.0b6`)文脈で記述しているため、HITL 行の `>=2.9.0`(GA 系)と齟齬しないよう beta 表記を GA 版基準へ更新するか HITL 固有列を併記する。「既知の制約(Accepted Risk)」の "v2 Beta 採用/GA 時に見直し" 記述も現況(GA 系 2.9.0 を採用済み)に合わせて更新する。
+- [x] 6.1 「CVE 根拠と依存フロア」表を更新する: CVE-2026-25580 / CVE-2026-46678 の既存行の対応列へ HITL レーンの対応(v2 フロア `pydantic-ai-slim>=2.9.0` + R4 スキーマ遮断)を追記し、CVE-2026-61437(Web UI XSS、<1.51.0)の行を新規追加する。**既存対応列の beta 表記の解消**(gap-analysis ズレ5): 既存 2 行の対応列は v2 を beta(`>=2.0.0b6`)文脈で記述しているため、HITL 行の `>=2.9.0`(GA 系)と齟齬しないよう beta 表記を GA 版基準へ更新するか HITL 固有列を併記する。「既知の制約(Accepted Risk)」の "v2 Beta 採用/GA 時に見直し" 記述も現況(GA 系 2.9.0 を採用済み)に合わせて更新する。
   _Boundary:_ `patterns/SECURITY-NOTES.md`
   _Depends:_ none
   _Requirements:_ 6.1
-- [ ] 6.2 「HITL 応用レイヤ → OWASP マッピング(Spec 013)」節を既存 4 レーンと同一表形式で追加する: 承認ゲート(requires_approval / ApprovalRequired)→ Excessive Agency / Insecure Tool Use、`UsageLimits` 停止・再開通算 → Unbounded Consumption、セッション衛生 + サーバー正本履歴 → 信頼できない入力面(LLM01 の間接経路含む)、マスク済み監査証跡 → アカウンタビリティ / 機微情報漏洩。
+- [x] 6.2 「HITL 応用レイヤ → OWASP マッピング(Spec 013)」節を既存 4 レーンと同一表形式で追加する: 承認ゲート(requires_approval / ApprovalRequired)→ Excessive Agency / Insecure Tool Use、`UsageLimits` 停止・再開通算 → Unbounded Consumption、セッション衛生 + サーバー正本履歴 → 信頼できない入力面(LLM01 の間接経路含む)、マスク済み監査証跡 → アカウンタビリティ / 機微情報漏洩。
   _Boundary:_ `patterns/SECURITY-NOTES.md`
   _Depends:_ 6.1
   _Requirements:_ 7.1, 7.2
-- [ ] 6.3 「fix 未提供アドバイザリの運用」節を追加する: 手順 (a) 修正版の不在確認 → (b) 影響レーンでの悪用可能性評価 → (c) 正当なら**レーン限定**の `--ignore-vuln <ID>` + 期限コメント + 追跡 issue → (d) 修正着地で即撤去。期限・追跡なしの抑止エントリは禁止と明記。実例として nltk / PYSEC-2026-597(2026-07、nltk 3.10.0 バンプで解消)を参照する。
+- [x] 6.3 「fix 未提供アドバイザリの運用」節を追加する: 手順 (a) 修正版の不在確認 → (b) 影響レーンでの悪用可能性評価 → (c) 正当なら**レーン限定**の `--ignore-vuln <ID>` + 期限コメント + 追跡 issue → (d) 修正着地で即撤去。期限・追跡なしの抑止エントリは禁止と明記。実例として nltk / PYSEC-2026-597(2026-07、nltk 3.10.0 バンプで解消)を参照する。
   _Boundary:_ `patterns/SECURITY-NOTES.md`
   _Depends:_ 6.1
   _Requirements:_ 8.1, 8.2

@@ -599,3 +599,119 @@ Finished in 17.53s   # exit code 0(全レーン lint/format/typecheck/test 緑)
   (節の存在・CVE 番号)の欠落だけは機械的に拾える。既存の重複記述
   (SSRF リスクの箇条書き)を専用節へ統合したことで、セキュリティ節全体の
   一貫性も同時に改善された。
+
+### [2026-07-14 Task 6.1] SECURITY-NOTES CVE 表更新 — 文書追記のみ(テスト境界なし)
+
+- Objective: 「CVE 根拠と依存フロア」表を更新(R6.1)。CVE-2026-25580 /
+  CVE-2026-46678 の既存行の対応列へ HITL レーンの対応(v2 フロア
+  `pydantic-ai-slim>=2.9.0` + R4 スキーマ遮断)を追記し、CVE-2026-61437
+  (Web UI XSS、<1.51.0)行を新規追加。gap-analysis ズレ5(既存対応列の
+  `>=2.0.0b6` beta 表記が HITL の `>=2.9.0` と齟齬)も解消する。
+- TDD 適用外の判断: tasks.md §6 は境界に `patterns/SECURITY-NOTES.md` のみを
+  宣言し、専用テストファイルを持たない(§5 の `test_egress_policy.py` と異なり
+  grep/存在検査ガードは指定されていない)。実際に `SECURITY-NOTES.md` を
+  参照するテストがリポジトリ全体に存在しないことを事前に確認
+  (`grep -rln "SECURITY-NOTES.md" --include="*.py"` → 0 件)。純粋な文書追記
+  のため RED→GREEN サイクルは成立せず、直接編集した。
+- 事前調査: 各レーンの実際のフロアを確認 — root/frameworks
+  `pydantic-ai-slim>=2.3.0`、HITL `pydantic-ai-slim[openai]>=2.9.0`。いずれも
+  `2.0.0b6` のような beta サフィックスを持たない。gap-analysis の記述
+  (「HITL 行の `>=2.9.0`(GA 系)」)に従い、既存 CVE 行の対応列と「既知の
+  制約(Accepted Risk)」の `pydantic-ai v2 Beta 採用 / v2 GA 時に見直し` 行を
+  GA 系フロア採用済みの文言へ更新した(`patterns/frameworks/pydantic-ai/README.md`
+  はタスク境界外のため未変更 — 別途の陳腐化として残る)。
+- 変更内容:
+  1. CVE-2026-25580 行: 対応列に「HITL レーンは `/resume` スキーマで
+     `message_history` のクライアント供給を遮断(R4)」を追記。
+  2. CVE-2026-46678 行: 対応列に「HITL レーンは URL 取得ツール非搭載のため
+     攻撃面未発火、将来ツール追加時は `safe_download` 必須化方針を README に
+     明記(R5.1–5.3)」を追記。
+  3. CVE-2026-61437 行を新規追加: 本リポジトリはいずれのレーンも
+     pydantic-ai Web UI 機能を採用していないため非依存と明記。
+  4. 「既知の制約(Accepted Risk)」表の `pydantic-ai v2 Beta 採用` 行を
+     `pydantic-ai v2 系の追従` へ変更し、GA 系フロア採用済みである旨を反映。
+- Verification: 変更はプレーンな Markdown 文字列のみ(コード変更ゼロ)。
+  ruff/pyright の対象外。`SECURITY-NOTES.md` を参照するテストが存在しない
+  ことを事前確認済みのため回帰リスクはゼロ。参考として hitl レーンの
+  既存スイートが無関係であることのみ再確認:
+
+```
+$ grep -rn "v2 Beta 採用\|2\.0\.0b6\|CVE-2026" --include="*.py" . | grep -v .sdd
+(patterns/hitl/tests/unit/test_egress_policy.py と test_resume_schema.py の
+ CVE-2026-25580/46678 文字列参照のみ — SECURITY-NOTES.md の具体的な文言には
+ 依存しないアサーションであることを確認、regression なし)
+```
+
+- tasks.md 6.1 を `[x]` に更新。
+
+### [2026-07-14 Task 6.2] SECURITY-NOTES OWASP マッピング節追加 — 文書追記のみ(テスト境界なし)
+
+- Objective: 「HITL 応用レイヤ → OWASP マッピング(Spec 013)」節を既存4レーン
+  (autonomous-agent / RAG / SSE / Deep Research)と同一表形式で追加(R7.1, R7.2)。
+- TDD 適用外の判断: Task 6.1 と同様、tasks.md §6 は `patterns/SECURITY-NOTES.md`
+  のみを境界とし専用テストファイルを持たない。文書追記のため直接編集。
+- 事前調査: `src/patterns_hitl/agent.py` / `harness.py` / `app.py` / `audit.py` を
+  grep して識別子(`Tool(requires_approval=True)`, `ApprovalRequired`,
+  `DeferredToolRequests`, `HitlBudgetExceededError`, `claim`/`consume`/
+  `settle_pending`/`release`, `AuditEvent`)を実コードで確認してから文言を作成。
+  列構成は risk→mechanism 型(RAG/SSE/Deep Research)ではなく mechanism→risk 型
+  (autonomous-agent の「ガードレール | OWASP 項目 | 緩和メカニズム」)を採用 —
+  6.2 のタスク文自体が「承認ゲート → Excessive Agency」のように機構起点で
+  要件を列挙しているため。
+- 変更内容: Deep Research 節の直後(`## 公式参照` の直前)に新規
+  `### HITL 応用レイヤ → OWASP マッピング` 節を追加。4行の表
+  (承認ゲート→過剰なエージェンシー/Insecure Tool Use、`UsageLimits` 通算→
+  Unbounded Consumption、セッション衛生+サーバー正本履歴→信頼できない入力面
+  (LLM01)、マスク済み監査証跡→アカウンタビリティ/機微情報漏洩)+ 既存4節と
+  対称な pre-commit 不変条件パラグラフ(gitleaks / forbid-hardcoded-model-ids が
+  patterns/ 全域を除外しないことの確認)を追加。
+- Verification: プレーンな Markdown 追記のみ(コード変更ゼロ)。新節を参照する
+  テストが存在しないことを事前確認。
+
+```
+$ grep -rn "OWASP.*マッピング\|HITL 応用レイヤ" --include="*.py" . | grep -v .sdd
+(0 件 — 新節に依存するテストなし、regression なし)
+
+$ cd patterns/hitl && uv run pytest --no-cov -q
+65 passed, 2 skipped, 1 warning in 0.76s
+```
+
+- tasks.md 6.2 を `[x]` に更新。
+
+### [2026-07-14 Task 6.3] SECURITY-NOTES fix未提供アドバイザリ runbook 追加 — 文書追記のみ(テスト境界なし)
+
+- Objective: 「fix 未提供アドバイザリの運用」節を追加(R8.1, R8.2)。手順
+  (a)修正版不在確認→(b)悪用可能性評価→(c)レーン限定 `--ignore-vuln <ID>` +
+  期限コメント + 追跡 issue → (d)修正着地で即撤去、を明記し、期限・追跡なしの
+  抑止エントリを禁止する旨を明文化。nltk / PYSEC-2026-597 の実例を参照する。
+- TDD 適用外の判断: Task 6.1/6.2 と同様、境界は `patterns/SECURITY-NOTES.md`
+  のみで専用テストなし。文書追記のため直接編集。
+- 事前調査:
+  1. `specs/document-review/agentic-ai-design-v2-review.md` §C-2/C-3 で
+     nltk 3.9.4(rag / frameworks/llamaindex の推移的依存)への
+     PYSEC-2026-597/CVE-2026-12243 登録(`_UNSAFE_NO_PROTOCOL_RE` がパーセント
+     エンコードされたトラバーサルを検査しない不完全修正)と、
+     `uv lock --upgrade-package nltk` で 3.10.0 へ更新して解消した実際の対応
+     経緯を確認。本件は upstream 修正が既にあったため `--ignore-vuln` 抑止は
+     不要だった旨も確認し、そのまま実例として引用。
+  2. `mise.toml` の `patterns:audit` タスクを確認 — 各レーンは
+     `(cd patterns/<lane> && uv run pip-audit)` で個別実行されるため、
+     「レーン限定の `--ignore-vuln`」は該当レーンの行にのみ追加するという
+     具体的な適用面を runbook 内で明記できた。
+  3. 相対リンク `../specs/document-review/agentic-ai-design-v2-review.md`
+     (patterns/SECURITY-NOTES.md からの相対パス)の実在を確認。
+- 変更内容: 「CVE 根拠と依存フロア」節の運用パラグラフ直後、
+  「## OWASP Agentic AI Top 10」節の直前に新規 `## fix 未提供アドバイザリの運用`
+  節(h2)を追加。手順 1–4、禁止事項(R8.2)、実例パラグラフの3ブロック構成。
+- Verification: プレーンな Markdown 追記のみ(コード変更ゼロ)。新節を参照する
+  テストが存在しないことを事前確認。
+
+```
+$ grep -rn "fix 未提供\|ignore-vuln\|PYSEC-2026-597" --include="*.py" . | grep -v .sdd
+(0 件 — 新節に依存するテストなし、regression なし)
+
+$ cd patterns/hitl && uv run pytest --no-cov -q
+65 passed, 2 skipped, 1 warning in 0.71s
+```
+
+- tasks.md 6.3 を `[x]` に更新。Section 6(6.1–6.3)完了。
