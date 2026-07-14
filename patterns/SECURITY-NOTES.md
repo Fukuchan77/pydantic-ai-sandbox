@@ -47,6 +47,17 @@ pip-audit cron が連続 red 化した）が実際に起きた運用上の教訓
 抑止が実際に必要になった場合の具体的な適用面は `mise.toml` の `patterns:audit` タスクにおける
 レーン別 `pip-audit` 呼出行である。
 
+**実例（2026-07, 抑止適用）**: json-repair（`patterns/frameworks/beeai` の beeai-framework 推移的
+依存）に **GHSA-xf7x-x43h-rpqh**（< 0.60.1、循環 `$ref` スキーマによる無限ループ DoS）が登録された。
+修正版 0.60.1 は存在するが本レーンでは**到達不能** — beeai-framework は `==0.1.39` 厳密ピン
+（`json-repair<0.40.0` 制約）であり、最新の 0.1.81 でも `json-repair<0.53.0` に留まる。手順 (b) の
+評価（脆弱関数 `SchemaRepairer.resolve_schema()` へ信頼できない JSON Schema を渡す面が本レーンに
+存在せず、unit はオフラインフェイク駆動）により手順 (c) のレーン限定抑止を適用:
+`mise.toml`（`patterns:audit`）・`patterns-ci.yml`（lane matrix）・`security.yml`
+（patterns-pip-audit matrix）の beeai 呼出のみ `--ignore-vuln GHSA-xf7x-x43h-rpqh`。
+見直し期限 2026-10-14、追跡は issue #30。beeai-framework が `json-repair>=0.60.1` を許容した
+時点で手順 (d) に従い即撤去する。
+
 ## OWASP Agentic AI Top 10（2025-12）/ LLM Top 10 2025 マッピング
 
 | リスク | 本パターン集での緩和策 |

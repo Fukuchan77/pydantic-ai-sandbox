@@ -86,6 +86,16 @@ jobs:
       fail-fast: false
       matrix:
         lane: [pydantic-ai, beeai, llamaindex]
+        include:
+          # GHSA-xf7x-x43h-rpqh (json-repair < 0.60.1, circular-$ref infinite
+          # loop): the fixed 0.60.1 is unreachable in this lane —
+          # beeai-framework is pinned exact (==0.1.39, constraint
+          # json-repair<0.40.0) and even its latest release (0.1.81) still
+          # caps json-repair<0.53.0. Lane-scoped suppression per the
+          # SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2).
+          # Review by 2026-10-14 or on any beeai-framework bump. Tracking: #30.
+          - lane: beeai
+            audit_args: --ignore-vuln GHSA-xf7x-x43h-rpqh
     defaults:
       run:
         working-directory: patterns/frameworks/${{ matrix.lane }}
@@ -130,9 +140,10 @@ jobs:
       - name: pytest (offline, coverage floor 85)
         run: uv run pytest --cov --cov-report=term
 
-      # Spec 005 Req 7.2: per-lockfile dependency CVE scan.
+      # Spec 005 Req 7.2: per-lockfile dependency CVE scan. `audit_args` is
+      # empty for every lane except the runbook-suppressed beeai entry above.
       - name: pip-audit
-        run: uv run pip-audit
+        run: uv run pip-audit ${{ matrix.audit_args }}
 
   # The shared patterns/contracts package (Spec 006-2a Req 1.1) is the single
   # source of truth the lanes import via `tool.uv.sources`. It is its own uv
