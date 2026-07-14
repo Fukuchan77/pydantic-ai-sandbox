@@ -52,6 +52,7 @@ from pydantic_ai.models.function import FunctionModel
 
 from patterns_hitl.agent import build_agent
 from patterns_hitl.app import create_app
+from patterns_hitl.harness import HitlHarness, TerminalResult
 from patterns_hitl.store import SessionStore, UnknownSessionError
 from tests.support.function_model_scripts import (
     apply_discount_call,
@@ -159,6 +160,24 @@ def test_consume_ends_the_session_permanently() -> None:
         store.claim(session_id)
 
 
+async def test_start_consumes_the_session_when_the_run_completes_terminally() -> None:
+    """A /run that finishes with no pending approval leaves no claimable session behind.
+
+    ``harness.resume`` already consumes on a terminal outcome (R2.1); ``harness.start``
+    must be symmetric so a prompt that never touches an approval-gated tool does not
+    leave a permanently-``pending``, indefinitely-claimable record in the store.
+    """
+    agent = build_agent(FunctionModel(call_counting_script(final_result_call())))
+    store = SessionStore()
+    harness = HitlHarness(agent, store)
+
+    result = await harness.start("Just answer directly, no discount needed.")
+
+    assert isinstance(result, TerminalResult)
+    with pytest.raises(UnknownSessionError):
+        store.claim(result.session_id)
+
+
 # --- API layer (Task 2.1): HTTP status mapping over /run + /resume ---------
 
 
@@ -214,7 +233,10 @@ def test_resume_with_unknown_session_id_returns_the_same_404_body_as_consumed() 
     app = _build_app(final_result_call())
 
     with TestClient(app) as client:
-        response = client.post("/resume", json={"session_id": "does-not-exist", "decisions": {}})
+        response = client.post(
+            "/resume",
+            json={"session_id": "does-not-exist", "decisions": {"whatever": {"approved": True}}},
+        )
 
     assert response.status_code == 404
     detail = response.json()["detail"].lower()
@@ -339,7 +361,11 @@ def test_run_over_budget_returns_429_and_saves_no_session() -> None:
         assert response.status_code == 429
 
         follow_up = client.post(
-            "/resume", json={"session_id": "whatever-id-a-client-might-guess", "decisions": {}}
+            "/resume",
+            json={
+                "session_id": "whatever-id-a-client-might-guess",
+                "decisions": {"whatever": {"approved": True}},
+            },
         )
 
     assert follow_up.status_code == 404

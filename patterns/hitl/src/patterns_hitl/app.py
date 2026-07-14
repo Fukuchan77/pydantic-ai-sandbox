@@ -61,7 +61,7 @@ from fastapi import FastAPI, HTTPException
 # when it builds the model schema, so the real type must be importable at
 # class-definition time even under `from __future__ import annotations`.
 from patterns_contracts import SupportOutput  # noqa: TC002  # used in a pydantic field
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import ToolApproved, ToolCallPart, ToolDenied, UsageLimits
 
 from .audit import LogfireAuditEmitter, build_audit_event, emit_audit_event
@@ -160,12 +160,18 @@ class ResumeRequest(BaseModel):
     ``SessionStore`` (R4.2), never from the request body -- and any
     unknown field on the wire is a ``422`` rather than a silently-dropped
     extra key.
+
+    ``decisions`` requires at least one entry (spec 013 R2.3): a request
+    that resolves nothing has no valid outcome -- pydantic-ai itself
+    raises ``UserError`` when a deferred run is resumed with no results
+    for its pending calls -- so this is rejected at the schema boundary
+    rather than surfacing as an unhandled 500.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     session_id: str
-    decisions: dict[str, Decision]
+    decisions: dict[str, Decision] = Field(min_length=1)
 
 
 def _to_pending_response(result: PendingResult) -> PendingResponse:

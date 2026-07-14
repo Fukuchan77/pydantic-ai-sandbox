@@ -132,7 +132,10 @@ class HitlHarness:
         session_id = self._store.create(
             history, result.usage, pending_call_ids=_pending_call_ids(result.output)
         )
-        return self._to_result(session_id, result.output, history, result.usage)
+        outcome = self._to_result(session_id, result.output, history, result.usage)
+        if isinstance(outcome, TerminalResult):
+            self._store.consume(session_id)
+        return outcome
 
     async def resume(
         self, session_id: str, decisions: dict[str, ToolApproved | ToolDenied]

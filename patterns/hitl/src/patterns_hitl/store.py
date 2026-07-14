@@ -122,21 +122,6 @@ class SessionStore:
         """
         return self._records[session_id]
 
-    def update(self, session_id: str, history: list[ModelMessage], usage: RunUsage) -> None:
-        """Overwrite an existing session's state after a resume.
-
-        Args:
-            session_id: The id returned by a prior :meth:`create` call.
-            history: The message history to store.
-            usage: The usage accumulated so far.
-
-        Raises:
-            KeyError: If ``session_id`` is unknown.
-        """
-        if session_id not in self._records:
-            raise KeyError(session_id)
-        self._records[session_id] = SessionRecord(history=history, usage=usage)
-
     def claim(self, session_id: str) -> SessionRecord:
         """Claim a ``pending`` session, synchronously moving it to ``in_flight``.
 
