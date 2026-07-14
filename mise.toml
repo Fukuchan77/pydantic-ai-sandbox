@@ -169,7 +169,16 @@ run = """
 set -e
 echo "== audit patterns/contracts"; (cd patterns/contracts && uv run pip-audit)
 for d in patterns/frameworks/*/; do
-  echo "== audit $d"; (cd "$d" && uv run pip-audit)
+  args=""
+  # GHSA-xf7x-x43h-rpqh (json-repair < 0.60.1, circular-$ref infinite loop):
+  # fix unreachable in the beeai lane — beeai-framework (==0.1.39 pin, and
+  # even latest 0.1.81) caps json-repair<0.53.0. Lane-scoped suppression per
+  # the SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2). Review by 2026-10-14
+  # or on any beeai-framework bump. Tracking: issue #30.
+  if [ "$d" = "patterns/frameworks/beeai/" ]; then
+    args="--ignore-vuln GHSA-xf7x-x43h-rpqh"
+  fi
+  echo "== audit $d"; (cd "$d" && uv run pip-audit $args)
 done
 echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit)
 echo "== audit patterns/sse"; (cd patterns/sse && uv run pip-audit)

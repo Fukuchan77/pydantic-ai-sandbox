@@ -154,7 +154,12 @@ jobs:
         include:
           - { lane: contracts,     dir: patterns/contracts }
           - { lane: pydantic-ai,   dir: patterns/frameworks/pydantic-ai }
-          - { lane: beeai,         dir: patterns/frameworks/beeai }
+          # beeai carries a lane-scoped suppression for GHSA-xf7x-x43h-rpqh
+          # (json-repair < 0.60.1): the fix is unreachable — beeai-framework
+          # (==0.1.39 pin, and even latest 0.1.81) caps json-repair<0.53.0.
+          # SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2); review by
+          # 2026-10-14 or on any beeai-framework bump. Tracking: #30.
+          - { lane: beeai,         dir: patterns/frameworks/beeai, audit_args: '--ignore-vuln GHSA-xf7x-x43h-rpqh' }
           - { lane: llamaindex,    dir: patterns/frameworks/llamaindex }
           - { lane: rag,           dir: patterns/rag }
           - { lane: sse,           dir: patterns/sse }
@@ -180,8 +185,10 @@ jobs:
       - name: Sync lane dependencies (locked)
         run: uv sync --all-groups --locked
 
+      # `audit_args` is empty for every lane except the runbook-suppressed
+      # beeai entry above.
       - name: pip-audit
-        run: uv run pip-audit
+        run: uv run pip-audit ${{ matrix.audit_args }}
 
   gitleaks:
     name: gitleaks (secret scan)
