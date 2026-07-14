@@ -6,10 +6,13 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "fastapi",
-    # ADR-1 (spec 002-watsonx-provider): 1.5.12 cannot import
-    # foundation_models.ModelInference on Python 3.14.5 (StrEnum/utils.py:1191
-    # TypeError); >=1.5.13 (requires_python <3.15,>=3.11) fixes the import.
-    "ibm-watsonx-ai>=1.5.13",
+    # ADR-1 (spec 002-watsonx-provider): 1.5.12 could not import
+    # foundation_models.ModelInference on Python 3.14 (StrEnum/utils.py:1191
+    # TypeError). The root project has since moved to Python 3.13, where the
+    # import works, but requires-python still admits 3.14 interpreters, so the
+    # floor stays on the fixed line — raised to 1.5.14 to match the version
+    # uv.lock resolves and the suite is verified against.
+    "ibm-watsonx-ai>=1.5.14",
     "logfire[fastapi,httpx]",
     # Use pydantic-ai-slim with explicit extras instead of the full `pydantic-ai`
     # meta-package, so only what the app actually uses is installed:

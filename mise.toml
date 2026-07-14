@@ -15,7 +15,7 @@ description = "Ruff format verification — no in-place rewrites."
 run = "uv run ruff format --check ."
 
 [tasks.typecheck]
-description = "Pyright strict type-check against Python 3.14."
+description = "Pyright strict type-check against Python 3.13."
 run = "uv run pyright"
 
 [tasks.test]
