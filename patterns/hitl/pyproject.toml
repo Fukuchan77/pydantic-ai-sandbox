@@ -1,0 +1,108 @@
+# patterns/hitl — Human-in-the-Loop stop/approve/resume harness lane
+# (Spec 012-agentic-ai-design Req 1.1/1.2/1.3/1.5).
+#
+# Independent uv project (plan.md File Structure Plan), mirroring the sse lane
+# (research.md I-2): both sit at depth 1 under patterns/, siblings of
+# frameworks/, on Python 3.14 (the pydantic-ai V2 baseline). This lane is
+# pydantic-ai-only (Req 1.2 / spec.md Scope) — `ApprovalRequired` /
+# `DeferredToolRequests` / `ToolApproved` / `ToolDenied` are pydantic-ai-v2-
+# specific mechanisms — so no `beeai-framework` or `llamaindex` dependency is
+# declared.
+
+[project]
+name = "patterns-hitl"
+version = "0.1.0"
+description = "Cross-framework agent patterns — Human-in-the-Loop stop/approve/resume harness lane (pydantic-ai v2 deferred tools)."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    # Shared contract package (path dep, Req 1.3). `ActionType` /
+    # `ResolutionAction` / `SupportOutput` live here as the single source of
+    # truth (patterns/contracts/src/patterns_contracts/hitl.py); the lane
+    # never duplicates them and never imports a sibling lane (NFR-3).
+    "patterns-contracts",
+    # HITL harness runtime (Req 1.2, spec.md Clarifications): the stop/
+    # approve/resume flow (`ApprovalRequired` -> `DeferredToolRequests` ->
+    # `ToolApproved`/`ToolDenied`) is a pydantic-ai-v2-only mechanism. The
+    # `openai` extra backs the OpenAI-compatible `OpenAIChatModel` the gated
+    # live Ollama integration lane (Task 8) uses.
+    "pydantic-ai-slim[openai]>=2.9.0",
+    # HITL API app-factory (`create_app`, R8.1-8.6).
+    "fastapi>=0.136",
+    # Fail-soft observability bootstrap (plan.md Observability / R9.1):
+    # `logfire.instrument_pydantic_ai()` + `instrument_fastapi()`.
+    "logfire",
+    # `HitlSettings` env-var loading (risk threshold / live model name),
+    # mirroring the root app's `pydantic_ai_sandbox.config.Settings` pattern.
+    "pydantic-settings>=2",
+]
+
+[dependency-groups]
+dev = [
+    # httpx backs `with TestClient(app):` lifespan-aware API tests (R8.6).
+    "httpx>=0.28",
+    "pip-audit",
+    "pyright",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/patterns_hitl"]
+
+# Path dependency to the shared contracts package. Editable so contract edits
+# land without a re-sync; `../contracts` resolves from patterns/hitl/ to
+# patterns/contracts/ — depth 1, mirroring the sse/rag lanes.
+[tool.uv.sources]
+patterns-contracts = { path = "../contracts", editable = true }
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "BLE", "UP", "RUF", "S", "A", "SIM", "T20", "D", "N", "C4", "C90", "TCH"]
+ignore = ["E501", "S101", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106", "D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["patterns_hitl"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["src/patterns_hitl"]
+branch = true
+relative_files = true
+
+[tool.coverage.report]
+fail_under = 98
+show_missing = true
+skip_covered = false
