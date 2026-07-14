@@ -173,6 +173,31 @@ def test_run_with_only_known_fields_is_accepted() -> None:
     assert response.status_code == 200
 
 
+# --- /resume: an empty decisions map resolves nothing and is rejected (R2.3) -----
+
+
+def test_resume_with_an_empty_decisions_map_is_rejected_as_422() -> None:
+    """An empty `decisions` map resolves no pending call -- reject it rather than run the model for nothing."""
+    calls = {"n": 0}
+    script = call_counting_script(apply_discount_call(amount_usd=100.0), final_result_call())
+
+    def spying_script(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        calls["n"] += 1
+        return script(messages, info)
+
+    agent = build_agent(FunctionModel(spying_script))
+    app = create_app(agent=agent, store=SessionStore(), instrument=False)
+
+    with TestClient(app) as client:
+        session_id, _ = _start_pending_run(client)
+        calls_after_run = calls["n"]
+
+        response = client.post("/resume", json={"session_id": session_id, "decisions": {}})
+
+    assert response.status_code == 422
+    assert calls["n"] == calls_after_run
+
+
 # --- Resume sources history from the store only, never from the wire (R4.2) ------
 
 

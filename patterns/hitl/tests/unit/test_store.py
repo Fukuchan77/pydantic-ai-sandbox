@@ -28,35 +28,12 @@ def test_create_then_get_round_trips_the_stored_record() -> None:
     assert record == SessionRecord(history=[], usage=usage)
 
 
-def test_update_overwrites_the_stored_record() -> None:
-    """update replaces a session's history and usage in place."""
-    store = SessionStore()
-    session_id = store.create([], RunUsage(requests=1))
-    updated_usage = RunUsage(requests=2)
-
-    store.update(session_id, [], updated_usage)
-
-    assert store.get(session_id) == SessionRecord(history=[], usage=updated_usage)
-
-
 def test_get_unknown_session_id_raises_key_error() -> None:
     """An unresolved session id raises KeyError -- app.py maps this to a 404 (R8.5)."""
     store = SessionStore()
 
     try:
         store.get("does-not-exist")
-    except KeyError as exc:
-        assert exc.args == ("does-not-exist",)
-    else:
-        raise AssertionError("expected KeyError")
-
-
-def test_update_unknown_session_id_raises_key_error() -> None:
-    """update on an unresolved session id raises KeyError rather than silently creating one."""
-    store = SessionStore()
-
-    try:
-        store.update("does-not-exist", [], RunUsage())
     except KeyError as exc:
         assert exc.args == ("does-not-exist",)
     else:

@@ -192,7 +192,10 @@ def test_resume_unknown_session_id_returns_404() -> None:
     app = _build_app(final_result_call())
 
     with TestClient(app) as client:
-        response = client.post("/resume", json={"session_id": "does-not-exist", "decisions": {}})
+        response = client.post(
+            "/resume",
+            json={"session_id": "does-not-exist", "decisions": {"whatever": {"approved": True}}},
+        )
 
     assert response.status_code == 404
 
