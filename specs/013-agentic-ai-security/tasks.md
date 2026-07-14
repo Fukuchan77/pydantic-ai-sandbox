@@ -144,7 +144,7 @@ _Boundary:_ `tests/unit/test_security_workflow_lanes.py`
 _Depends:_ none(012 Task 7 の列挙面登録が前提)
 _Requirements:_ 9.1, 9.2, 9.3
 
-- [ ] 7.1 `tests/unit/test_security_workflow_lanes.py` を新規作成する(`test_ollama_ci_workflows.py` と同じ YAML パース手法)。(a) `security.yml` の `patterns-pip-audit` matrix include に `{lane: hitl, dir: patterns/hitl}` が存在、(b) `dependabot.yml` の pip `directories` に `/patterns/hitl` が存在 — 欠落は **fail red**(warn ではない)。将来レーンの追い漏れも拾えるよう、`patterns/` 直下 + `patterns/frameworks/` 直下の uv レーン(pyproject.toml 保有ディレクトリ)全列挙と matrix の集合一致で書く(A2)。(c) **機構の赤をスイート内に恒久固定(H-2)**: 集合一致の判定を**純関数**(実 YAML を引数に取り、欠落レーン集合を返す/空なら合格)へ切り出し、`hitl` 行を欠いた**合成 YAML/合成 include リスト**を渡すと非空(=fail)を返すことを負のユニットケースで assert する。これにより手動削除に依存せず機構の red がコミット内に残る。**赤の証跡(A1、補助)**: (a)(b) 自体は hitl 既登録(`security.yml:162` / `dependabot.yml:91`)のため初回緑 — 作業ツリー上で hitl 行を一時削除(非コミット)→ red 確認 → 復元 を PDCA ログにも記録する。
+- [x] 7.1 `tests/unit/test_security_workflow_lanes.py` を新規作成する(`test_ollama_ci_workflows.py` と同じ YAML パース手法)。(a) `security.yml` の `patterns-pip-audit` matrix include に `{lane: hitl, dir: patterns/hitl}` が存在、(b) `dependabot.yml` の pip `directories` に `/patterns/hitl` が存在 — 欠落は **fail red**(warn ではない)。将来レーンの追い漏れも拾えるよう、`patterns/` 直下 + `patterns/frameworks/` 直下の uv レーン(pyproject.toml 保有ディレクトリ)全列挙と matrix の集合一致で書く(A2)。(c) **機構の赤をスイート内に恒久固定(H-2)**: 集合一致の判定を**純関数**(実 YAML を引数に取り、欠落レーン集合を返す/空なら合格)へ切り出し、`hitl` 行を欠いた**合成 YAML/合成 include リスト**を渡すと非空(=fail)を返すことを負のユニットケースで assert する。これにより手動削除に依存せず機構の red がコミット内に残る。**赤の証跡(A1、補助)**: (a)(b) 自体は hitl 既登録(`security.yml:162` / `dependabot.yml:91`)のため初回緑 — 作業ツリー上で hitl 行を一時削除(非コミット)→ red 確認 → 復元 を PDCA ログにも記録する。
   _Boundary:_ `tests/unit/test_security_workflow_lanes.py`
   _Depends:_ none
   _Requirements:_ 9.1, 9.2, 9.3
