@@ -715,3 +715,74 @@ $ cd patterns/hitl && uv run pytest --no-cov -q
 ```
 
 - tasks.md 6.3 を `[x]` に更新。Section 6(6.1–6.3)完了。
+
+### [2026-07-14 Task 7.1] `tests/unit/test_security_workflow_lanes.py` 新規作成 — CVE スキャン到達性の回帰防止ガード
+
+- Objective: `security.yml` の `patterns-pip-audit` matrix と `dependabot.yml`
+  の pip `directories` から `hitl`(または将来の任意レーン)が欠落したら
+  fail red になる集合一致ガードを追加する(R9.1–9.3)。
+- 事前調査(gap-analysis 論点 A の反映): `security.yml:162` に
+  `{lane: hitl, dir: patterns/hitl}`、`dependabot.yml:91` に
+  `/patterns/hitl` が**既に登録済み**であることを実測確認。したがって本ガードは
+  「初回赤の新規保護」ではなく**回帰防止ゲート**であり、TDD の赤先行は
+  A1+A2(tasks.md 実装ノート採用済み)に従い以下の二段構成で示す:
+  1. 検出機構そのものの赤(H-2): `missing_lanes()` を純関数として切り出し、
+     合成 include リスト/合成期待集合を渡して `hitl` 欠落を検出することを
+     恒久的な負のユニットケースとしてスイートに固定
+     (`test_missing_lanes_is_pure_and_detects_a_synthetic_gap`)。
+  2. 実ファイルに対する一時的な赤確認(A1、手動手順): `security.yml` の
+     hitl 行、`dependabot.yml` の `/patterns/hitl` 行をそれぞれ一時削除して
+     赤を確認 → 復元。
+- 実装: `tests/unit/test_security_workflow_lanes.py` を新規作成。
+  - `_discover_uv_lanes()`: `patterns/*/pyproject.toml` +
+    `patterns/frameworks/*/pyproject.toml` を glob し、独立 uv レーン名を
+    全列挙(A2 — hitl 一点でなく将来レーンの追い漏れも拾う)。
+  - `_lanes_from_security_matrix()` / `_lanes_from_dependabot_pydantic_ai_block()`:
+    実 YAML から現状の登録レーン集合を抽出。
+  - `missing_lanes(actual, expected) -> frozenset`: 純関数(ファイル I/O
+    なし)。空集合 = 合格。
+  - `test_security_yml_matrix_covers_every_uv_lane`: 全 uv レーン列挙 vs
+    matrix の集合一致。
+  - `test_security_yml_hitl_lane_dir_is_correct`: hitl エントリの `dir` 値。
+  - `test_dependabot_pydantic_ai_dependent_block_covers_hitl`: dependabot 側は
+    AD-9 方針(pydantic-ai 依存レーン群 = frameworks 3 + hitl)に限定した
+    集合一致(rag/sse/deep-research は既知のスコープ外ギャップとして除外)。
+  - `test_missing_lanes_is_pure_and_detects_a_synthetic_gap`: 上記 H-2 の
+    恒久固定ケース。
+- 赤の実測(A1、作業ツリー上で一時編集 → 確認 → 復元、コミットなし):
+
+```
+$ uv run pytest --no-cov tests/unit/test_security_workflow_lanes.py -v
+# hitl 行削除前(初回): 4 passed — 既登録のため初回緑(gap-analysis 想定通り)
+
+# security.yml から `{ lane: hitl, dir: patterns/hitl }` を一時削除:
+test_security_yml_matrix_covers_every_uv_lane FAILED
+test_security_yml_hitl_lane_dir_is_correct FAILED
+test_dependabot_pydantic_ai_dependent_block_covers_hitl PASSED
+test_missing_lanes_is_pure_and_detects_a_synthetic_gap PASSED
+AssertionError: security.yml patterns-pip-audit matrix is missing lane(s) ['hitl']; ...
+2 failed, 2 passed
+# → security.yml を復元(git diff で無差分を確認)
+
+# dependabot.yml から "/patterns/hitl" を一時削除:
+test_dependabot_pydantic_ai_dependent_block_covers_hitl FAILED
+AssertionError: dependabot.yml's pydantic-ai-dependent pip block is missing lane(s) ['hitl']; ...
+1 failed, 3 passed
+# → dependabot.yml を復元(git diff で無差分を確認)
+
+$ uv run pytest --no-cov tests/unit/test_security_workflow_lanes.py -v
+4 passed  # 復元後、緑に回帰
+```
+
+- Verification(フォーマッタ 1 件是正: `PYDANTIC_AI_DEPENDENT_LANES` の
+  frozenset リテラルが折返し対象 — `uv run ruff format` で解消):
+
+```
+$ mise run check
+[lint] All checks passed!
+[format] 63 files already formatted
+[typecheck] 0 errors, 0 warnings, 0 informations
+[test] 286 passed, 4 skipped, 1 warning in 3.09s
+```
+
+- tasks.md 7.1 を `[x]` に更新。残タスクは 8.1(完了ゲート)のみ。
