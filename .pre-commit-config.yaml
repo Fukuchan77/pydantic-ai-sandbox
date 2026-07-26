@@ -8,15 +8,22 @@
 #   * gitleaks                  — secret scanning (Req 9.3)
 #   * forbid-hardcoded-model-ids — local pygrep guard (Req 1.5, Plan AD-4)
 #
-# Manual stage (`mise run pre-commit:manual`, also invoked by CI per Req 8.4):
+# Pre-push stage (runs on every `git push`):
+#   * ollama-integration — live-Ollama integration lane (skips when no daemon)
+#
+# Manual stage (`mise run pre-commit:manual`, on demand):
 #   * pytest      — full unit + integration suite
 #   * pip-audit   — dependency CVE scan
 #
 # `bandit` is intentionally absent: ruff's `S` rule set (enabled in pyproject.toml)
 # is a Py3-complete superset of flake8-bandit for this project's surface area
 # (see Spec Q3 amendment / research.md "bandit 非導入の根拠").
+#
+# NOTE: `default_install_hook_types` gained `pre-push`, so an existing clone
+# must re-run `mise run setup` (i.e. `pre-commit install`) once to get the new
+# hook wired into .git/hooks/pre-push.
 
-default_install_hook_types: [pre-commit]
+default_install_hook_types: [pre-commit, pre-push]
 default_stages: [pre-commit]
 
 repos:
@@ -85,8 +92,35 @@ repos:
       - id: gitleaks
 
   # --------------------------------------------------------------------------
+  # Pre-push stage: the live-Ollama integration lane.
+  #
+  # This is where live 8B inference is exercised now that GitHub's
+  # `integration-ollama.yml` is workflow_dispatch-only (Actions usage-limit
+  # control). Pre-push rather than pre-commit because the lane costs minutes,
+  # not seconds — paying it once per push instead of once per commit keeps the
+  # inner loop fast while still gating anything that reaches the remote.
+  #
+  # The hook delegates to scripts/pre-push-ollama.sh, which warn-and-skips when
+  # no daemon is listening (see that file's header for the escape hatches).
+  # `always_run: true` + `pass_filenames: false`: the router's behaviour can
+  # change through config or dependency edits, so the lane must not be keyed to
+  # a file-type filter.
+  # --------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: ollama-integration
+        name: live-Ollama integration lane (pre-push)
+        language: system
+        entry: bash scripts/pre-push-ollama.sh
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+  # --------------------------------------------------------------------------
   # Manual stage: heavy gates excluded from the default commit path (Req 8.3,
-  # NFR-7). CI runs these via `mise run pre-commit:manual` (Req 8.4).
+  # NFR-7). Run on demand via `mise run pre-commit:manual`; CI no longer runs
+  # this stage (it would be a third pytest + a second pip-audit per run — see
+  # `mise run pre-commit:validate`, which is what ci.yml calls instead).
   # --------------------------------------------------------------------------
   - repo: local
     hooks:

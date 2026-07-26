@@ -1,12 +1,22 @@
 # Spec Req 9.5 / Plan §4.3 / tasks.md T12.5.
 #
-# Weekly dependency monitoring. Two ecosystems are tracked:
+# Monthly dependency monitoring. Two ecosystems are tracked:
 #   1. pip   — runtime + dev deps resolved from pyproject.toml. uv's
 #              lockfile is consumed transparently by Dependabot's pip
 #              ecosystem; no extra configuration needed.
 #   2. github-actions — pinned action versions in .github/workflows/*.yml.
 #              Catches deprecation of e.g. actions/checkout@v3, action
 #              SHA rotation, etc.
+#
+# CADENCE (CI optimization — Actions usage-limit control): checks are MONTHLY,
+# not weekly, and each ecosystem opens at most 3 PRs at a time (was 10). Every
+# Dependabot PR fans out into a ci + security (+ patterns-ci) run, so the update
+# cadence is one of the largest usage drivers in this repository. Freshness is
+# not lost: security.yml's DAILY pip-audit cron audits the root lockfile plus
+# every patterns/ lane lockfile, so a newly filed CVE still surfaces within a
+# day — Dependabot's job here is routine version hygiene, not CVE detection.
+# `day:` is intentionally absent below: Dependabot honours it only for weekly
+# checks; a monthly check runs on the 1st at the configured `time`.
 #
 # Supply-chain watchlist (Spec Req 9.5 + 11.4 + idea0.md §14): packages with a
 # documented incident history get an extra `supply-chain-watch` label
@@ -29,11 +39,10 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:13"  # off-zero minute (avoid the :00 stampede)
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     labels:
       - "dependencies"
       - "python"
@@ -58,8 +67,9 @@ updates:
     # extra labels + reviewers so they're visibly not-auto-mergeable.
     # `litellm` and `ibm-watsonx-ai` are the registered watchlist packages
     # (idea0.md §14 2026-03 yank; ADR-1 py3.14 import break respectively).
-    # When a new package joins the watchlist, add it here AND mention
-    # it in security.yml's `supply-chain-summary` job.
+    # When a new package joins the watchlist, add it here AND mention it in
+    # security.yml's "Supply-chain watch reminder" step (a step of the
+    # pip-audit job since the standalone summary job was folded in).
     # ------------------------------------------------------------------
     ignore: []
     # Per-dep overrides cannot be expressed in the v2 schema as a map (a
@@ -90,11 +100,10 @@ updates:
       - "/patterns/frameworks/llamaindex"
       - "/patterns/hitl"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:33"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     labels:
       - "dependencies"
       - "python"
@@ -119,11 +128,10 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: "06:23"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
     labels:
       - "dependencies"
       - "github-actions"
