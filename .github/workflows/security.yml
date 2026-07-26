@@ -14,13 +14,20 @@
 # would be duplicate detection cost without coverage gain.
 #
 # Triggers:
-#   * push / pull_request (merge-time protection): root pip-audit + gitleaks.
-#   * DAILY cron: dependency CVE scans — root uv.lock plus every patterns/
+#   * pull_request (merge-time protection): root pip-audit + gitleaks.
+#   * DAILY cron: dependency CVE scans ONLY — root uv.lock plus every patterns/
 #     lane lockfile. Unchanged lanes never re-enter patterns-ci, so the
 #     schedule is the only way a newly filed advisory against a frozen
-#     lockfile gets detected.
+#     lockfile gets detected. Nothing else is scheduled in this repository:
+#     the daily budget is security scanning and nothing more (CI optimization).
 #   * WEEKLY cron (Mon): gitleaks full-history scan.
 #   * workflow_dispatch: everything, on demand.
+#
+# CI optimization (Actions usage-limit control): the `push: branches: [main]`
+# trigger is retired for the same reason as ci.yml's — the PR run already
+# audited that exact commit. Full-history secret coverage is unaffected: the
+# weekly gitleaks cron scans all of main's history regardless of trigger.
+#
 # GitHub Actions binds all crons to the single `on.schedule` list; jobs route
 # by comparing `github.event.schedule` against a cron string, so the strings
 # in the job `if:` expressions MUST stay byte-identical to the strings below
@@ -31,8 +38,6 @@
 name: security
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -57,8 +62,8 @@ jobs:
     name: pip-audit (PyPI Advisory DB)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Runs on push / PR / dispatch / the daily cron; skipped on the weekly
-    # gitleaks cron (the daily cron under an hour earlier already covered it).
+    # Runs on PR / dispatch / the daily cron; skipped on the weekly gitleaks
+    # cron (the daily cron under an hour earlier already covered it).
     if: github.event_name != 'schedule' || github.event.schedule == '23 1 * * *'
     steps:
       - name: Checkout
@@ -132,10 +137,36 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # ----------------------------------------------------------------------
+      # Spec Req 9.5 — supply-chain-watch reminder, folded into this job.
+      # It used to be a standalone `supply-chain-summary` job with no `if:`,
+      # so every event (PR, both crons, every dispatch) spun up a whole extra
+      # runner just to echo static text. As a step here it costs nothing and
+      # lands in the same job summary a reviewer is already reading, next to
+      # the audit findings it annotates (CI optimization).
+      # ----------------------------------------------------------------------
+      - name: Supply-chain watch reminder
+        if: always()
+        run: |
+          {
+            echo '## Supply-chain watch (Req 9.5)'
+            echo ''
+            echo 'Dependencies tagged `supply-chain-watch` in '
+            echo '`.github/dependabot.yml` MUST NOT be auto-merged. A human'
+            echo 'reviewer is required for any version change. Current'
+            echo 'watchlist (idea0.md §14):'
+            echo ''
+            echo '- `litellm` (2026-03 yank incident)'
+            echo '- `ibm-watsonx-ai` (1.5.12 py3.14 import break, ADR-1)'
+            echo ''
+            echo 'See [README.md](../README.md) and `.github/dependabot.yml`'
+            echo 'for the operational rule.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Patterns lanes are independent uv projects with independent lockfiles.
-  # patterns-ci.yml audits a lane only when a PR/push touches its paths, so an
+  # patterns-ci.yml audits a lane only when a PR touches its paths, so an
   # unchanged lane never learns about a newly filed advisory. This job closes
-  # that gap on the daily cron (and on demand via dispatch). push/PR are
+  # that gap on the daily cron (and on demand via dispatch). PRs are
   # deliberately excluded: patterns-ci already audits changed lanes there.
   # Steps mirror patterns-ci.yml's audit shape (setup-uv + `uv sync --locked` +
   # plain `uv run pip-audit`) so a finding here reproduces locally with
@@ -194,8 +225,8 @@ jobs:
     name: gitleaks (secret scan)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Runs on push / PR / dispatch (cheap merge-time protection) plus the
-    # weekly full-history cron; skipped on the daily pip-audit cron.
+    # Runs on PR / dispatch (cheap merge-time protection) plus the weekly
+    # full-history cron; skipped on the daily pip-audit cron.
     if: github.event_name != 'schedule' || github.event.schedule == '17 2 * * 1'
     steps:
       - name: Checkout
@@ -220,27 +251,3 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  supply-chain-summary:
-    # Spec Req 9.5 is delivered as documentation+process: dependabot.yml
-    # (T12.5) labels supply-chain-watch dependencies; this job posts a
-    # reminder on every run so reviewers don't have to remember the policy.
-    name: supply-chain-watch reminder
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    steps:
-      - name: Emit policy reminder
-        run: |
-          {
-            echo '## Supply-chain watch (Req 9.5)'
-            echo ''
-            echo 'Dependencies tagged `supply-chain-watch` in '
-            echo '`.github/dependabot.yml` MUST NOT be auto-merged. A human'
-            echo 'reviewer is required for any version change. Current'
-            echo 'watchlist (idea0.md §14):'
-            echo ''
-            echo '- `litellm` (2026-03 yank incident)'
-            echo ''
-            echo 'See [README.md](../README.md) and `.github/dependabot.yml`'
-            echo 'for the operational rule.'
-          } >> "$GITHUB_STEP_SUMMARY"

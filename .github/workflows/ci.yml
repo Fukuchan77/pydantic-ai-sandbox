@@ -1,29 +1,40 @@
 # Constitution Principle V single-entry quality gate, mirrored to CI.
 # Spec Req 6.5, 7.1-7.4, 7.7, 8.4, 10.4 / Plan §4.3 / tasks.md T12.1.
 #
-# Local and CI run the same `mise run check` (lint + format + typecheck + test)
-# and the same `mise run pre-commit:manual` (pytest + pip-audit). Tool versions
-# live in pyproject.toml's dev-deps; mise.toml owns the entry-point names.
-# This workflow MUST NOT introduce its own pinned tool versions — every command
-# is a one-line shell pass-through to mise.
+# Local and CI run the same mise tasks (lint + format + typecheck + test).
+# Tool versions live in pyproject.toml's dev-deps; mise.toml owns the
+# entry-point names. This workflow MUST NOT introduce its own pinned tool
+# versions — every command is a one-line shell pass-through to mise.
 #
-# Coverage: `pytest --cov-report=xml` is generated explicitly (mise run test
-# uses the bare-pytest entry per Constitution V, so the cov flag is added here
-# as a CI-only concern). The XML feeds python-coverage-comment-action for PR
-# diff coverage (Req 7.7) and is uploaded as `coverage-baseline` on main pushes
-# so the next PR has a baseline to diff against.
+# ---------------------------------------------------------------------------
+# CI optimization (Actions usage-limit control) — two changes here:
+#
+# 1. ONE pytest run, not three. This workflow used to run the suite via
+#    `mise run check`, again via `mise run pre-commit:manual`, and a third time
+#    to produce coverage.xml. It now runs `check:static` (lint / format /
+#    typecheck) plus a single `cov:xml` (pytest + coverage + XML). The manual
+#    stage is replaced by `pre-commit:validate`, which preserves Req 8.4's
+#    actual intent — catching a drifted / unparseable hook config — in ~1s;
+#    its pip-audit half is already covered by security.yml on the same PR.
+#
+# 2. NO push trigger. Every change reaches main through a pull request, and the
+#    PR run gates it, so re-running the identical commit on the merge push was
+#    a duplicate. `workflow_dispatch` remains for the occasional manual re-run
+#    of main. Consequence: the `coverage-baseline` artifact upload is gone
+#    (nothing runs on main to produce it); the PR comment still reports the
+#    PR's own coverage, and pyproject's `fail_under` ratchet is what actually
+#    enforces the floor.
+# ---------------------------------------------------------------------------
 
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch: {}
 
-# Cancel superseded runs on the same ref to keep the queue lean. main pushes
-# never cancel each other (different SHAs land on the same branch ref but the
-# group resolves to `ci-refs/heads/main` and runs serially per push).
+# Cancel superseded runs on the same PR ref to keep the queue lean; a manual
+# dispatch is deliberate, so it is never cancelled by a sibling.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,7 +45,7 @@ permissions:
 
 jobs:
   check:
-    name: mise run check + pre-commit:manual
+    name: mise run check:static + cov:xml
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -60,32 +71,34 @@ jobs:
         run: uv sync --all-groups
 
       # ----------------------------------------------------------------------
-      # Constitution Principle V — four-gate aggregate.
-      # `mise run check` depends-runs lint / format / typecheck / test. If any
+      # Constitution Principle V — the aggregate gate, minus the test half.
+      # `mise run check:static` depends-runs lint / format / typecheck. If any
       # gate fails the rest still run via mise's depends model so reviewers see
-      # the full failure surface, not just the first error.
+      # the full failure surface, not just the first error. The test half is
+      # the `cov:xml` step below — running it there instead of here is what
+      # collapsed three pytest runs into one.
       # ----------------------------------------------------------------------
-      - name: mise run check (lint / format / typecheck / test)
-        run: mise run check
+      - name: mise run check:static (lint / format / typecheck)
+        run: mise run "check:static"
 
       # ----------------------------------------------------------------------
-      # Spec Req 8.4 — CI MUST run the manual stage so a missing local
-      # `pre-commit install` is detected before merge. This rerun of pytest
-      # plus pip-audit is intentional: it proves the pre-commit configuration
-      # itself is parseable and that the manual hooks haven't drifted from
-      # their `language: system` entries.
+      # Spec Req 7.5 / 7.7 / 10.4 — the test gate AND the coverage XML in one
+      # pytest invocation. `--cov-report=xml` writes ./coverage.xml; pytest
+      # reads coverage source / branch settings and the `fail_under` ratchet
+      # from pyproject.toml, so a coverage regression reds this step.
       # ----------------------------------------------------------------------
-      - name: mise run pre-commit:manual
-        run: mise run "pre-commit:manual"
+      - name: mise run cov:xml (pytest + coverage + XML)
+        run: mise run "cov:xml"
 
       # ----------------------------------------------------------------------
-      # Spec Req 7.7 / 10.4 — coverage XML for diff coverage and baseline.
-      # `--cov-report=xml` writes ./coverage.xml; pytest reads coverage source
-      # / branch settings from [tool.coverage.run] in pyproject.toml so no
-      # additional flags are needed here.
+      # Spec Req 8.4 — a drifted or unparseable .pre-commit-config.yaml must be
+      # caught before merge. Validating the config is the part of the old
+      # `pre-commit:manual` step that CI uniquely provides; its pytest half now
+      # runs once above, and its pip-audit half runs in security.yml on the
+      # same pull request.
       # ----------------------------------------------------------------------
-      - name: Generate coverage XML
-        run: uv run pytest --cov --cov-report=xml --cov-report=term
+      - name: mise run pre-commit:validate
+        run: mise run "pre-commit:validate"
 
       - name: Post PR diff coverage comment
         if: github.event_name == 'pull_request'
@@ -94,15 +107,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MINIMUM_GREEN: 80
           MINIMUM_ORANGE: 60
-
-      # On main, persist the XML as the next-PR baseline. PRs read it via
-      # python-coverage-comment-action's storage convention (its own action
-      # writes to a separate branch, so this artifact is a redundant backup
-      # for human inspection / Req 10.4 traceability).
-      - name: Upload coverage baseline (main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-baseline
-          path: coverage.xml
-          retention-days: 90

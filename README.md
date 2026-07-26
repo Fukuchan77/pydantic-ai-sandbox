@@ -34,9 +34,13 @@ All quality gates flow through `mise` — never invoke bare `ruff` / `pyright` /
 | `mise run typecheck`          | `pyright` (strict, Python 3.13)                                |
 | `mise run test`               | `pytest` (asyncio auto mode)                                   |
 | `mise run check`              | Aggregate gate — lint + format + typecheck + test              |
+| `mise run check:static`       | Aggregate gate without tests (what CI pairs with `cov:xml`)    |
+| `mise run cov`                | Coverage-gated run (`fail_under` ratchet)                      |
+| `mise run cov:xml`            | Same, plus `coverage.xml` for the CI diff-coverage comment     |
 | `mise run pre-commit:default` | Run the default pre-commit stage on all files                  |
 | `mise run pre-commit:manual`  | Run the manual stage (pytest / pip-audit)                      |
 | `mise run test:integration`   | Live-Ollama integration lane (sets `RUN_INTEGRATION_OLLAMA=1`) |
+| `mise run test:integration:pre-push` | The same lane exactly as the pre-push hook runs it       |
 
 Run a single test file under the same ground rules:
 
@@ -89,9 +93,48 @@ mise run test:integration                       # uses mise's preset env
 RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration
 ```
 
-In CI, the same lane runs on push-to-main, weekly cron, and any pull-request
-that touches the LLM router / agents / schemas / integration tests
-([specs/001-agentic-platform/tasks.md](specs/001-agentic-platform/tasks.md) T12.3).
+### The lane runs on `git push`, not in CI
+
+Live 8B inference is slow and environment-bound, so it is **not** a GitHub
+Actions gate. It runs from a `pre-push` hook instead
+([scripts/pre-push-ollama.sh](scripts/pre-push-ollama.sh)), wired through
+pre-commit's pre-push stage:
+
+```bash
+mise run setup   # required once on an existing clone: installs .git/hooks/pre-push
+```
+
+The hook probes the daemon first and **warns-and-skips when nothing is
+listening**, so a docs-only push from a machine without Ollama is never
+blocked. Controls:
+
+| Variable / flag             | Effect                                                  |
+| --------------------------- | ------------------------------------------------------- |
+| `REQUIRE_OLLAMA_PREPUSH=1`  | Treat a missing daemon as a hard failure instead of skip |
+| `SKIP_OLLAMA_PREPUSH=1`     | Skip the lane even when the daemon is up                 |
+| `SKIP=ollama-integration`   | pre-commit's own per-hook skip variable                  |
+| `git push --no-verify`      | Bypass every pre-push hook                               |
+
+## CI cost policy
+
+GitHub Actions usage is deliberately constrained (see the header comment in
+each workflow for the full rationale):
+
+| Workflow                          | Triggers                                             |
+| --------------------------------- | ---------------------------------------------------- |
+| `ci.yml`                          | pull request + manual dispatch                       |
+| `patterns-ci.yml`                 | pull request (patterns paths) + manual dispatch      |
+| `security.yml`                    | pull request + **daily** pip-audit + weekly gitleaks |
+| `integration-ollama.yml`          | manual dispatch only (runs pre-push locally instead) |
+| `patterns-integration-ollama.yml` | manual dispatch only                                 |
+| `integration-watsonx.yml`         | manual dispatch only (metered SaaS)                  |
+
+Rules of thumb: nothing is scheduled except security scanning; no workflow
+re-runs a commit on push-to-main because the pull-request run already gated it;
+`ci.yml` runs the test suite exactly once. These invariants are pinned by
+[tests/unit/test_ci_usage_policy.py](tests/unit/test_ci_usage_policy.py) and
+`tests/unit/test_ollama_ci_workflows.py`, so an edit that quietly re-inflates
+the budget fails the suite.
 
 ## Specs and process
 
