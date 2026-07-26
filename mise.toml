@@ -29,6 +29,22 @@ run = "uv run pytest"
 description = "Coverage-gated test run enforcing the fail_under ratchet."
 run = "uv run pytest --cov --cov-report=term-missing"
 
+[tasks."cov:xml"]
+# CI-facing sibling of `cov`: same single pytest invocation, but also emits
+# ./coverage.xml for python-coverage-comment-action. It exists so ci.yml never
+# has to run pytest a second time just to produce the XML (CI optimization:
+# the workflow used to run the suite three times — check / pre-commit:manual /
+# coverage — for one set of results).
+description = "Coverage-gated test run emitting coverage.xml (CI diff-coverage input)."
+run = "uv run pytest --cov --cov-report=xml --cov-report=term"
+
+[tasks."check:static"]
+# `check` minus the test gate, for callers that run the suite themselves with
+# coverage (ci.yml pairs this with `cov:xml`). `depends` keeps mise's
+# run-them-all-then-report semantics so one failing gate does not hide the rest.
+description = "Static half of the aggregate gate (lint / format / typecheck) — no tests."
+depends = ["lint", "format", "typecheck"]
+
 [tasks.check]
 description = "Aggregate quality gate (Constitution V, Req 7.5)."
 depends = ["lint", "format", "typecheck", "test"]
@@ -46,12 +62,30 @@ description = "Run the default pre-commit stage (lint / format / pyright / gitle
 run = "uv run pre-commit run --all-files"
 
 [tasks."pre-commit:manual"]
-description = "Run the manual pre-commit stage (pytest / pip-audit) — invoked in CI and on demand."
+description = "Run the manual pre-commit stage (pytest / pip-audit) — on demand; CI runs the underlying gates directly."
 run = "uv run pre-commit run --all-files --hook-stage manual"
+
+[tasks."pre-commit:validate"]
+# CI replacement for the old `pre-commit:manual` step. Req 8.4's intent was to
+# catch a drifted / unparseable hook configuration before merge; the manual
+# hooks themselves (pytest, pip-audit) are already covered by `cov:xml` in
+# ci.yml and by security.yml's pip-audit job, so CI now validates the config
+# in ~1s instead of re-running the whole suite plus an audit.
+description = "Validate .pre-commit-config.yaml parses and its hooks are well-formed (Req 8.4, CI-cheap form)."
+run = "uv run pre-commit validate-config .pre-commit-config.yaml"
 
 [tasks."test:integration"]
 description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
 run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
+
+[tasks."test:integration:pre-push"]
+# Same lane as `test:integration`, wrapped in the daemon-probe that the
+# pre-push hook needs: no local daemon means warn-and-skip, not a blocked push
+# (set REQUIRE_OLLAMA_PREPUSH=1 to make it fatal). The script is the single
+# source of truth shared with `.pre-commit-config.yaml`'s pre-push hook, so
+# running this task locally reproduces the hook exactly.
+description = "Live-Ollama lane as run by the pre-push hook (skips cleanly when no daemon is listening)."
+run = "bash scripts/pre-push-ollama.sh"
 
 # ---------------------------------------------------------------------------
 # patterns/ framework lanes (Spec 005 Req 9.1). Each lane is an independent

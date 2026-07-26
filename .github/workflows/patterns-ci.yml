@@ -12,36 +12,15 @@
 # The root app's ci.yml is intentionally untouched (Req 8.3); root gates
 # exclude patterns/ (root pyproject extend-exclude) and this workflow only
 # triggers on the patterns surface.
+#
+# CI optimization (Actions usage-limit control): the `push: branches: [main]`
+# trigger is retired. Everything reaches main through a pull request and the PR
+# run — same commit, same eight jobs — already gated it, so the merge-push run
+# was a duplicate. `workflow_dispatch` covers the occasional manual re-run.
 
 name: patterns-ci
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'patterns/**'
-      # `patterns/**` already matches the shared package, but contracts is a
-      # first-class CI surface (the single source of truth the lanes import),
-      # so it is listed explicitly per Req 12.1.
-      - 'patterns/contracts/**'
-      # The RAG application lane (Spec 007-2b Req 11.1) is an independent lane
-      # at patterns/rag/ with its own dedicated job below. `patterns/**` already
-      # matches it, but it is listed explicitly as a first-class CI surface.
-      - 'patterns/rag/**'
-      # The SSE delivery lane (Spec 008-2c Req 10.1) is an independent lane at
-      # patterns/sse/ with its own dedicated job below. `patterns/**` already
-      # matches it, but it is listed explicitly as a first-class CI surface.
-      - 'patterns/sse/**'
-      # The Deep Research lane (Spec 009 Req 12.1) is an independent lane at
-      # patterns/deep-research/ with its own dedicated job below. `patterns/**`
-      # already matches it, but it is listed explicitly as a first-class CI surface.
-      - 'patterns/deep-research/**'
-      # The HITL harness lane (Spec 012 Req 1.6) is an independent lane at
-      # patterns/hitl/ with its own dedicated job below. `patterns/**` already
-      # matches it, but it is listed explicitly as a first-class CI surface.
-      - 'patterns/hitl/**'
-      - 'mise.toml'
-      - '.github/workflows/patterns-ci.yml'
   pull_request:
     branches: [main]
     paths:
