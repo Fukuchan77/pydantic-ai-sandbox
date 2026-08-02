@@ -186,10 +186,17 @@ jobs:
           - { lane: contracts,     dir: patterns/contracts }
           - { lane: pydantic-ai,   dir: patterns/frameworks/pydantic-ai }
           # beeai carries a lane-scoped suppression for GHSA-xf7x-x43h-rpqh
-          # (json-repair < 0.60.1): the fix is unreachable — beeai-framework
-          # (==0.1.39 pin, and even latest 0.1.81) caps json-repair<0.53.0.
-          # SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2); review by
-          # 2026-10-14 or on any beeai-framework bump. Tracking: #30.
+          # (json-repair, declared range < 0.60.1). The lane is NOT AFFECTED:
+          # the vulnerable schema_repair.py first shipped in 0.56.0 and the lane
+          # locks 0.39.1, whose loads() has no schema argument at all. The
+          # advisory range is over-broad (real window 0.56.0-0.60.0 — 0.60.0
+          # still ships the unfixed loop, cycle detection lands in 0.60.1);
+          # the suppression exists only because pip-audit matches declared
+          # ranges, not reachability. beeai-framework caps json-repair<0.40.0
+          # (==0.1.39 pin) and <0.53.0 even at latest 0.1.82, so no reachable
+          # version crosses 0.56.0. SECURITY-NOTES.md runbook (Spec 013
+          # R8.1/8.2); re-evaluate only if locked json-repair enters
+          # 0.56.0-0.60.0. Review by 2026-10-14. Tracking: #30.
           - { lane: beeai,         dir: patterns/frameworks/beeai, audit_args: '--ignore-vuln GHSA-xf7x-x43h-rpqh' }
           - { lane: llamaindex,    dir: patterns/frameworks/llamaindex }
           - { lane: rag,           dir: patterns/rag }

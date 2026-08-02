@@ -32,7 +32,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
-    from docling_core.types.doc.document import DoclingDocument, ProvenanceItem
+    from docling_core.types.doc.common.reference import ProvenanceItem
+    from docling_core.types.doc.document import DoclingDocument
 
 __all__ = ["ChunkRecord", "chunk_document", "derive_locator"]
 
