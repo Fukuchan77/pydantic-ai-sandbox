@@ -204,11 +204,17 @@ set -e
 echo "== audit patterns/contracts"; (cd patterns/contracts && uv run pip-audit)
 for d in patterns/frameworks/*/; do
   args=""
-  # GHSA-xf7x-x43h-rpqh (json-repair < 0.60.1, circular-$ref infinite loop):
-  # fix unreachable in the beeai lane — beeai-framework (==0.1.39 pin, and
-  # even latest 0.1.81) caps json-repair<0.53.0. Lane-scoped suppression per
-  # the SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2). Review by 2026-10-14
-  # or on any beeai-framework bump. Tracking: issue #30.
+  # GHSA-xf7x-x43h-rpqh (json-repair, declared range < 0.60.1, circular-$ref
+  # infinite loop): the beeai lane is NOT AFFECTED — the vulnerable
+  # schema_repair.py first shipped in 0.56.0 and the lane locks 0.39.1, whose
+  # loads() takes no schema argument. The advisory range is over-broad (real
+  # window 0.56.0-0.60.0 — 0.60.0 still ships the unfixed loop, cycle
+  # detection lands in 0.60.1); this suppression exists only because
+  # pip-audit matches declared ranges, not reachability. beeai-framework caps
+  # json-repair<0.40.0 (==0.1.39 pin) and <0.53.0 even at latest 0.1.82, so no
+  # reachable version crosses 0.56.0. Lane-scoped per the SECURITY-NOTES.md
+  # runbook (Spec 013 R8.1/8.2). Re-evaluate only if the locked json-repair
+  # enters 0.56.0-0.60.0. Review by 2026-10-14. Tracking: issue #30.
   if [ "$d" = "patterns/frameworks/beeai/" ]; then
     args="--ignore-vuln GHSA-xf7x-x43h-rpqh"
   fi

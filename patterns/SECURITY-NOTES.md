@@ -47,16 +47,49 @@ pip-audit cron が連続 red 化した）が実際に起きた運用上の教訓
 抑止が実際に必要になった場合の具体的な適用面は `mise.toml` の `patterns:audit` タスクにおける
 レーン別 `pip-audit` 呼出行である。
 
-**実例（2026-07, 抑止適用）**: json-repair（`patterns/frameworks/beeai` の beeai-framework 推移的
-依存）に **GHSA-xf7x-x43h-rpqh**（< 0.60.1、循環 `$ref` スキーマによる無限ループ DoS）が登録された。
-修正版 0.60.1 は存在するが本レーンでは**到達不能** — beeai-framework は `==0.1.39` 厳密ピン
-（`json-repair<0.40.0` 制約）であり、最新の 0.1.81 でも `json-repair<0.53.0` に留まる。手順 (b) の
-評価（脆弱関数 `SchemaRepairer.resolve_schema()` へ信頼できない JSON Schema を渡す面が本レーンに
-存在せず、unit はオフラインフェイク駆動）により手順 (c) のレーン限定抑止を適用:
+**実例（2026-07 抑止適用 → 2026-08 not affected へ格上げ）**: json-repair
+（`patterns/frameworks/beeai` の beeai-framework 推移的依存）に **GHSA-xf7x-x43h-rpqh**
+（宣言範囲 < 0.60.1、循環 `$ref` スキーマによる無限ループ DoS、CWE-835 / CVSS 7.5）が登録された。
+
+手順 (b) の再評価により、本レーンは「到達性が低い」ではなく**脆弱コードが存在しない
+（not affected）**と確定した。根拠:
+
+- 脆弱モジュール `src/json_repair/schema_repair.py` は upstream commit `9a27d7c8`
+  （2026-02-03, "Prepare 0.56.0-alpha.1"）で**新規追加**された。タグ実測で `v0.52.5` /
+  `v0.55.2` に**不在**、`v0.56.0` 以降に存在。修正版 wheel（0.60.1）との差分は循環
+  `$ref` 検出（`seen_schema_ids`）の追加のみで、**`v0.60.0` にはまだ入っていない**
+  （実測: `schema_repair.py` あり・循環検出なし）。よって真の脆弱範囲は
+  **0.56.0–0.60.0** であり、advisory の `< 0.60.1` は下限（`>= 0.56.0`）が欠落した
+  **過大申告**である。
+- 本レーンのロック版は **0.39.1**（2025-02）。パッケージ内の全 `.py` に文字列 `schema` が
+  **0 件**で、`loads()` のシグネチャは `(json_str, skip_json_loads, logging)` ——
+  脆弱 API を呼ぶ引数自体が存在しない。
+- beeai-framework 側の利用箇所も `json_repair.loads(input)` の 1 点のみ
+  （`beeai_framework/backend/utils.py:106`）で、JSON Schema を渡さない。
+
+さらに本件は**恒久的に安全**である: beeai-framework は `==0.1.39` 厳密ピン
+（`json-repair>=0.39.0,<0.40.0`）で、最新 0.1.82 でも `json-repair>=0.52.5,<0.53.0`
+（upstream 制約実測 2026-08-02）。許容されうる全バージョンが脆弱範囲 0.56.0 の**下側**に
+収まるため、beeai-framework をどのリリースへ上げても脆弱コードは入らない。
+
+それでも手順 (c) のレーン限定抑止を**維持する**: pip-audit は到達性ではなく advisory の
+宣言範囲で照合するため、抑止なしでは daily cron が red 化し続ける。適用面は
 `mise.toml`（`patterns:audit`）・`patterns-ci.yml`（lane matrix）・`security.yml`
 （patterns-pip-audit matrix）の beeai 呼出のみ `--ignore-vuln GHSA-xf7x-x43h-rpqh`。
-見直し期限 2026-10-14、追跡は issue #30。beeai-framework が `json-repair>=0.60.1` を許容した
-時点で手順 (d) に従い即撤去する。
+
+**撤去条件の訂正**: 旧記述の「beeai-framework が `json-repair>=0.60.1` を許容した時点」は
+判定基準として誤りであり（上記の通り恒久的に満たされない見込み）、無期限の期限延長を招く。
+正しい再評価トリガは「`json-repair` のロック版が **0.56.0–0.60.0** に入った場合」であり、
+その時に限り手順 (d) の対応（0.60.1 以上へのバンプ）が必要になる。見直し期限 2026-10-14、
+追跡は issue #30。なお、この抑止は「脆弱コード不在」を根拠とする点で、リスク受容型の
+抑止（手順 (b) が「到達不能なら抑止は不要」と述べる想定）とは性質が異なる例である。
+
+このトリガは散文だけに頼らず、
+`patterns/frameworks/beeai/tests/unit/test_json_repair_vuln_window.py` が
+レーンの `uv.lock` から実際にロックされた json-repair バージョンを読み、
+`0.56.0` 未満であることを機械的に assert する形で固定されている。将来ロック版が
+脆弱範囲 0.56.0–0.60.0 に入った場合、この抑止のレビューを待たずレーンの pytest が
+即座に red 化する。
 
 ## OWASP Agentic AI Top 10（2025-12）/ LLM Top 10 2025 マッピング
 

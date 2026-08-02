@@ -10,15 +10,15 @@ dependencies = [
     # foundation_models.ModelInference on Python 3.14 (StrEnum/utils.py:1191
     # TypeError). The root project has since moved to Python 3.13, where the
     # import works, but requires-python still admits 3.14 interpreters, so the
-    # floor stays on the fixed line — raised to 1.5.14 to match the version
+    # floor stays on the fixed line — raised to 1.6.0 to match the version
     # uv.lock resolves and the suite is verified against.
-    "ibm-watsonx-ai>=1.5.14",
+    "ibm-watsonx-ai>=1.6.0",
     "logfire[fastapi,httpx]",
     # Use pydantic-ai-slim with explicit extras instead of the full `pydantic-ai`
     # meta-package, so only what the app actually uses is installed:
     #   openai  → OpenAI-compatible chat client used by the Ollama provider.
     #   logfire → instrument_pydantic_ai instrumentation (logging_setup.py).
-    "pydantic-ai-slim[logfire,openai]>=2.3.0",
+    "pydantic-ai-slim[logfire,openai]>=2.22.0",
     "pydantic-settings",
     "uvicorn",
 ]
@@ -68,8 +68,11 @@ line-length = 100
 # patterns/ lanes are independent uv projects with their own interpreters,
 # dependency sets, and ruff/pyright configs (Spec 005 AD-1/AD-5). Excluding
 # them here keeps `mise run check` scoped to the root app; lane gates run
-# via `mise run patterns:check`.
-extend-exclude = ["patterns"]
+# via `mise run patterns:check`. ruff >=0.16 also formats fenced ```python
+# blocks in Markdown by default; docs/ and specs/ carry hand-authored
+# snippets (comment alignment, prose-adjacent examples) that a blanket
+# reformat would silently rewrite, so Markdown stays out of scope here too.
+extend-exclude = ["patterns", "*.md"]
 
 [tool.ruff.lint]
 select = [
