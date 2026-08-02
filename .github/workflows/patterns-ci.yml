@@ -71,13 +71,14 @@ jobs:
           # vulnerable module schema_repair.py first shipped in 0.56.0, and the
           # lane locks 0.39.1 (no `schema` symbol anywhere in the package; its
           # loads() takes no schema argument). The advisory range is over-broad;
-          # the real window is 0.56.0-0.59.10. Suppression is kept only because
-          # pip-audit matches the declared range, not reachability.
+          # the real window is 0.56.0-0.60.0 (0.60.0 still ships the unfixed
+          # loop; cycle detection lands in 0.60.1). Suppression is kept only
+          # because pip-audit matches the declared range, not reachability.
           # Permanently safe: beeai-framework caps json-repair<0.40.0 at the
           # ==0.1.39 pin and <0.53.0 even at latest 0.1.82 — every reachable
           # version sits below 0.56.0. Per the SECURITY-NOTES.md runbook
           # (Spec 013 R8.1/8.2). Re-evaluate only if the locked json-repair
-          # enters 0.56.0-0.59.10. Review by 2026-10-14. Tracking: #30.
+          # enters 0.56.0-0.60.0. Review by 2026-10-14. Tracking: #30.
           - lane: beeai
             audit_args: --ignore-vuln GHSA-xf7x-x43h-rpqh
     defaults:
