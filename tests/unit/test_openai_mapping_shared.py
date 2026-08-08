@@ -34,6 +34,7 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     TextPart,
     ThinkingPart,
+    ToolAvailabilityDeltaPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -117,6 +118,18 @@ def test_map_request_part_retry_with_tool_to_tool() -> None:
     mapped = _map_request_part(part)
     assert mapped["role"] == "tool"
     assert mapped["tool_call_id"] == "c1"
+
+
+def test_map_request_part_tool_availability_delta_raises_naming_type() -> None:
+    # The agent pipeline projects this cache-bookkeeping part away before message
+    # mapping; one reaching the shared mapper must fail loud (Req 2.7), not be
+    # silently dropped, and the message stays transport-neutral (Req 11).
+    part = ToolAvailabilityDeltaPart(tools_added=["search_kb"])
+    with pytest.raises(NotImplementedError, match="ToolAvailabilityDeltaPart") as excinfo:
+        _map_request_part(part)
+    message = str(excinfo.value)
+    assert "watsonx" not in message.lower()
+    assert "sdk" not in message.lower()
 
 
 def test_map_assistant_message_text_and_tool_calls() -> None:

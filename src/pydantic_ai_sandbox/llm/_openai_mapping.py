@@ -28,15 +28,17 @@ hard-coded are lifted to keyword parameters so each transport stamps its own.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
+    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
+    ToolAvailabilityDeltaPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -152,10 +154,12 @@ def _map_assistant_message(response: ModelResponse) -> dict[str, Any]:
 def _map_request_part(part: ModelRequestPart) -> dict[str, Any]:
     """Map a single :class:`ModelRequest` part to an OpenAI message dict.
 
-    Exhaustively covers the four request-side parts of the ``ModelRequestPart``
-    union — system prompts, user prompts, tool returns and retry prompts — so no
-    part is silently dropped (Req 2.7); a future addition to the union would
-    surface as a pyright error here rather than a runtime drop.
+    Exhaustively covers the request-side parts of the ``ModelRequestPart``
+    union — system prompts, user prompts, tool returns (including the
+    ``ToolSearchReturnPart`` / ``LoadCapabilityReturnPart`` subclasses) and
+    retry prompts — so no part is silently dropped (Req 2.7); ``assert_never``
+    makes a future addition to the union surface as a pyright error here
+    rather than a runtime drop.
     """
     if isinstance(part, SystemPromptPart):
         return {"role": "system", "content": part.content}
@@ -167,19 +171,27 @@ def _map_request_part(part: ModelRequestPart) -> dict[str, Any]:
             "tool_call_id": part.tool_call_id,
             "content": part.model_response_str(),
         }
-    # ``RetryPromptPart`` is the only remaining member of the ``ModelRequestPart``
-    # union; pyright proves exhaustiveness, so handling it here (rather than via a
-    # redundant ``isinstance``) keeps the type-checker happy while still covering
-    # every emitted part. A retry without a tool name is feedback on free-text /
-    # native output (→ ``user``); with one it targets a specific tool call (→
-    # ``tool``).
-    if part.tool_name is None:
-        return {"role": "user", "content": part.model_response()}
-    return {
-        "role": "tool",
-        "tool_call_id": part.tool_call_id,
-        "content": part.model_response(),
-    }
+    if isinstance(part, RetryPromptPart):
+        # A retry without a tool name is feedback on free-text / native output
+        # (→ ``user``); with one it targets a specific tool call (→ ``tool``).
+        if part.tool_name is None:
+            return {"role": "user", "content": part.model_response()}
+        return {
+            "role": "tool",
+            "tool_call_id": part.tool_call_id,
+            "content": part.model_response(),
+        }
+    # ``ToolAvailabilityDeltaPart`` (pydantic_ai >= 2.27) is prompt-cache
+    # bookkeeping for mid-run tool additions; the agent pipeline projects it
+    # away before message mapping, so one reaching this transport-level mapper
+    # is a pipeline bug. pydantic_ai's own OpenAI Chat adapter raises for the
+    # same reason — fail loud rather than silently drop (Req 2.7).
+    # The isinstance is "unnecessary" to pyright today (the union has no other
+    # member left) but keeps ``assert_never`` reachable for the next addition.
+    if isinstance(part, ToolAvailabilityDeltaPart):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg = f"Unsupported request part: {type(part).__name__!r}."
+        raise NotImplementedError(msg)
+    assert_never(part)
 
 
 def _map_messages(messages: list[ModelMessage]) -> list[dict[str, Any]]:
