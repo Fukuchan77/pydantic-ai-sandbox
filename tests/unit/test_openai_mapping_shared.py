@@ -31,6 +31,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     RetryPromptPart,
+    SpeechPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
@@ -126,6 +127,19 @@ def test_map_request_part_tool_availability_delta_raises_naming_type() -> None:
     # silently dropped, and the message stays transport-neutral (Req 11).
     part = ToolAvailabilityDeltaPart(tools_added=["search_kb"])
     with pytest.raises(NotImplementedError, match="ToolAvailabilityDeltaPart") as excinfo:
+        _map_request_part(part)
+    message = str(excinfo.value)
+    assert "watsonx" not in message.lower()
+    assert "sdk" not in message.lower()
+
+
+def test_map_request_part_speech_raises_naming_type() -> None:
+    # Neither transport runs a realtime session, so pydantic_ai's own
+    # ``prepare_messages`` should have converted any user-speaker ``SpeechPart``
+    # to a ``UserPromptPart`` before history reaches this mapper; one arriving
+    # here must fail loud (Req 2.7), not be silently dropped.
+    part = SpeechPart(speaker="user", transcript="hello")
+    with pytest.raises(NotImplementedError, match="SpeechPart") as excinfo:
         _map_request_part(part)
     message = str(excinfo.value)
     assert "watsonx" not in message.lower()
