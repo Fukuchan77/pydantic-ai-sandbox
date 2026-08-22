@@ -35,6 +35,7 @@ from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
     RetryPromptPart,
+    SpeechPart,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
@@ -186,9 +187,18 @@ def _map_request_part(part: ModelRequestPart) -> dict[str, Any]:
     # away before message mapping, so one reaching this transport-level mapper
     # is a pipeline bug. pydantic_ai's own OpenAI Chat adapter raises for the
     # same reason — fail loud rather than silently drop (Req 2.7).
+    if isinstance(part, ToolAvailabilityDeltaPart):
+        msg = f"Unsupported request part: {type(part).__name__!r}."
+        raise NotImplementedError(msg)
+    # ``SpeechPart`` (pydantic_ai >= 2.31) carries realtime-session audio; per
+    # its docstring, standard (non-realtime) models never see it directly —
+    # ``Model.prepare_messages`` converts user-speaker instances to
+    # ``UserPromptPart`` before history reaches a transport. Neither transport
+    # here runs a realtime session, so one reaching this mapper is a pipeline
+    # bug — fail loud rather than silently drop (Req 2.7).
     # The isinstance is "unnecessary" to pyright today (the union has no other
     # member left) but keeps ``assert_never`` reachable for the next addition.
-    if isinstance(part, ToolAvailabilityDeltaPart):  # pyright: ignore[reportUnnecessaryIsInstance]
+    if isinstance(part, SpeechPart):  # pyright: ignore[reportUnnecessaryIsInstance]
         msg = f"Unsupported request part: {type(part).__name__!r}."
         raise NotImplementedError(msg)
     assert_never(part)
