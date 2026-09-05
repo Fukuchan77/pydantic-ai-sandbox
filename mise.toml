@@ -218,9 +218,30 @@ for d in patterns/frameworks/*/; do
   if [ "$d" = "patterns/frameworks/beeai/" ]; then
     args="--ignore-vuln GHSA-xf7x-x43h-rpqh"
   fi
+  # PYSEC-2026-3740 (GHSA-8mgp-746c-j5xp / CVE-2026-81726, nltk 3.10.3, a
+  # llama-index-core transitive): NLTK's model-artifact import/export helpers
+  # call built-in open() on caller-controlled paths instead of the pathsec-aware
+  # helpers, so they escape the allowed roots when path-security enforcement is
+  # on. NOT reachable in this lane, on two independent counts: the advisory's own
+  # preconditions require the app to enable pathsec.ENFORCE *and* let untrusted
+  # input pick a model import/export path (this lane does neither), and none of
+  # the affected components (TransitionParser, AveragedPerceptron,
+  # PerceptronTagger.save_to_json, save_maxent_params) is called -- the lane's
+  # src imports no nltk symbol at all. There is no fix release to upgrade into:
+  # fixed_in is empty and 3.10.3 is the latest nltk on PyPI, so unlike the
+  # 2026-07 PYSEC-2026-597 precedent (closed by bumping 3.9.4 -> 3.10.0) step (d)
+  # has nothing to land. Suppressed lane-locally only because pip-audit matches
+  # declared ranges, not reachability. Review by 2026-11-05; tracking is the
+  # dated entry in patterns/SECURITY-NOTES.md (a GitHub tracking issue is still
+  # to be filed -- see that entry). Retire the moment nltk ships a fixed release.
+  if [ "$d" = "patterns/frameworks/llamaindex/" ]; then
+    args="--ignore-vuln PYSEC-2026-3740"
+  fi
   echo "== audit $d"; (cd "$d" && uv run pip-audit $args)
 done
-echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit)
+# Same nltk advisory, same reasoning as the llamaindex lane above (both pull
+# nltk through llama-index-core). See patterns/SECURITY-NOTES.md.
+echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit --ignore-vuln PYSEC-2026-3740)
 echo "== audit patterns/sse"; (cd patterns/sse && uv run pip-audit)
 echo "== audit patterns/deep-research"; (cd patterns/deep-research && uv run pip-audit)
 echo "== audit patterns/hitl"; (cd patterns/hitl && uv run pip-audit)

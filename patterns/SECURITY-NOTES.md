@@ -91,6 +91,42 @@ pip-audit cron が連続 red 化した）が実際に起きた運用上の教訓
 脆弱範囲 0.56.0–0.60.0 に入った場合、この抑止のレビューを待たずレーンの pytest が
 即座に red 化する。
 
+**実例（2026-09-05 抑止適用、fix 未提供）**: nltk 3.10.3（`patterns/frameworks/llamaindex` /
+`patterns/rag` の llama-index-core 経由の推移的依存）に **PYSEC-2026-3740**
+（GHSA-8mgp-746c-j5xp / CVE-2026-81726、model artifact の import/export ヘルパが
+pathsec 対応ヘルパではなく組込み `open()` を使うためサンドボックス境界を越えて読み書きできる、
+File sandbox bypass）が登録され、依存更新後の `patterns:audit` が llamaindex / rag の 2 レーンで
+red 化した。
+
+手順 (a) **修正版の不在確認**: advisory の `fixed_in` は空。PyPI 上の nltk 最新版は
+**3.10.3 そのもの**で、上位に上げる先が存在しない。2026-07 の PYSEC-2026-597（同じ nltk・同じ
+2 レーン）は 3.9.4 → 3.10.0 のバンプで解消できたが、本件はその選択肢がない。
+
+手順 (b) **到達可能性評価 — 到達不能**。独立した 2 つの根拠:
+
+- advisory 自身が前提条件を明示している: アプリケーションが `pathsec.ENFORCE=True` を有効にし、
+  **かつ**信頼できない入力に model の import/export パスを選ばせている場合に限り悪用可能。
+  本リポジトリはそのどちらも行っていない。
+- 影響コンポーネント（`TransitionParser.train` / `.parse`、`AveragedPerceptron.save` / `.load`、
+  `PerceptronTagger.save_to_json`、`save_maxent_params`）はいずれも呼ばれていない。両レーンの
+  `src/` は nltk のシンボルを 1 つも import しておらず、llama-index-core 側で nltk に触れるのは
+  `indices/keyword_table/utils.py`（stopword 参照）のみ。両レーンとも keyword-table index を
+  構築せず、検索は in-memory の `SimpleVectorStore` 経由である。
+
+手順 (c) **レーン限定の抑止を適用**。適用面は `mise.toml`（`patterns:audit` の llamaindex 分岐と
+rag 行）・`patterns-ci.yml`（lane matrix の llamaindex）・`security.yml`（patterns-pip-audit
+matrix の llamaindex / rag）の 3 か所で、いずれも `--ignore-vuln PYSEC-2026-3740`。
+beeai の json-repair 抑止と同じく、pip-audit が到達性ではなく宣言範囲で照合するために必要な
+一時措置である。
+
+手順 (d) **撤去条件**: nltk が修正版を公開した時点で `uv lock --upgrade-package nltk` によりバンプし、
+3 か所の `--ignore-vuln` を即座に削除する。**見直し期限 2026-11-05**。
+
+**追跡 issue: 未起票**。R8.2 は抑止エントリに追跡 issue への参照を要求しており、本エントリは
+その要件を暫定的に満たしていない — 現時点の追跡先はこの日付付きエントリそのものである。
+見直し期限までに GitHub issue を起票し、その番号を上記 3 か所のコメントと本エントリに
+書き戻すこと。（beeai の GHSA-xf7x-x43h-rpqh は issue #30 で追跡されており、そちらが正しい形。）
+
 ## 上限ピンによる脆弱版回避の運用（ルート、2026-08-22 依存更新）
 
 `--ignore-vuln` による**抑止**とは逆向きの措置として、解決器が脆弱版へ**後退**する

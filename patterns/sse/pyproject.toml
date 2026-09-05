@@ -32,8 +32,8 @@ dependencies = [
     # SSE delivery runtime (Req 1.1). Floors pinned to the versions the Task 0
     # spike resolved and exercised against ASGITransport (fastapi 0.136.x /
     # sse-starlette 3.4.x).
-    "fastapi>=0.136",
-    "sse-starlette>=3.4",
+    "fastapi>=0.141.1",
+    "sse-starlette>=3.4.10",
     # Framework-agnostic event contracts ride Pydantic. Upper-bounded to keep
     # the runtime closure on a stable pydantic (Task 0 hand-off).
     "pydantic>=2,<2.14",
@@ -47,12 +47,12 @@ dependencies = [
 [dependency-groups]
 dev = [
     # httpx ASGITransport drives the in-process happy-path tests (R5 / ADR-4a).
-    "httpx>=0.28",
+    "httpx>=0.28.1",
     # Integration-only (Task 10): the `run_stream_events` -> SseEvent adapter
     # backs the gated Ollama lane. Mirrors the pydantic-ai lane's
     # `pydantic-ai-slim[openai]` (OpenAIChatModel + OllamaProvider). Never
     # imported by the framework-agnostic lane src (NFR-3).
-    "pydantic-ai-slim[openai]>=2.3.0",
+    "pydantic-ai-slim[openai]>=2.40.0",
     "pip-audit",
     "pyright",
     "pytest",

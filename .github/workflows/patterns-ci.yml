@@ -81,6 +81,24 @@ jobs:
           # enters 0.56.0-0.60.0. Review by 2026-10-14. Tracking: #30.
           - lane: beeai
             audit_args: --ignore-vuln GHSA-xf7x-x43h-rpqh
+          # PYSEC-2026-3740 (GHSA-8mgp-746c-j5xp / CVE-2026-81726, nltk 3.10.3,
+          # a llama-index-core transitive): NLTK's model-artifact import/export
+          # helpers call built-in open() on caller-controlled paths instead of
+          # the pathsec-aware helpers, escaping the allowed roots when path
+          # security is enforced. NOT reachable in this lane — the advisory
+          # needs pathsec.ENFORCE enabled *and* untrusted control of a model
+          # import/export path, and none of the affected components
+          # (TransitionParser / AveragedPerceptron /
+          # PerceptronTagger.save_to_json / save_maxent_params) is called; the
+          # lane src imports no nltk symbol at all. No fix release exists
+          # (fixed_in empty; 3.10.3 is the latest nltk on PyPI), so unlike the
+          # 2026-07 PYSEC-2026-597 precedent there is no version to bump into.
+          # Suppression kept only because pip-audit matches the declared range,
+          # not reachability. Per the SECURITY-NOTES.md runbook (Spec 013
+          # R8.1/8.2). Review by 2026-11-05; tracked by the dated entry in
+          # patterns/SECURITY-NOTES.md. Retire as soon as nltk ships a fix.
+          - lane: llamaindex
+            audit_args: --ignore-vuln PYSEC-2026-3740
     defaults:
       run:
         working-directory: patterns/frameworks/${{ matrix.lane }}
