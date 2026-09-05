@@ -198,8 +198,22 @@ jobs:
           # R8.1/8.2); re-evaluate only if locked json-repair enters
           # 0.56.0-0.60.0. Review by 2026-10-14. Tracking: #30.
           - { lane: beeai,         dir: patterns/frameworks/beeai, audit_args: '--ignore-vuln GHSA-xf7x-x43h-rpqh' }
-          - { lane: llamaindex,    dir: patterns/frameworks/llamaindex }
-          - { lane: rag,           dir: patterns/rag }
+          # PYSEC-2026-3740 (GHSA-8mgp-746c-j5xp / CVE-2026-81726, nltk
+          # 3.10.3, pulled in by llama-index-core): NLTK's model-artifact
+          # import/export helpers use built-in open() on caller-controlled
+          # paths instead of the pathsec-aware helpers. NOT reachable in
+          # either lane — the advisory needs pathsec.ENFORCE on plus
+          # untrusted control of a model path, and none of the affected
+          # components (TransitionParser / AveragedPerceptron /
+          # PerceptronTagger.save_to_json / save_maxent_params) is called;
+          # neither lane's src imports an nltk symbol. No fix release exists
+          # (fixed_in empty; 3.10.3 is the latest nltk), so there is nothing
+          # to bump into. Suppressed lane-locally because pip-audit matches
+          # declared ranges, not reachability. SECURITY-NOTES.md runbook
+          # (Spec 013 R8.1/8.2). Review by 2026-11-05; tracked by the dated
+          # entry in patterns/SECURITY-NOTES.md.
+          - { lane: llamaindex,    dir: patterns/frameworks/llamaindex, audit_args: '--ignore-vuln PYSEC-2026-3740' }
+          - { lane: rag,           dir: patterns/rag, audit_args: '--ignore-vuln PYSEC-2026-3740' }
           - { lane: sse,           dir: patterns/sse }
           - { lane: deep-research, dir: patterns/deep-research }
           - { lane: hitl,          dir: patterns/hitl }
