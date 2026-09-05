@@ -32,7 +32,7 @@ dependencies = [
     # Orchestration runtime (Req 1.1): the lead / researcher / report agents are
     # pydantic-ai `Agent`s. Mirrors the pydantic-ai lane's `pydantic-ai-slim[openai]`
     # (OpenAIChatModel + OllamaProvider for the gated live test).
-    "pydantic-ai-slim[openai]>=2.3.0",
+    "pydantic-ai-slim[openai]>=2.40.0",
     # Contract models ride Pydantic. Upper-bounded to match the contracts-shared
     # package's stable pydantic floor.
     "pydantic>=2,<2.14",

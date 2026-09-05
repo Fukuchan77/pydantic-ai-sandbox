@@ -22,7 +22,7 @@ dependencies = [
     # directly and no longer needs `prerelease = "allow"` (removed under
     # [tool.uv]). The CVE-2026-25580 / CVE-2026-46678 SSRF fixes landed in
     # v1.99.0; the 2.x line postdates them (patterns/SECURITY-NOTES.md).
-    "pydantic-ai-slim[openai]>=2.3.0",
+    "pydantic-ai-slim[openai]>=2.40.0",
     "pydantic>=2",
     # Tracing surface for observability.configure_tracing (Spec 005 Req 6.1).
     "opentelemetry-sdk",
