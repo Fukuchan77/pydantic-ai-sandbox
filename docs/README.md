@@ -15,6 +15,12 @@
 | [tool-design.md](./tool-design.md) | ツール設計: namespacing / トークン効率(pagination・filter・truncation)/ `response_format`(concise・detailed) | Anthropic "Writing tools for agents" | `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/tool_design.py` |
 | [context-engineering.md](./context-engineering.md) | コンテキスト工学: structured note-taking / compaction /「最小の高信号トークン集合」 | Anthropic "Effective context engineering" | `patterns/deep-research/src/patterns_deep_research/notes.py` |
 
+## 横断レビュー
+
+| ガイド | 内容 |
+|--------|------|
+| [cross-repo-adoption-backlog.md](./cross-repo-adoption-backlog.md) | 兄弟リポジトリ 4 本(`beeai-agentic-ai-sandbox` / `fastapi-pydantic-ai-agent` / `vaz-ai-next` / `vaz-agentic-ai-next`)との横断検証。本 repo が出す資産と取り込む項目。全文の正本は `vaz-agentic-ai-next/docs/cross-repo-adoption-review.md` |
+
 ## 設計方針(なぜデモとして追加したか)
 
 本リポジトリの 6 パターン契約は Spec 006-2a に対して**凍結**され、3 フレームワーク lane 間の
