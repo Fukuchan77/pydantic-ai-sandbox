@@ -4,7 +4,7 @@
 # Default stage (runs on every `git commit`):
 #   * ruff check                — lint, security (S = flake8-bandit), complexity, docstrings, naming
 #   * ruff format --check       — formatting consistency
-#   * pyright                   — strict type-check against Python 3.14
+#   * pyright                   — strict type-check against Python 3.13
 #   * gitleaks                  — secret scanning (Req 9.3)
 #   * forbid-hardcoded-model-ids — local pygrep guard (Req 1.5, Plan AD-4)
 #
@@ -58,7 +58,7 @@ repos:
         exclude: ^patterns/
 
       - id: pyright
-        name: pyright (strict, py3.14)
+        name: pyright (strict, py3.13)
         language: system
         entry: uv run pyright
         types: [python]

@@ -82,13 +82,34 @@ def _parse_args(args: str) -> dict[str, object]:
     return cast("dict[str, object]", parsed) if isinstance(parsed, dict) else {}
 
 
+def _unwrap_singleton(raw: object) -> object:
+    """Unwrap a single-element list to its lone item; pass everything else through.
+
+    Lenient-parsing allowance: a model that wraps a scalar arg in a one-item list
+    (``["detailed"]`` instead of ``"detailed"``) should read the same as the
+    scalar form. Lists with zero or more than one element are left alone — they
+    are not a singleton, so downstream type checks reject them as invalid rather
+    than guessing which element was meant.
+    """
+    if isinstance(raw, list):
+        items = cast("list[object]", raw)
+        return items[0] if len(items) == 1 else items
+    return raw
+
+
 def _clamp_int(raw: object, *, default: int, minimum: int, maximum: int | None = None) -> int:
     """Coerce ``raw`` to a bounded int, falling back to ``default`` when invalid.
 
-    Booleans are rejected (``isinstance(True, int)`` is True) so a stray ``true``
-    never reads as ``1``. Values below ``minimum`` reset to ``default``; values
-    above ``maximum`` (when given) clamp down to it.
+    Lenient-parsing allowances applied before the bounds check: a single-element
+    list unwraps to its item, and a numeric string (optionally whitespace-padded,
+    e.g. ``" 5 "``) parses as its int value. Booleans are still rejected
+    (``isinstance(True, int)`` is True) so a stray ``true`` never reads as ``1``.
+    Values below ``minimum`` reset to ``default``; values above ``maximum`` (when
+    given) clamp down to it.
     """
+    raw = _unwrap_singleton(raw)
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        raw = int(raw.strip())
     if not isinstance(raw, int) or isinstance(raw, bool):
         return default
     if raw < minimum:
@@ -97,8 +118,15 @@ def _clamp_int(raw: object, *, default: int, minimum: int, maximum: int | None =
 
 
 def _coerce_format(raw: object) -> ResponseFormat:
-    """Read the ``response_format`` knob, defaulting to the token-efficient ``concise``."""
-    return "detailed" if raw == "detailed" else "concise"
+    """Read the ``response_format`` knob, defaulting to the token-efficient ``concise``.
+
+    Lenient-parsing allowances: a single-element list unwraps to its item, and
+    the match against ``"detailed"`` is case-insensitive and ignores leading /
+    trailing whitespace (``" Detailed "`` counts). Anything else — including a
+    missing value — defaults to ``concise``.
+    """
+    raw = _unwrap_singleton(raw)
+    return "detailed" if isinstance(raw, str) and raw.strip().lower() == "detailed" else "concise"
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -144,7 +172,7 @@ class DirectorySearchTool:
     def run(self, args: str) -> str:
         """Return a paged, filtered, truncated JSON view of the directory."""
         params = _parse_args(args)
-        query = str(params.get("query", "")).strip().lower()
+        query = str(_unwrap_singleton(params.get("query", ""))).strip().lower()
         limit = _clamp_int(
             params.get("limit"), default=_DEFAULT_LIMIT, minimum=1, maximum=_MAX_LIMIT
         )
@@ -183,7 +211,7 @@ class DirectoryGetTool:
     def run(self, args: str) -> str:
         """Return one record (or a not-found marker) as JSON."""
         params = _parse_args(args)
-        record_id = str(params.get("id", "")).strip()
+        record_id = str(_unwrap_singleton(params.get("id", ""))).strip()
         response_format = _coerce_format(params.get("response_format"))
         match = next((record for record in self.records if record.identifier == record_id), None)
         if match is None:

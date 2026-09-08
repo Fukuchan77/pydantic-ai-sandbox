@@ -133,6 +133,34 @@ CVE-2026-25580（<1.56.0、信頼できない `message_history` 経由の SSRF�
 不要）。この二重（サーバー正本 + スキーマ遮断）により CVE-2026-25580 系の注入経路は
 ネットワーク到達前に遮断される（R4.1–R4.4）。
 
+### 受信者 allow-list とスティッキー taint（X-9）
+
+`vaz-ai-next` 由来の 2 方向補強を、既存の金額しきい値承認ゲートに独立追加した
+（[`agent.py`](src/patterns_hitl/agent.py)）。いずれも「既存ゲートを迂回不能にする」方向であり、
+承認ダイアログを増やす方向（読まずに承認されるリスクを増やす）ではない。
+
+- **(a) 受信者 allow-list**（`_known_recipient`）: `apply_discount` / `escalate_to_legal` の
+  `target_id` が `HitlDeps.customer_directory`（`search_customer_context` と共用）に無い場合、
+  `ModelRetry` で拒否する。これは**承認では迂回できない**独立ゲートである — 人間が金額を
+  承認しても、未知の受信者そのものは常に拒否される。`customer_directory` が空（本レーンの
+  fake dep の既定値）の場合は fail-open とする設計判断を明記する: 実 CRM が未配線という
+  意味であり、「誰も許可しない」という意図的な拒否ではない。`escalate_to_legal` は
+  宣言的 `requires_approval=True` のため、この関数本体は承認**後**にしか実行されない —
+  つまり受信者チェックは承認の後にも効くことが要点で、承認自体を無効化するわけではない。
+- **(b) スティッキー taint**（`HitlDeps.tainted`）: `search_customer_context` が実際の顧客
+  レコード（顧客が入力した、信頼できない地の文 — プロンプトインジェクションの経路になり得る、
+  OWASP "excessive agency"）をモデルへ返した時点で `True` にラッチし、run の残り全体で
+  保持する。以後 `apply_discount` はしきい値未満の金額であっても人間承認を要求する —
+  デリミタやレコード本文がコンテキストから流れ去っても、taint フラグ自体は消えない。
+  `"no record on file"` という固定文字列（顧客入力ではない）を返す miss はラッチしない。
+
+現状 `HitlHarness`（[`harness.py`](src/patterns_hitl/harness.py)）は `HitlDeps()` を
+決め打ちで生成するため、`customer_directory` の実配線（recipient allow-list を実データで
+機能させる経路）は本 X-9 実装のスコープ外として残る — エージェント層（`build_agent` +
+直接 `agent.run`）では両ゲートとも
+[`tests/unit/test_recipient_and_taint_guards.py`](tests/unit/test_recipient_and_taint_guards.py)
+で検証済み。ハーネス層への配線は別タスクとする。
+
 ### SSRF / egress ポリシー（`safe_download`）
 
 本レーンには現時点で URL を fetch するツールは存在しない。将来 URL 取得ツールを追加する場合、

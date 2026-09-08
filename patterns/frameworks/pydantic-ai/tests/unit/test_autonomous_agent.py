@@ -248,6 +248,38 @@ async def test_rejects_negative_budget() -> None:
         )
 
 
+async def test_rejects_more_than_twenty_allowed_tools() -> None:
+    # X-6b: too many tools on one agent degrades selection accuracy; reject
+    # loudly rather than silently letting the agent choose among 21+ options.
+    # The fix is subagents or Tool RAG, never raising this cap.
+    model = turn_sequenced_model([FinalTurn(text="unused", tokens=0)])
+    too_many = [StubTool(name=f"tool_{i}") for i in range(21)]
+    with pytest.raises(ValueError, match="exceeding the 20-tool budget"):
+        await run_autonomous_agent(
+            "task",
+            model=model,
+            max_iterations=3,
+            allowed_tools=too_many,
+            approval_hook=_approve_all,
+            budget=10,
+        )
+
+
+async def test_accepts_exactly_twenty_allowed_tools() -> None:
+    # The boundary itself must not be rejected -- only exceeding it.
+    model = turn_sequenced_model([FinalTurn(text="done", tokens=1)])
+    exactly_twenty = [StubTool(name=f"tool_{i}") for i in range(20)]
+    result = await run_autonomous_agent(
+        "task",
+        model=model,
+        max_iterations=3,
+        allowed_tools=exactly_twenty,
+        approval_hook=_approve_all,
+        budget=10,
+    )
+    assert result.stop_reason == "completed"
+
+
 async def test_normalizes_dict_and_none_tool_call_args_for_tool_run() -> None:
     # A real model can emit ToolCallPart.args as a dict or None, not just a
     # string; the loop normalizes both before forwarding to Tool.run (dict ->

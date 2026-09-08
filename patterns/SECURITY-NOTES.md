@@ -138,6 +138,24 @@ three comments above and into this entry. (Compare the beeai
 GHSA-xf7x-x43h-rpqh suppression, which is tracked by issue #30 — that's the
 correct form.)
 
+## 抑止ポリシーの階梯（cross-repo、2026-09-08 記録）
+
+Agentic AI 系の兄弟 repo 間で、`--ignore-vuln` をどこまで許容するかに 3 段階の差がある:
+
+1. **最厳格 — 抑止を一切使わない**（`beeai-agentic-ai-sandbox/SECURITY-NOTES.md`）:
+   fix 未提供の advisory であっても `--ignore-vuln` は使わず、バージョン上限ピンや
+   到達不能性の記録のみで対応する。
+2. **期限付き抑止（本 repo が採る段）**: 上記 Runbook（Spec 013 R8.1/8.2）の通り、
+   `--ignore-vuln` の使用自体は許容するが、**見直し期限**と**追跡 issue への参照**を欠く
+   抑止エントリは禁止する（R8.2）。期限が来れば手順 (a)-(d) の再評価が強制される。
+   nltk PYSEC-2026-3740（本節上部）・json-repair GHSA-xf7x-x43h-rpqh（issue #30）は
+   いずれもこの段の実例。
+3. **理由付き抑止**（`fastapi-pydantic-ai-agent`）: `--ignore-vuln` 追加時に到達不能性などの
+   理由をコメントで残すが、日付付きの見直し期限までは必須としない。
+
+本 repo は**第 2 段（期限付き抑止）**を採ることをここに明記する。これまでこの選択は
+Runbook の運用実態から読み取れるのみで、階梯上の位置づけとしては暗黙だった。
+
 ## 上限ピンによる脆弱版回避の運用（ルート、2026-08-22 依存更新）
 
 `--ignore-vuln` による**抑止**とは逆向きの措置として、解決器が脆弱版へ**後退**する

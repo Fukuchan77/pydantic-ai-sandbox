@@ -104,13 +104,13 @@ jobs:
         working-directory: patterns/frameworks/${{ matrix.lane }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads each lane's .python-version and provisions the matching
       # interpreter (3.14 for pydantic-ai, 3.13 for beeai/llamaindex) —
       # no mise needed in this workflow (plan AD-5).
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/frameworks/${{ matrix.lane }}/uv.lock
@@ -140,7 +140,7 @@ jobs:
       - name: pyright (strict)
         run: uv run pyright
 
-      - name: pytest (offline, coverage floor 85)
+      - name: pytest (offline, coverage floor 98)
         run: uv run pytest --cov --cov-report=term
 
       # Spec 005 Req 7.2: per-lockfile dependency CVE scan. `audit_args` is
@@ -163,12 +163,12 @@ jobs:
         working-directory: patterns/contracts
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads patterns/contracts/.python-version (3.13) and provisions the
       # matching interpreter — no mise needed (plan AD-5).
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/contracts/uv.lock
@@ -214,13 +214,13 @@ jobs:
         working-directory: patterns/rag
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads patterns/rag/.python-version (3.13, capped to dodge 3.14 wheel
       # gaps in the Docling/LlamaIndex trees) and provisions the matching
       # interpreter — no mise needed (plan AD-5).
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/rag/uv.lock
@@ -269,12 +269,12 @@ jobs:
         working-directory: patterns/sse
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads patterns/sse/.python-version (3.14) and provisions the matching
       # interpreter — no mise needed (plan AD-5).
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/sse/uv.lock
@@ -322,12 +322,12 @@ jobs:
         working-directory: patterns/deep-research
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads patterns/deep-research/.python-version (3.13, matching the rag app
       # lane; pydantic-ai-slim supports it) and provisions the matching interpreter.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/deep-research/uv.lock
@@ -377,12 +377,12 @@ jobs:
         working-directory: patterns/hitl
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # uv reads patterns/hitl/.python-version (3.14) and provisions the
       # matching interpreter — no mise needed (plan AD-5).
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
           cache-dependency-glob: patterns/hitl/uv.lock

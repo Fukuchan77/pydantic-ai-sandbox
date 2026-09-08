@@ -103,6 +103,18 @@ def test_round_trip_through_wire_preserves_sequence() -> None:
     assert parse_sse_events(_encode(events)) == events
 
 
+def test_parse_sse_events_does_not_split_on_unicode_line_separators() -> None:
+    # X-10 (SSE lifecycle trap #3): a token's text can legitimately contain
+    # U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR -- ordinary Unicode
+    # text, not an SSE line terminator. `str.splitlines()` treats both as line
+    # breaks, which would fragment this single `data:` line into two invalid
+    # halves. The SSE spec recognizes only CRLF/CR/LF, so a token payload
+    # carrying either character must parse as one whole event.
+    event = TokenEvent(text="line one\u2028line two\u2029line three")
+    body = f"event: token\r\ndata: {to_sse(event)['data']}\r\n\r\n"
+    assert parse_sse_events(body) == [event]
+
+
 async def test_event_source_protocol_accepts_async_generator() -> None:
     class _Fake:
         async def stream(self, query: str) -> AsyncIterator[SseEvent]:
