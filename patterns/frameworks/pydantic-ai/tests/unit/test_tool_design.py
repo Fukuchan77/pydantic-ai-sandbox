@@ -114,6 +114,28 @@ def test_search_falls_back_to_defaults_for_invalid_pagination_params() -> None:
     assert json.loads(search.run(json.dumps({"limit": "lots"})))["returned"] == 5
 
 
+def test_search_accepts_the_documented_lenient_parsing_allowances() -> None:
+    # docs/tool-design.md's lenient-parsing convention: numeric strings, a
+    # whitespace-padded / mixed-case response_format, and a single-element list
+    # in place of a bare scalar should all read the same as the canonical form.
+    search, _ = make_directory_tools(_records(7))
+    assert json.loads(search.run(json.dumps({"limit": "3"})))["returned"] == 3
+    assert json.loads(search.run(json.dumps({"limit": " 3 "})))["returned"] == 3
+    assert json.loads(search.run(json.dumps({"limit": ["3"]})))["returned"] == 3
+
+    detailed_variants = (
+        {"limit": 1, "response_format": " Detailed "},
+        {"limit": 1, "response_format": "DETAILED"},
+        {"limit": 1, "response_format": ["detailed"]},
+    )
+    for params in detailed_variants:
+        items = json.loads(search.run(json.dumps(params)))["items"][0]
+        assert set(items) == {"id", "name", "role", "notes"}
+
+    wrapped_query = json.loads(search.run(json.dumps({"query": ["engineer"]})))
+    assert wrapped_query["total"] == 4  # same 4 matches as the bare-string form
+
+
 def test_search_tolerates_missing_malformed_and_non_object_args() -> None:
     search, _ = make_directory_tools(_records(3))
     for args in ("", "   ", "{not json", "[1, 2, 3]"):

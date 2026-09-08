@@ -23,6 +23,7 @@ Ollama integration). It never imports a sibling lane.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from patterns_contracts import SseEvent
@@ -40,6 +41,15 @@ _SSE_EVENT_ADAPTER: TypeAdapter[SseEvent] = TypeAdapter(SseEvent)
 # SSE field prefix the reverse mapping consumes. The contract's `model_dump_json`
 # emits single-line JSON, so one `data:` line carries one whole event.
 _DATA_PREFIX = "data:"
+
+# The SSE spec (WHATWG HTML living standard §9.2.6) recognizes exactly three
+# line terminators: CRLF, CR, and LF. `str.splitlines()` is deliberately NOT
+# used here (X-10): it additionally splits on characters the SSE spec does not
+# treat as line breaks -- notably U+2028 LINE SEPARATOR and U+2029 PARAGRAPH
+# SEPARATOR, either of which can appear inside ordinary model-generated text.
+# A token containing one would silently fragment its `data:` JSON payload
+# across two "lines", breaking `validate_json` on both halves.
+_SSE_LINE_TERMINATOR_RE = re.compile(r"\r\n|\r|\n")
 
 
 @runtime_checkable
@@ -85,6 +95,11 @@ def parse_sse_events(body: str) -> list[SseEvent]:
     Non-``data:`` lines (keepalive ``:`` comments, ``event:`` / ``id:`` / ``retry:``
     framing, blank separators) are ignored -- the JSON payload is authoritative.
 
+    Splits on the SSE spec's own line terminators (CRLF / CR / LF) rather than
+    ``str.splitlines()`` (X-10): the latter also breaks on U+2028/U+2029 and
+    other Unicode line-break characters the spec does not recognize, which
+    would fragment a `data:` payload containing one inside ordinary text.
+
     Args:
         body: The buffered ``text/event-stream`` response body.
 
@@ -92,7 +107,7 @@ def parse_sse_events(body: str) -> list[SseEvent]:
         The events in wire order, each a concrete member of the ``SseEvent`` union.
     """
     events: list[SseEvent] = []
-    for line in body.splitlines():
+    for line in _SSE_LINE_TERMINATOR_RE.split(body):
         if line.startswith(_DATA_PREFIX):
             payload = line[len(_DATA_PREFIX) :].strip()
             events.append(_SSE_EVENT_ADAPTER.validate_json(payload))

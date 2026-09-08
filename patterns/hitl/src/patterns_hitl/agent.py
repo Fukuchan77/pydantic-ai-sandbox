@@ -57,19 +57,70 @@ class HitlDeps:
     Attributes:
         customer_directory: A fake customer lookup table keyed by customer
             id; ``search_customer_context`` reads from this instead of a
-            real CRM -- the lane performs zero external I/O in tests.
+            real CRM -- the lane performs zero external I/O in tests. Also
+            doubles as the recipient allow-list (X-9a): a non-empty
+            directory scopes ``apply_discount`` / ``escalate_to_legal`` to
+            known ids only.
+        tainted: Sticky flag (X-9b), set once and never cleared for the rest
+            of a run: ``True`` once a tool has returned externally-sourced
+            content (a real customer record) into the model's context. A
+            customer's own account notes are untrusted input that could
+            carry injected instructions (OWASP "excessive agency" /
+            prompt injection); once that has happened, money-moving tools
+            require human approval regardless of amount, even if the
+            record's content later scrolls out of the visible context.
     """
 
     customer_directory: Mapping[str, str] = field(default_factory=dict[str, str])
+    tainted: bool = False
 
 
 def search_customer_context(ctx: RunContext[HitlDeps], customer_id: str) -> str:
-    """Look up a customer's account context. Never requires approval."""
-    return ctx.deps.customer_directory.get(customer_id, "no record on file")
+    """Look up a customer's account context. Never requires approval.
+
+    Sets the sticky ``tainted`` flag (X-9b) when a real record is returned:
+    that text is customer-supplied and untrusted, unlike the fixed
+    "no record on file" literal.
+    """
+    context = ctx.deps.customer_directory.get(customer_id)
+    if context is None:
+        return "no record on file"
+    ctx.deps.tainted = True
+    return context
+
+
+def _known_recipient(ctx: RunContext[HitlDeps], target_id: str) -> bool:
+    """Recipient allow-list gate (X-9a), independent of the approval gate.
+
+    A human approving an amount or an escalation must never be able to
+    substitute for this check: it is not a risk-acceptance decision, it is a
+    validity check that no target outside the known customer directory can
+    ever pass, approved or not. Enforced only when the directory is
+    actually populated -- an empty directory is this test double's default
+    (no real CRM wired in), not a deliberate "deny everyone".
+    """
+    return not ctx.deps.customer_directory or target_id in ctx.deps.customer_directory
+
+
+def _unknown_recipient_retry(target_id: str) -> ModelRetry:
+    """Build the retry prompt for a target outside the recipient allow-list (X-9a)."""
+    return ModelRetry(
+        f"target_id {target_id!r} is not a known customer. Refusing to act on an "
+        "unrecognized recipient -- this is independent of any approval decision "
+        "and cannot be overridden by approving the call. Look up a valid customer "
+        "id first."
+    )
 
 
 def escalate_to_legal(ctx: RunContext[HitlDeps], target_id: str, reason: str) -> str:
-    """Escalate a matter to legal. Always requires human approval."""
+    """Escalate a matter to legal. Always requires human approval.
+
+    The recipient allow-list (X-9a) still applies once approved: framework
+    approval for a ``requires_approval=True`` tool only lets this body run,
+    it does not exempt the recipient check inside it.
+    """
+    if not _known_recipient(ctx, target_id):
+        raise _unknown_recipient_retry(target_id)
     return f"escalated {target_id} to legal: {reason}"
 
 
@@ -88,8 +139,17 @@ def _make_apply_discount(
         target_id: str,
         amount_usd: Annotated[float, Field(ge=0)],
     ) -> str:
-        """Apply a discount; amounts above the risk threshold need manual approval."""
-        if amount_usd > risk_threshold_usd and not ctx.tool_call_approved:
+        """Apply a discount; amounts above the risk threshold need manual approval.
+
+        Two independent guardrails (X-9), neither a substitute for the
+        other: the recipient allow-list (:func:`_known_recipient`) checked
+        first and never satisfiable by approval, then the approval gate --
+        now also tripped by the sticky taint flag (X-9b), not only the
+        dollar threshold.
+        """
+        if not _known_recipient(ctx, target_id):
+            raise _unknown_recipient_retry(target_id)
+        if (amount_usd > risk_threshold_usd or ctx.deps.tainted) and not ctx.tool_call_approved:
             raise ApprovalRequired
         return f"applied ${amount_usd:.2f} discount to {target_id}"
 

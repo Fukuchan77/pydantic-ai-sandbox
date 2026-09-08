@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,11 @@ if TYPE_CHECKING:
 __all__ = ["DriveResult", "drive_until_disconnect"]
 
 _DATA_PREFIX = "data:"
+
+# Mirrors `patterns_sse.events`'s own line-terminator regex (X-10): splitting on
+# `str.splitlines()` would also break on U+2028/U+2029 inside scripted text,
+# undercounting `data:` frames if a future fixture's text contains either.
+_SSE_LINE_TERMINATOR_RE = re.compile(r"\r\n|\r|\n")
 
 
 @dataclass
@@ -56,7 +62,7 @@ class DriveResult:
 def _count_data_frames(chunks: list[bytes]) -> int:
     """Count ``data:`` frames across the captured body chunks (mirrors ``parse_sse_events``)."""
     text = b"".join(chunks).decode("utf-8", "replace")
-    return sum(1 for line in text.splitlines() if line.startswith(_DATA_PREFIX))
+    return sum(1 for line in _SSE_LINE_TERMINATOR_RE.split(text) if line.startswith(_DATA_PREFIX))
 
 
 async def drive_until_disconnect(

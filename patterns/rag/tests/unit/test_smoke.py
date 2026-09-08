@@ -4,10 +4,10 @@ Two concerns live here:
 
 * the lane package imports cleanly and pulls in no sibling lane (NFR-3 / Req 1.3);
 * a *fake one-pass* through the whole pipeline -- real ``HybridChunker`` + the deterministic
-  ``HashEmbedding`` / ``ScriptedLLM`` fakes -- completes with **zero network I/O** under a
-  socket guard that loud-fails on any reach (Req 6.1). ``HF_HUB_OFFLINE=1`` (set for every
-  unit run via ``pyproject.toml``) keeps the chunker's tokenizer off the Hub; the guard
-  proves nothing else slips out either.
+  ``HashEmbedding`` / ``ScriptedLLM`` fakes -- completes with **zero network I/O** under the
+  autouse ``block_network`` guard (``tests/unit/conftest.py``, Req 6.1). ``HF_HUB_OFFLINE=1``
+  (set for every unit run via ``pyproject.toml``) keeps the chunker's tokenizer off the Hub;
+  the guard proves nothing else slips out either. A load-bearing case proves the guard fires.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from patterns_rag.indexing import build_index
 from patterns_rag.rag import run_rag
 from tests.support.fake_embedding import HashEmbedding
 from tests.support.fake_llm import ScriptedLLM
+from tests.support.hermetic import NetworkReachError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,13 +38,6 @@ if TYPE_CHECKING:
 SIBLING_LANES = frozenset({"patterns_pydantic_ai", "patterns_beeai", "patterns_llamaindex"})
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "sample.docling.json"
-
-# Internet socket families the hermetic guard rejects. AF_UNIX and the like are delegated to
-# the real connect so the guard targets network *reach*, not in-process IPC.
-_INET_FAMILIES = frozenset({socket.AF_INET, socket.AF_INET6})
-
-# The address shape ``socket.connect`` / ``connect_ex`` accept (typeshed's private ``_Address``).
-_Address = tuple[object, ...] | str | bytes
 
 
 def test_patterns_rag_imports() -> None:
@@ -59,10 +53,6 @@ def test_no_sibling_lane_imports() -> None:
 
     leaked = SIBLING_LANES & set(sys.modules)
     assert not leaked, f"RAG lane must not import sibling lanes: {sorted(leaked)}"
-
-
-class NetworkReachError(RuntimeError):
-    """Raised when a unit-lane code path attempts to reach the network (Req 6.1)."""
 
 
 class _WordTokenizer(BaseTokenizer):
@@ -86,39 +76,10 @@ class _WordTokenizer(BaseTokenizer):
         return self.count_tokens
 
 
-@pytest.fixture
-def block_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Loud-fail on any internet socket connect or DNS lookup (hermetic guard, Req 6.1).
-
-    Installed around the fake one-pass so an accidental reach -- an un-faked embedding/LLM,
-    a HybridChunker tokenizer download, an OTLP export -- raises ``NetworkReachError`` instead
-    of silently performing I/O. The offline pipeline opens no internet socket, so any
-    AF_INET/AF_INET6 connect (sync or asyncio's ``connect_ex``) or ``getaddrinfo`` call is a
-    regression. AF_UNIX and other local sockets are delegated to the genuine implementation.
-    """
-
-    def _make_guard(real: Callable[[socket.socket, _Address], object]) -> Callable[..., object]:
-        def _guard(self: socket.socket, address: _Address) -> object:
-            if self.family in _INET_FAMILIES:
-                msg = f"hermetic unit lane reached the network: {address!r} (Req 6.1)"
-                raise NetworkReachError(msg)
-            return real(self, address)  # genuinely local (AF_UNIX etc.)
-
-        return _guard
-
-    def _guarded_getaddrinfo(*args: object, **kwargs: object) -> object:
-        msg = f"hermetic unit lane attempted DNS resolution: {args!r} (Req 6.1)"
-        raise NetworkReachError(msg)
-
-    # Read the real callables before patching so the delegate path cannot re-enter the guard.
-    monkeypatch.setattr(socket.socket, "connect", _make_guard(socket.socket.connect))
-    monkeypatch.setattr(socket.socket, "connect_ex", _make_guard(socket.socket.connect_ex))
-    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
-
-
-def test_block_network_guard_loud_fails_on_internet_connect(block_network: None) -> None:
-    # Load-bearing proof the guard is not vacuous: a real AF_INET connect must be intercepted
-    # before any I/O (a loopback closed port would otherwise raise ConnectionRefusedError).
+def test_block_network_guard_loud_fails_on_internet_connect() -> None:
+    # Load-bearing proof the autouse guard is not vacuous: a real AF_INET connect must be
+    # intercepted before any I/O (a loopback closed port would otherwise raise
+    # ConnectionRefusedError).
     with (
         socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock,
         pytest.raises(NetworkReachError),
@@ -126,7 +87,7 @@ def test_block_network_guard_loud_fails_on_internet_connect(block_network: None)
         sock.connect(("127.0.0.1", 9))
 
 
-async def test_fake_one_pass_runs_hermetically(block_network: None) -> None:
+async def test_fake_one_pass_runs_hermetically() -> None:
     # Full pipeline under the guard: real chunker -> fake embeddings -> real retriever ->
     # fake LLM, all offline. Reaching the network anywhere raises NetworkReachError (Req 6.1).
     doc = DoclingDocument.load_from_json(_FIXTURE)
