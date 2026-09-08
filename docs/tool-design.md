@@ -74,6 +74,25 @@ json.loads(search.run(json.dumps({"limit": 1, "response_format": "detailed"})))[
 引数が欠落・不正 JSON・非オブジェクトのときは例外を投げず、トークン効率の良い既定へフォールバック
 する。ノイズの多いツール呼び出しでもループを壊さず、小さく安全な結果に劣化する。
 
+### 寛容なパース(lenient parsing)の許容範囲(X-6)
+
+`fastapi-pydantic-ai-agent/docs/tool-design-conventions.md` の「寛容なパース」節が挙げる
+具体的な許容範囲を、本 repo の規約としてもここに明記する。モデルが厳密な型で引数を渡すとは
+限らないため、ツールは次の 4 種のブレを**同じ意味**として受け入れる:
+
+1. **大文字小文字の違い** — `"detailed"` / `"Detailed"` / `"DETAILED"` はすべて同じ値として扱う。
+2. **前後の空白** — `" detailed "` のような余分な空白は無視する(strip)。
+3. **数値の文字列表現** — `limit: "5"` のような数値の文字列化は `limit: 5` と同じに読む。
+4. **単一要素とリストの相互変換** — モデルがスカラー引数を 1 要素のリストで包んで送っても
+   (`response_format: ["detailed"]`)、素のスカラー(`"detailed"`)と同じに読む。要素数が
+   0 個または 2 個以上のリストはこの対象外とし、無効値として通常のフォールバックに委ねる。
+
+実装との整合: [`tool_design.py`](../patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/tool_design.py)
+の `_unwrap_singleton()` が (4) を、`_coerce_format()` が (1)(2)(4) を、`_clamp_int()` が
+(3)(4) を担う。`query` / `id` も `_unwrap_singleton()` 経由で (4) を受ける。テストは
+`test_tool_design.py::test_search_accepts_the_documented_lenient_parsing_allowances` が
+4 種すべてを回帰する。
+
 ### autonomous-agent ループへの接続
 
 凍結済みの core には手を入れず、注入シーム経由でそのまま動く。

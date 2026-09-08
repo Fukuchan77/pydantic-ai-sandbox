@@ -22,7 +22,7 @@ dependencies = [
     # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
     # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
     "patterns-contracts",
-    "llama-index-core>=0.14",
+    "llama-index-core>=0.14.24",
     # Ollama backend for the gated integration lane (Req 5).
     "llama-index-llms-ollama",
     # `llama-index-llms-ollama` imports the `ollama` client, whose 0.6.x line
@@ -34,7 +34,7 @@ dependencies = [
     # 1.0 dev pre-release (1.0.dev3), whose `httpx.Client` signature is
     # incompatible with the `ollama` 0.6.x client (`base_url` kwarg), breaking
     # the gated integration lane at import. ollama requires httpx>=0.27.
-    "httpx>=0.27,<1",
+    "httpx>=0.28.1,<1",
     "pydantic>=2",
     # Tracing surface (Req 6.1): OpenInference instruments LlamaIndex into
     # any OTel TracerProvider.

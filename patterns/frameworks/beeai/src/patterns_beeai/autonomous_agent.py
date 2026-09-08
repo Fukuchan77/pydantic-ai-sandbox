@@ -40,7 +40,7 @@ chaining / parallelization / evaluator-optimizer lanes.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from beeai_framework.backend.message import (
     MessageToolResultContent,
@@ -58,6 +58,12 @@ if TYPE_CHECKING:
     from patterns_contracts import ApprovalHook, Tool
 
 __all__ = ["run_autonomous_agent"]
+
+_MAX_TOOLS_PER_AGENT: Final = 20
+"""Hard ceiling on ``len(allowed_tools)`` (X-6b). One agent choosing among too
+many tools degrades selection accuracy (Anthropic "Writing tools for agents");
+the fix is to split the work across subagents or add Tool RAG (retrieve a
+relevant subset before the loop starts) -- never to raise this constant."""
 
 
 def _budget_spent(output: ChatModelOutput) -> int:
@@ -101,7 +107,8 @@ async def run_autonomous_agent(
         max_iterations: Maximum model turns before stopping with
             ``stop_reason="max_iterations"`` (Req 6.3). Must be >= 1.
         allowed_tools: The least-privilege tool allow-list (Req 6.4); a requested
-            tool outside it is refused, never executed.
+            tool outside it is refused, never executed. Capped at
+            ``_MAX_TOOLS_PER_AGENT`` (20, X-6b).
         approval_hook: Human-approval seam ``(tool, args) -> approved`` consulted
             before any ``dangerous`` tool runs (Req 6.5).
         budget: Non-negative cumulative token cap; the loop stops with
@@ -114,15 +121,25 @@ async def run_autonomous_agent(
         five-value guardrail vocabulary (Req 6.2).
 
     Raises:
-        ValueError: If ``max_iterations`` is not positive or ``budget`` is
-            negative — either would make the run meaningless rather than fail
-            loudly.
+        ValueError: If ``max_iterations`` is not positive, ``budget`` is
+            negative, or ``allowed_tools`` exceeds the per-agent tool budget
+            (X-6b) — each would make the run meaningless or unreliable rather
+            than fail loudly.
     """
     if max_iterations < 1:
         msg = f"max_iterations must be >= 1, got {max_iterations}"
         raise ValueError(msg)
     if budget < 0:
         msg = f"budget must be >= 0, got {budget}"
+        raise ValueError(msg)
+    tool_count = len(allowed_tools)
+    if tool_count > _MAX_TOOLS_PER_AGENT:
+        msg = (
+            f"allowed_tools has {tool_count} tools, exceeding the "
+            f"{_MAX_TOOLS_PER_AGENT}-tool budget per agent (X-6b). Split the "
+            "work across subagents or add Tool RAG -- raising this limit is "
+            "not a fix."
+        )
         raise ValueError(msg)
 
     registry = {tool.name: tool for tool in allowed_tools}
