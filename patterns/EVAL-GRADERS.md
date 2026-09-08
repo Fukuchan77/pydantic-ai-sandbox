@@ -97,6 +97,66 @@ R3.1）。独立性は契約の型制約ではなく**実装規律**で担保す
 （R2.2）。in-the-loop の判断点（収束判定）と offline の eval（CI 採点）は
 補完的な 2 モードである（IBM / Anthropic）。
 
+## PR-gate 運用の設計（未実装、X-8）
+
+現状の eval は**契約とフェイク judge によるオフライン単体テスト**のみで、
+「実行 → ベースラインとの回帰比較 → PR ゲート」という**運用**は本 repo に存在しない
+（`vaz-ai-next/packages/evals/src/pr-gate.ts` が兄弟 repo に持つ機能）。本節は
+その運用を将来実装する際の設計を記録する — **CI ワークフローは未作成**であり、
+実モデル課金を伴うコードはまだどこにも存在しない。
+
+### なぜ未実装で止めるか
+
+PR-gate は本質的に「実 judge モデルで実際に eval case を走らせ、課金を伴う」運用である。
+本セッションでは実モデルへのライブ呼び出しも GitHub Actions の実トリガも検証できないため、
+検証していないコードをこの形で着地させることはしない。以下は着手時にそのまま使える設計。
+
+### eval case とベースラインの形
+
+- **eval case**: 各パターンの `tests/unit/test_eval_graders_*.py` が使うフェイク judge を、
+  ここでは実 judge（別モデル注入、ADR-3 の物理分離規律のまま）に差し替えて走らせる
+  named シナリオ。契約は既存の `GradeReport` / `Judge[SubjectT]` のまま**変更しない** —
+  PR-gate は eval 契約の上に乗る運用層であり、契約自体を拡張しない（ADR-4 と同じ
+  「純加算で併存」の原則）。
+- **ベースラインの運搬手段**: `actions/cache`（バックログが挙げた選択肢をそのまま採用）。
+  `main` へのマージごとに走る別ジョブが同じ eval case 群を実行し、
+  `GradeReport` の列（case id ごと）を JSON で `eval-baseline-<base branch のコミット SHA>`
+  というキーで cache に保存する。PR 側のジョブはそのキーで**復元のみ**し、
+  存在しなければ「ベースライン無し」として今回の実行結果をそのまま記録するに留める
+  （初回や cache 退避後の縮退運転）。
+- **比較指標**（`pr-gate.ts` の形を踏襲）:
+  - **回帰**: `aggregate` が許容差（例 0.5 段階相当）を超えて悪化した case。
+  - **over-trigger / under-trigger のバランス**: `guardrail_adherence` のような
+    behavior 軸が、ベースラインでは通っていたのに今回だけ低評価（over-trigger — 誤検知の
+    増加）、あるいはその逆（under-trigger — 見逃しの増加）になった case を左右に分けて
+    件数を出す。どちらか一方だけを潰す最適化はガードレールの意味を壊すため、両方を
+    別カウントとして PR コメントに出す。
+  - **case あたりのトークン・所要時間**: 各 `Judge.grade()` 呼び出しの前後で計測し、
+    ベースライン比の増減を記録する（コスト・レイテンシの回帰検知）。
+- **20 件未満は `reportOnly`**: 統計的に signal too small な母数でハード fail させると
+  PR を偽陽性で止める。20 件未満の eval case 群では比較結果を PR コメント/summary へ
+  出すのみとし、CI のジョブ自体は緑のまま通す。20 件以上で初めて回帰をハード fail の
+  対象にする。
+
+### トリガー方式（バックログの想定からの修正）
+
+バックログ原文は「opt-in ラベル方式を踏襲」と書くが、実際に本 repo が
+実モデル課金を伴うレーン（`integration-ollama.yml` /
+`patterns-integration-ollama.yml`）に採用している既存規約はラベルではなく
+**`workflow_dispatch` の手動トリガーのみ**（`test_ollama_ci_workflows.py` が
+push/pull_request/schedule の再混入を red 化で固定している）。PR-gate も
+既存レーンと同じ規約に揃え、ラベルではなく手動 `workflow_dispatch` で起動する
+設計に修正する — 本 repo に存在しない規約を新規に持ち込まない（この節末尾の
+「この repo 固有の注意」と同じ判断）。
+
+### 実装時の置き場所（提案）
+
+- 比較ロジック: `scripts/eval_pr_gate.py`（各レーンの実 judge を呼び出し、
+  `GradeReport` 列を JSON にシリアライズしてベースラインと diff する。パターン契約には
+  触れないので `patterns_contracts` の外、ルート `scripts/` が適切）。
+- ワークフロー: `.github/workflows/eval-pr-gate.yml`（新規、`workflow_dispatch` のみ、
+  `actions/cache` で `eval-baseline-*` キーを読み書き）。
+
 ## 参照（各パターン eval）
 
 オフライン hermetic eval は別 venv 制約によりレーン側テストに置く（AD-5）:

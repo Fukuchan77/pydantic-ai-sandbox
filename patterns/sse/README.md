@@ -65,6 +65,41 @@ SseEvent = Annotated[StepStartedEvent | ToolCalledEvent | TokenEvent | Completed
 | 切断・終端 | `_event_stream` ジェネレータ（[`app.py`](src/patterns_sse/app.py)） | `is_disconnected()` 協調 break + `except CancelledError: raise` + `finally: aclose()` でリソース解放（R6.1/6.3）。実行中エラーは `error` 化し silent 打ち切り禁止（R4.3） |
 | 逆写像 | `parse_sse_events`（[`events.py`](src/patterns_sse/events.py)） | `data:` 行のみ抽出し `TypeAdapter(SseEvent).validate_json` で逆写像（R4.2） |
 
+## クロスレポ由来のライフサイクル罠（X-10）
+
+`fastapi-pydantic-ai-agent`（兄弟 repo）が実運用で踏んだ SSE 特有の 3 罠を、本レーンでの
+現況とあわせて記録する。
+
+1. **`Agent.iter()` の anyio cancel scope はタスク跨ぎ不可**。`Agent.iter()` を手動で駆動しつつ
+   別タスクへ結果を運ぶ設計では、`Agent.iter()` が内部で開く anyio cancel scope が
+   producer タスクと consumer タスクをまたぐと `RuntimeError` になる。対処は単一の永続駆動
+   タスク＋`asyncio.Queue`（cancel scope の外でキューを介して結果を運ぶ）。**本レーンは現状
+   this trap を踏んでいない**: `_event_stream`（[`app.py`](src/patterns_sse/app.py)）は
+   `agent.run_stream_events()` を返す async generator をリクエストの単一タスク内で直接
+   `async for` 消費しており、`Agent.iter()` の手動駆動も、生成物を運ぶための追加タスク作成も
+   行わない。将来 `Agent.iter()` を直接使う設計に切り替える場合は、この罠を再導入しないこと
+   （単一の永続駆動タスク＋`asyncio.Queue`）。
+2. **ハートビートは `asyncio.wait()` を使う、`asyncio.wait_for()` は使わない**。
+   `wait_for()` はタイムアウト時に対象タスクそのものをキャンセルするため、ハートビート待機と
+   「次のイベント」待機を同じ `wait_for()` で多重化すると、ハートビート間隔に運悪く重なった
+   進行中イベントまでキャンセルしてしまう。`asyncio.wait()`
+   （`return_when=asyncio.FIRST_COMPLETED`）はどちらのタスクも生かしたまま先着を判定できる。
+   **本レーンは現状ハートビートを実装していない**（`_SEND_TIMEOUT_SECONDS` は
+   sse-starlette 側の送信タイムアウトであり、独自ハートビート送出ではない）ため、この罠も
+   未踏。将来ハートビート送出を追加する際は、必ず `asyncio.wait()` 版で実装すること。
+3. **`str.splitlines()` は U+2028/U+2029 を行境界扱いする**。実 SSE の行終端子は
+   CRLF/CR/LF の 3 種のみ（WHATWG HTML Living Standard §9.2.6）だが、Python の
+   `str.splitlines()` はそれに加えて U+2028 (LINE SEPARATOR) / U+2029 (PARAGRAPH SEPARATOR)
+   等も行境界とみなす。トークンの地の文にこれらの文字が現れると、`data:` 行の JSON
+   ペイロードが誤って分断され、`validate_json` が壊れた断片に対して失敗する。**本レーンは
+   このバグを実際に踏んでいた**: `parse_sse_events`（[`events.py`](src/patterns_sse/events.py)）
+   は `body.splitlines()` で分割していたため、`token.text` に U+2028/U+2029 が含まれる場合に
+   壊れる実バグがあった。SSE 自身の行終端子だけに分割する正規表現
+   （`\r\n|\r|\n`）へ置き換えて修正し、`test_event_serialization.py::
+   test_parse_sse_events_does_not_split_on_unicode_line_separators` で回帰させている。
+   テスト専用の `tests/support/asgi_driver.py::_count_data_frames`（`data:` フレーム計数、
+   `parse_sse_events` を模倣する設計）も同じ修正を横展開した。
+
 ## 必須4セクション
 
 ### 型安全

@@ -91,6 +91,71 @@ pip-audit cron が連続 red 化した）が実際に起きた運用上の教訓
 脆弱範囲 0.56.0–0.60.0 に入った場合、この抑止のレビューを待たずレーンの pytest が
 即座に red 化する。
 
+**Worked example (suppression applied 2026-09-05, no fix available)**: nltk 3.10.3 (a
+transitive dependency of `patterns/frameworks/llamaindex` / `patterns/rag` via
+llama-index-core) had **PYSEC-2026-3740** (GHSA-8mgp-746c-j5xp / CVE-2026-81726, a
+File sandbox bypass where the model-artifact import/export helpers call the
+built-in `open()` on caller-controlled paths instead of the pathsec-aware
+helpers, escaping the sandbox boundary) registered against it, turning
+`patterns:audit` red on the llamaindex / rag lanes after the dependency
+refresh.
+
+Step (a) **confirm no fix release exists**: the advisory's `fixed_in` is empty.
+The latest nltk on PyPI is **3.10.3 itself** — there is no newer version to
+bump into. The 2026-07 PYSEC-2026-597 (same nltk, same 2 lanes) was closed by
+bumping 3.9.4 → 3.10.0, but that option doesn't exist here.
+
+Step (b) **reachability assessment — not reachable**. Two independent grounds:
+
+- The advisory itself states its preconditions: it's only exploitable when the
+  application enables `pathsec.ENFORCE=True` **and** lets untrusted input
+  choose a model import/export path. This repository does neither.
+- None of the affected components (`TransitionParser.train` / `.parse`,
+  `AveragedPerceptron.save` / `.load`, `PerceptronTagger.save_to_json`,
+  `save_maxent_params`) is called. Neither lane's `src/` imports a single nltk
+  symbol; the only place llama-index-core touches nltk is
+  `indices/keyword_table/utils.py` (for stopword lookups). Neither lane builds
+  a keyword-table index — retrieval goes through the in-memory
+  `SimpleVectorStore`.
+
+Step (c) **apply a lane-scoped suppression**. It's applied in three places —
+`mise.toml` (the llamaindex branch and the rag line of `patterns:audit`),
+`patterns-ci.yml` (the llamaindex entry in the lane matrix), and
+`security.yml` (the llamaindex / rag entries in the patterns-pip-audit
+matrix) — all with `--ignore-vuln PYSEC-2026-3740`. As with the beeai
+json-repair suppression, this is a temporary measure needed because
+pip-audit matches against declared ranges, not reachability.
+
+Step (d) **removal condition**: once nltk publishes a fix release, bump it
+with `uv lock --upgrade-package nltk` and remove the `--ignore-vuln` in all
+three places immediately. **Review by 2026-11-05**.
+
+**Tracking issue: not yet filed**. R8.2 requires suppression entries to
+reference a tracking issue, and this entry does not yet meet that
+requirement — for now, this dated entry is its own tracking record. File a
+GitHub issue before the review deadline and backfill its number into the
+three comments above and into this entry. (Compare the beeai
+GHSA-xf7x-x43h-rpqh suppression, which is tracked by issue #30 — that's the
+correct form.)
+
+## 抑止ポリシーの階梯（cross-repo、2026-09-08 記録）
+
+Agentic AI 系の兄弟 repo 間で、`--ignore-vuln` をどこまで許容するかに 3 段階の差がある:
+
+1. **最厳格 — 抑止を一切使わない**（`beeai-agentic-ai-sandbox/SECURITY-NOTES.md`）:
+   fix 未提供の advisory であっても `--ignore-vuln` は使わず、バージョン上限ピンや
+   到達不能性の記録のみで対応する。
+2. **期限付き抑止（本 repo が採る段）**: 上記 Runbook（Spec 013 R8.1/8.2）の通り、
+   `--ignore-vuln` の使用自体は許容するが、**見直し期限**と**追跡 issue への参照**を欠く
+   抑止エントリは禁止する（R8.2）。期限が来れば手順 (a)-(d) の再評価が強制される。
+   nltk PYSEC-2026-3740（本節上部）・json-repair GHSA-xf7x-x43h-rpqh（issue #30）は
+   いずれもこの段の実例。
+3. **理由付き抑止**（`fastapi-pydantic-ai-agent`）: `--ignore-vuln` 追加時に到達不能性などの
+   理由をコメントで残すが、日付付きの見直し期限までは必須としない。
+
+本 repo は**第 2 段（期限付き抑止）**を採ることをここに明記する。これまでこの選択は
+Runbook の運用実態から読み取れるのみで、階梯上の位置づけとしては暗黙だった。
+
 ## 上限ピンによる脆弱版回避の運用（ルート、2026-08-22 依存更新）
 
 `--ignore-vuln` による**抑止**とは逆向きの措置として、解決器が脆弱版へ**後退**する

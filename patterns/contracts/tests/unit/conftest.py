@@ -1,39 +1,29 @@
-"""Lane-wide test config: block real model requests and network reach (X-2).
+"""Hermetic-guard fixture for the contracts unit suite (X-2).
 
-Two layers of hermetic guard, kept for defense in depth:
+``patterns_contracts`` is pure ``pydantic`` models plus typing primitives
+(Principle III / NFR-5) with no I/O of any kind, so this suite should never
+touch the network. The autouse ``block_network`` fixture makes that an
+enforced invariant rather than an assumption: any accidental internet reach
+turns into a loud ``NetworkReachError`` instead of silent I/O.
 
-* ``pydantic_ai.models.ALLOW_MODEL_REQUESTS = False`` (Spec 012-agentic-ai-design
-  Req 10.1) stops the pydantic-ai model-calling path specifically.
-* the autouse ``block_network`` fixture below stops *any* internet socket
-  connect or DNS lookup -- an un-faked HTTP client, an OTLP export, or any
-  other library reaching the network directly, not only a pydantic-ai model
-  call. Targets internet *reach* (AF_INET/AF_INET6 connect + DNS), delegating
-  AF_UNIX and other local sockets (asyncio's self-pipe, the API's own
-  ``TestClient`` transport) to the genuine implementation so the app keeps
-  working. ``test_smoke.py`` proves the guard is not vacuous.
-
-Both are unit-suite-only: the integration suite lives in a separate
-``tests/integration`` directory this conftest does not cover, and flips
-``ALLOW_MODEL_REQUESTS`` back on explicitly under its
-``RUN_INTEGRATION_PATTERNS`` gate.
+Targets internet *reach* (AF_INET/AF_INET6 connect + DNS), delegating AF_UNIX
+and other local sockets (asyncio's self-pipe) to the genuine implementation so
+the event loop keeps working. ``test_smoke.py`` proves the guard is not
+vacuous. This lane has no ``tests/integration`` directory, so the guard
+applies to the whole suite.
 """
 
 from __future__ import annotations
 
-import os
 import socket
 from typing import TYPE_CHECKING
 
 import pytest
-from pydantic_ai import models
 
 from tests.support.hermetic import NetworkReachError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-if os.environ.get("RUN_INTEGRATION_PATTERNS") != "1":
-    models.ALLOW_MODEL_REQUESTS = False
 
 _INET_FAMILIES = frozenset({socket.AF_INET, socket.AF_INET6})
 _Address = tuple[object, ...] | str | bytes

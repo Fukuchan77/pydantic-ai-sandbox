@@ -30,8 +30,8 @@ dependencies = [
     # DoclingDocument.load_from_json. The [chunking] extra pulls the tokenizer
     # stack HybridChunker needs. The full `docling` converter is deliberately
     # excluded — conversion is fixtured off the CI path.
-    "docling-core[chunking]>=2.82",
-    "llama-index-core>=0.14",
+    "docling-core[chunking]>=2.95.0",
+    "llama-index-core>=0.14.24",
     # Embedding + LLM backends for the gated Ollama integration lane (Req 7).
     # Offline unit runs inject deterministic fakes instead (Req 3.2 / 6.3).
     "llama-index-embeddings-ollama",

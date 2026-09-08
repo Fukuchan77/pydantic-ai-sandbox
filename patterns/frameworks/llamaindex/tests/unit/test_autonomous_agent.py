@@ -328,6 +328,38 @@ async def test_rejects_negative_budget() -> None:
         )
 
 
+async def test_rejects_more_than_twenty_allowed_tools() -> None:
+    # X-6b: too many tools on one agent degrades selection accuracy; reject
+    # loudly rather than silently letting the agent choose among 21+ options.
+    # The fix is subagents or Tool RAG, never raising this cap.
+    llm = TurnSequencedLLM([FinalTurn(text="unused", tokens=0)])
+    too_many = [StubTool(name=f"tool_{i}") for i in range(21)]
+    with pytest.raises(ValueError, match="exceeding the 20-tool budget"):
+        await run_autonomous_agent(
+            "task",
+            llm=llm,
+            max_iterations=3,
+            allowed_tools=too_many,
+            approval_hook=_approve_all,
+            budget=10,
+        )
+
+
+async def test_accepts_exactly_twenty_allowed_tools() -> None:
+    # The boundary itself must not be rejected -- only exceeding it.
+    llm = TurnSequencedLLM([FinalTurn(text="done", tokens=1)])
+    exactly_twenty = [StubTool(name=f"tool_{i}") for i in range(20)]
+    result = await run_autonomous_agent(
+        "task",
+        llm=llm,
+        max_iterations=3,
+        allowed_tools=exactly_twenty,
+        approval_hook=_approve_all,
+        budget=10,
+    )
+    assert result.stop_reason == "completed"
+
+
 async def test_autonomous_agent_emits_spans_into_injected_exporter() -> None:
     # Req 9.1/9.2: an instrumented run emits at least one span. The LlamaIndex
     # lane uses OpenInference's process-global instrumentor, so the test installs
