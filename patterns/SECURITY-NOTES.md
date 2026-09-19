@@ -91,6 +91,12 @@ pip-audit cron が連続 red 化した）が実際に起きた運用上の教訓
 脆弱範囲 0.56.0–0.60.0 に入った場合、この抑止のレビューを待たずレーンの pytest が
 即座に red 化する。
 
+**再検証（2026-09-19 依存更新）**: 期限 2026-10-14 は未到来。`uv lock --upgrade` 後も
+beeai レーンのロック版は **0.39.1** のまま（`beeai-framework==0.1.39` の上限による)で、
+再評価トリガの 0.56.0–0.60.0 には入っていない。`test_json_repair_vuln_window.py` を含む
+レーンの pytest は green、抑止なしの `pip-audit` は同 advisory 1 件のみを報告し、
+`--ignore-vuln GHSA-xf7x-x43h-rpqh` 付きで clean。抑止は現状維持。
+
 **Worked example (suppression applied 2026-09-05, no fix available)**: nltk 3.10.3 (a
 transitive dependency of `patterns/frameworks/llamaindex` / `patterns/rag` via
 llama-index-core) had **PYSEC-2026-3740** (GHSA-8mgp-746c-j5xp / CVE-2026-81726, a
@@ -137,6 +143,14 @@ GitHub issue before the review deadline and backfill its number into the
 three comments above and into this entry. (Compare the beeai
 GHSA-xf7x-x43h-rpqh suppression, which is tracked by issue #30 — that's the
 correct form.)
+
+**Re-verified (2026-09-19 dependency refresh)**: the 2026-11-05 review deadline
+has not lapsed. `uv lock --upgrade` left nltk at **3.10.3** in both lanes, and
+PyPI still lists 3.10.3 as the latest release with `fixed_in` empty — step (a)
+still has nothing to land. Neither lane's `src/` gained an nltk import, so the
+step (b) reachability argument is unchanged. Raw `pip-audit` reports exactly
+this one advisory per lane; with `--ignore-vuln PYSEC-2026-3740` both lanes are
+clean. Suppression retained as-is; the tracking issue is still to be filed.
 
 ## 抑止ポリシーの階梯（cross-repo、2026-09-08 記録）
 
