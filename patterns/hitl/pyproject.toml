@@ -26,7 +26,7 @@ dependencies = [
     # `ToolApproved`/`ToolDenied`) is a pydantic-ai-v2-only mechanism. The
     # `openai` extra backs the OpenAI-compatible `OpenAIChatModel` the gated
     # live Ollama integration lane (Task 8) uses.
-    "pydantic-ai-slim[openai]>=2.40.0",
+    "pydantic-ai-slim[openai]>=2.46.0",
     # HITL API app-factory (`create_app`, R8.1-8.6).
     "fastapi>=0.141.1",
     # Fail-soft observability bootstrap (plan.md Observability / R9.1):
