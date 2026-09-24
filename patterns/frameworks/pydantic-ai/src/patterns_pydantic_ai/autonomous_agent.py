@@ -46,6 +46,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.instrumented import instrument_model
+from pydantic_ai.tools import ToolDefinition
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -63,6 +64,60 @@ many tools degrades selection accuracy (Anthropic "Writing tools for agents");
 the fix is to split the work across subagents or add Tool RAG (retrieve a
 relevant subset before the loop starts) -- never to raise this constant."""
 
+_GENERIC_ARGS_SCHEMA: Final[dict[str, Any]] = {
+    "type": "object",
+    "properties": {
+        "args": {
+            "type": "string",
+            "description": "Arguments for the tool, as a single string.",
+        }
+    },
+    "required": ["args"],
+}
+"""Fallback JSON schema for a ``Tool`` that carries no schema of its own.
+
+``patterns_contracts.autonomous_agent.Tool`` only requires ``name`` /
+``dangerous`` / ``run`` -- no description or parameter schema, since a lane's
+tool may not need one. A concrete tool *may* additionally carry
+``description``/``parameters_json_schema`` attributes (duck-typed extras, not
+part of the Protocol, per :func:`_tool_definitions`); one that doesn't gets
+this generic single-string-argument shape instead, so the model always learns
+at minimum that the tool exists and how to call it, rather than nothing at
+all (see :func:`_tool_definitions`).
+"""
+
+
+def _tool_definitions(tools: Sequence[Tool]) -> list[ToolDefinition]:
+    """Build the model-facing tool schema for ``tools`` (Req 6.4).
+
+    Before this, ``run_autonomous_agent`` sent an empty ``ModelRequestParameters``
+    on every turn -- no ``function_tools`` at all -- so a real model had no way
+    to learn a tool existed, let alone how to call it; a live model can only
+    ever return a final-answer text turn (this is exactly what
+    ``tests/integration/test_ollama_e2e.py``'s ``_NoopTool`` docstring used to
+    document as expected behavior, not a known limitation). ``allowed_tools``
+    is otherwise reachable only via a scripted offline fake that ignores the
+    request's tool schema entirely.
+
+    Args:
+        tools: The run's least-privilege ``allowed_tools`` list.
+
+    Returns:
+        One ``ToolDefinition`` per tool, in order. ``description``/
+        ``parameters_json_schema`` are forwarded when the concrete tool
+        happens to carry them (duck-typed, optional extras beyond the
+        ``Tool`` Protocol), else default to a name-derived description and
+        :data:`_GENERIC_ARGS_SCHEMA`.
+    """
+    definitions: list[ToolDefinition] = []
+    for tool in tools:
+        description = getattr(tool, "description", None) or f"Run the {tool.name!r} tool."
+        schema = getattr(tool, "parameters_json_schema", None) or _GENERIC_ARGS_SCHEMA
+        definitions.append(
+            ToolDefinition(name=tool.name, description=description, parameters_json_schema=schema)
+        )
+    return definitions
+
 
 def _budget_spent(response: ModelResponse) -> int:
     """Lane budget seam: tokens consumed by one model response (Req 6.6).
@@ -74,9 +129,17 @@ def _budget_spent(response: ModelResponse) -> int:
     return response.usage.total_tokens
 
 
-def _first_tool_call(response: ModelResponse) -> ToolCallPart | None:
-    """Return the first tool-call part in a response, or None for a final answer."""
-    return next((part for part in response.parts if isinstance(part, ToolCallPart)), None)
+def _tool_calls(response: ModelResponse) -> list[ToolCallPart]:
+    """Return every tool-call part in a response, in order (empty for a final answer).
+
+    A real model is free to return more than one ``ToolCallPart`` in a single
+    turn; a provider-valid follow-up request must carry a ``ToolReturnPart``
+    for every one of them (an assistant turn with an unanswered tool call is
+    rejected outright by, e.g., the OpenAI-compatible API this lane's live
+    Ollama test drives). Only ever returning the first call here would silently
+    drop the rest.
+    """
+    return [part for part in response.parts if isinstance(part, ToolCallPart)]
 
 
 def _final_text(response: ModelResponse) -> str:
@@ -164,7 +227,7 @@ async def run_autonomous_agent(
 
     resolved = instrument_model(model, instrumentation) if instrumentation else model
     registry = {tool.name: tool for tool in allowed_tools}
-    params = ModelRequestParameters()
+    params = ModelRequestParameters(function_tools=_tool_definitions(allowed_tools))
 
     messages: list[ModelMessage] = [ModelRequest(parts=[UserPromptPart(goal)])]
     steps: list[AgentStep] = []
@@ -175,8 +238,8 @@ async def run_autonomous_agent(
         messages.append(response)
         tokens = _budget_spent(response)
 
-        tool_call = _first_tool_call(response)
-        if tool_call is None:
+        tool_calls = _tool_calls(response)
+        if not tool_calls:
             return AgentRunResult(
                 steps=steps,
                 final_output=_final_text(response),
@@ -184,45 +247,59 @@ async def run_autonomous_agent(
                 total_budget_spent=total,
             )
 
-        name = tool_call.tool_name
-        args = _args_text(tool_call.args)
-        tool = registry.get(name)
+        # A turn can carry more than one tool call; every one of them needs a
+        # recorded step and, if all succeed, a ToolReturnPart in the single
+        # follow-up ModelRequest (a provider rejects an assistant turn with
+        # an unanswered tool call). `tokens` prices the whole turn, not any
+        # one call inside it, so it is attributed once -- to the first call
+        # processed -- rather than once per call, which would over-count a
+        # multi-call turn's spend.
+        return_parts: list[ToolReturnPart] = []
+        for call_index, tool_call in enumerate(tool_calls):
+            name = tool_call.tool_name
+            args = _args_text(tool_call.args)
+            tool = registry.get(name)
+            step_tokens = tokens if call_index == 0 else 0
 
-        if tool is None:
-            steps.append(
-                AgentStep(
-                    index=index,
-                    tool=name,
-                    observation=_refused_observation(name),
-                    budget_spent=tokens,
+            if tool is None:
+                steps.append(
+                    AgentStep(
+                        index=index,
+                        tool=name,
+                        observation=_refused_observation(name),
+                        budget_spent=step_tokens,
+                    )
                 )
-            )
-            return AgentRunResult(
-                steps=steps,
-                final_output=None,
-                stop_reason="disallowed_tool",
-                total_budget_spent=total + tokens,
-            )
-        if tool.dangerous and not approval_hook(name, args):
-            steps.append(
-                AgentStep(
-                    index=index,
-                    tool=name,
-                    observation=_denied_observation(name),
-                    budget_spent=tokens,
+                return AgentRunResult(
+                    steps=steps,
+                    final_output=None,
+                    stop_reason="disallowed_tool",
+                    total_budget_spent=total + tokens,
                 )
-            )
-            return AgentRunResult(
-                steps=steps,
-                final_output=None,
-                stop_reason="denied",
-                total_budget_spent=total + tokens,
-            )
-        observation = tool.run(args)
+            if tool.dangerous and not approval_hook(name, args):
+                steps.append(
+                    AgentStep(
+                        index=index,
+                        tool=name,
+                        observation=_denied_observation(name),
+                        budget_spent=step_tokens,
+                    )
+                )
+                return AgentRunResult(
+                    steps=steps,
+                    final_output=None,
+                    stop_reason="denied",
+                    total_budget_spent=total + tokens,
+                )
+            observation = tool.run(args)
 
-        steps.append(
-            AgentStep(index=index, tool=name, observation=observation, budget_spent=tokens)
-        )
+            steps.append(
+                AgentStep(index=index, tool=name, observation=observation, budget_spent=step_tokens)
+            )
+            return_parts.append(
+                ToolReturnPart(name, observation, tool_call_id=tool_call.tool_call_id)
+            )
+
         total += tokens
         if total > budget:
             return AgentRunResult(
@@ -231,11 +308,7 @@ async def run_autonomous_agent(
                 stop_reason="budget_exceeded",
                 total_budget_spent=total,
             )
-        messages.append(
-            ModelRequest(
-                parts=[ToolReturnPart(name, observation, tool_call_id=tool_call.tool_call_id)]
-            )
-        )
+        messages.append(ModelRequest(parts=return_parts))
 
     return AgentRunResult(
         steps=steps,

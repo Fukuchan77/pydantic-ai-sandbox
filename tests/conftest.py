@@ -102,6 +102,9 @@ _MANAGED_ENV_KEYS: tuple[str, ...] = (
     "LOGFIRE_TOKEN",
     "LOG_SENSITIVE_PAYLOADS",
     "RUN_INTEGRATION_OLLAMA",
+    "CHAT_USAGE_REQUEST_LIMIT",
+    "CHAT_USAGE_TOTAL_TOKENS_LIMIT",
+    "CHAT_REQUEST_TIMEOUT",
 )
 
 
@@ -151,9 +154,17 @@ class AppWithOverrides(Protocol):
     for the lifetime of the calling test (the fixture's ExitStack handles
     cleanup on teardown), so route handlers see the overridden model
     transparently via ``Depends(get_chat_agent)``.
+
+    ``**env_overrides`` are layered on top of the fixture's seated
+    ``LLM_PROVIDER``/``OLLAMA_MODEL_NAME`` pair (last-write-wins, same
+    semantics as :class:`SettingsFactory`) — e.g.
+    ``app_with_overrides(model, CHAT_REQUEST_TIMEOUT="1")`` to exercise the
+    ``/chat`` route's guardrails without a second, hand-rolled app builder.
     """
 
-    def __call__(self, model: Model) -> TestClient: ...  # pragma: no cover
+    def __call__(
+        self, model: Model, **env_overrides: str | None
+    ) -> TestClient: ...  # pragma: no cover
 
 
 @pytest.fixture
@@ -249,10 +260,11 @@ def app_with_overrides(
     the per-test app instance and is garbage-collected with it.
     """
 
-    def _build(model: Model) -> TestClient:
+    def _build(model: Model, **env_overrides: str | None) -> TestClient:
         settings_factory(
             LLM_PROVIDER="ollama",
             OLLAMA_MODEL_NAME="dummy-ollama-model",
+            **env_overrides,
         )
         # Both caches must be cleared: get_settings so the route's
         # Depends chain reads the per-test env, get_chat_agent so the

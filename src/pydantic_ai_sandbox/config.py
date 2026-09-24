@@ -77,6 +77,12 @@ class Settings(BaseSettings):
             ``send_to_logfire='if-token-present'`` (T7.3).
         log_sensitive_payloads: Opt-in flag that disables payload
             scrubbing (T7.3); kept opt-in to satisfy Req 5.4.
+        chat_usage_request_limit: Cap on ``UsageLimits.request_limit`` for
+            ``POST /chat``; ``None`` disables the cap.
+        chat_usage_total_tokens_limit: Cap on ``UsageLimits.total_tokens_limit``
+            for ``POST /chat``; ``None`` disables the cap.
+        chat_request_timeout: Seconds ``POST /chat`` waits for
+            ``agent.run()`` before aborting with HTTP 504.
     """
 
     model_config = SettingsConfigDict(
@@ -122,6 +128,35 @@ class Settings(BaseSettings):
     fallback_order: str = ""
     logfire_token: SecretStr | None = None
     log_sensitive_payloads: bool = False
+
+    # `POST /chat` guardrails (OWASP Agentic AI "unbounded consumption"): the
+    # MVP route previously called `agent.run()` with no `usage_limits` and no
+    # timeout at all, so a runaway tool loop or a hung provider call could
+    # consume unbounded tokens/requests or block the request forever. `None`
+    # disables the corresponding `UsageLimits` field (unbounded); the timeout
+    # has no disable knob since an unbounded HTTP handler is never desirable.
+    chat_usage_request_limit: int | None = 25
+    chat_usage_total_tokens_limit: int | None = 50_000
+    chat_request_timeout: int = 30
+
+    @field_validator("chat_usage_request_limit", "chat_usage_total_tokens_limit")
+    @classmethod
+    def _validate_chat_usage_limit(cls, value: int | None, info: ValidationInfo) -> int | None:
+        """Reject a non-positive usage limit (a `<= 0` cap would reject every request)."""
+        if value is not None and value < 1:
+            env_name = (info.field_name or "chat_usage_limit").upper()
+            msg = f"{env_name} must be a positive integer or unset; got {value!r}."
+            raise ValueError(msg)
+        return value
+
+    @field_validator("chat_request_timeout")
+    @classmethod
+    def _validate_chat_request_timeout(cls, value: int) -> int:
+        """Reject a non-positive chat request timeout (Req: fail-fast on misconfiguration)."""
+        if value < 1:
+            msg = f"CHAT_REQUEST_TIMEOUT must be a positive integer (seconds); got {value!r}."
+            raise ValueError(msg)
+        return value
 
     @field_validator("watsonx_transport", mode="before")
     @classmethod
