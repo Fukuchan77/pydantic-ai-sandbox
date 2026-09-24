@@ -52,9 +52,15 @@ def _approve_all(_tool: str, _args: str) -> bool:
 class _NoopTool:
     """Minimal contracts ``Tool`` for the live loop.
 
-    The autonomous pattern registers no model-side tool schema, so a real model
-    returns a final answer rather than a tool call; the tool exists only to
-    satisfy the required least-privilege allow-list (Req 6.4).
+    The loop now sends a model-side tool schema for every ``allowed_tools``
+    entry (``_tool_definitions`` in ``autonomous_agent.py``), so a real model
+    may call this tool instead of always answering directly -- this class
+    carries no ``description``/``parameters_json_schema`` of its own, so it
+    gets ``_tool_definitions``'s generic single-string-argument fallback
+    schema. Either way, the assertions below only check the closed
+    ``stop_reason`` vocabulary and a non-negative budget (Req 8.2), so this
+    tool's job is just to satisfy the required least-privilege allow-list
+    (Req 6.4), not to force one behavior or the other.
     """
 
     name: str = "noop"

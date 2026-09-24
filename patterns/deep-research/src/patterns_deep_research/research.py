@@ -142,6 +142,7 @@ async def run_deep_research(
                 search=search,
                 max_iterations=max_iterations,
                 top_k=top_k,
+                brief=plan.brief,
             )
         else:
             finding = await run_subquestion(
@@ -151,6 +152,7 @@ async def run_deep_research(
                 max_iterations=max_iterations,
                 top_k=top_k,
                 digest_fn=digest_fn,
+                brief=plan.brief,
             )
         await _emit(
             FindingReadyEvent(

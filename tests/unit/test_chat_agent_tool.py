@@ -112,3 +112,27 @@ def test_search_kb_signature_returns_list_of_str() -> None:
         f"expected list[...] return annotation, got origin={origin!r}"
     )
     assert args == (str,), f"expected list[str] return annotation, got args={args!r}"
+
+
+def test_search_kb_description_sent_to_model_carries_no_developer_commentary() -> None:
+    """The tool description an LLM actually sees reads as production content.
+
+    ``@agent.tool`` turns ``search_kb``'s docstring into the model-facing
+    tool description verbatim (Writing tools for agents), so a developer
+    note (a spec/task id, an internal test-file reference, an "MVP stub"
+    caveat) leaking into the docstring reaches every model call. Dumps the
+    schema exactly as ``TestModel`` recorded it and checks it clean.
+    """
+    test_model = TestModel()
+    agent = build_chat_agent(model=test_model)
+
+    agent.run_sync("trigger tool surfacing")
+
+    params = test_model.last_model_request_parameters
+    assert params is not None
+    (tool,) = [t for t in params.function_tools if t.name == "search_kb"]
+    schema_text = f"{tool.description}\n{tool.parameters_json_schema}"
+    for banned in ("MVP", "spec.md", "T11.1", "T6.1", "stub", "test_chat_agent_tool"):
+        assert banned.lower() not in schema_text.lower(), (
+            f"{banned!r} found in model-facing tool schema: {schema_text}"
+        )

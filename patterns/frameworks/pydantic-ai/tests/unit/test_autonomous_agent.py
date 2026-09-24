@@ -58,6 +58,26 @@ class _RecordingTool:
         return "recorded"
 
 
+@dataclass
+class _DescribedTool:
+    """Tool carrying the optional ``description``/``parameters_json_schema``
+    duck-typed extras ``_tool_definitions`` forwards when present."""
+
+    name: str
+    description: str
+    schema: dict[str, object]
+    dangerous: bool = False
+
+    @property
+    def parameters_json_schema(self) -> dict[str, object]:
+        """Expose ``schema`` under the attribute name ``_tool_definitions`` reads."""
+        return self.schema
+
+    def run(self, args: str) -> str:
+        """Unused by these tests; present only to satisfy the ``Tool`` Protocol."""
+        return args
+
+
 def _dict_then_none_args_model() -> FunctionModel:
     """Emit a dict-args tool call, then a None-args tool call, then a final answer.
 
@@ -323,3 +343,145 @@ async def test_autonomous_agent_emits_spans_into_injected_exporter() -> None:
     # Req 9.3: assert only that leaf LLM spans exist; token aggregation is the
     # backend's concern (double-counting trap).
     assert any("gen_ai" in str(span.attributes) for span in spans)
+
+
+class TestToolSchemaSentToModel:
+    """Before this, ``run_autonomous_agent`` sent an empty tool schema on
+    every request -- no ``function_tools`` at all -- so a real model had no
+    way to learn a tool existed. These tests capture the actual
+    ``ModelRequestParameters`` a request receives (via a scripted
+    ``FunctionModel``) and assert the ``allowed_tools`` entries reach it."""
+
+    async def test_allowed_tools_reach_the_model_as_function_tools(self) -> None:
+        captured: list[AgentInfo] = []
+
+        def fn(_messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            captured.append(info)
+            return ModelResponse(parts=[TextPart("done")], usage=RequestUsage(output_tokens=1))
+
+        result = await run_autonomous_agent(
+            "task",
+            model=FunctionModel(fn),
+            max_iterations=1,
+            allowed_tools=[StubTool(name="search"), StubTool(name="lookup")],
+            approval_hook=_approve_all,
+            budget=10,
+        )
+
+        assert result.stop_reason == "completed"
+        assert len(captured) == 1
+        sent_names = {tool.name for tool in captured[0].function_tools}
+        assert sent_names == {"search", "lookup"}
+
+    async def test_a_tool_without_its_own_schema_gets_the_generic_fallback(self) -> None:
+        captured: list[AgentInfo] = []
+
+        def fn(_messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            captured.append(info)
+            return ModelResponse(parts=[TextPart("done")], usage=RequestUsage(output_tokens=1))
+
+        await run_autonomous_agent(
+            "task",
+            model=FunctionModel(fn),
+            max_iterations=1,
+            allowed_tools=[StubTool(name="search")],
+            approval_hook=_approve_all,
+            budget=10,
+        )
+
+        (sent,) = captured[0].function_tools
+        assert sent.name == "search"
+        assert sent.description is not None
+        assert "search" in sent.description
+        assert sent.parameters_json_schema["required"] == ["args"]
+
+    async def test_a_tool_with_its_own_description_and_schema_is_forwarded(self) -> None:
+        captured: list[AgentInfo] = []
+
+        def fn(_messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            captured.append(info)
+            return ModelResponse(parts=[TextPart("done")], usage=RequestUsage(output_tokens=1))
+
+        schema: dict[str, object] = {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+        tool = _DescribedTool(name="web_search", description="Search the web.", schema=schema)
+
+        await run_autonomous_agent(
+            "task",
+            model=FunctionModel(fn),
+            max_iterations=1,
+            allowed_tools=[tool],
+            approval_hook=_approve_all,
+            budget=10,
+        )
+
+        (sent,) = captured[0].function_tools
+        assert sent.description == "Search the web."
+        assert sent.parameters_json_schema == schema
+
+
+class TestMultipleToolCallsInOneTurn:
+    """A real model can return more than one ``ToolCallPart`` in a single
+    turn; every one of them must be executed, recorded, and answered (a
+    provider rejects a follow-up request carrying an assistant turn with an
+    unanswered tool call)."""
+
+    async def test_both_calls_execute_and_the_loop_continues(self) -> None:
+        def fn(messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+            returns = sum(
+                1
+                for message in messages
+                for part in message.parts
+                if isinstance(part, ToolReturnPart)
+            )
+            if returns == 0:
+                return ModelResponse(
+                    parts=[ToolCallPart("a", "x"), ToolCallPart("b", "y")],
+                    usage=RequestUsage(output_tokens=5),
+                )
+            return ModelResponse(parts=[TextPart("done")], usage=RequestUsage(output_tokens=1))
+
+        result = await run_autonomous_agent(
+            "task",
+            model=FunctionModel(fn),
+            max_iterations=3,
+            allowed_tools=[
+                StubTool(name="a", observation="A"),
+                StubTool(name="b", observation="B"),
+            ],
+            approval_hook=_approve_all,
+            budget=100,
+        )
+
+        assert result.stop_reason == "completed"
+        assert [step.tool for step in result.steps] == ["a", "b"]
+        assert [step.observation for step in result.steps] == ["A", "B"]
+        # The turn's tokens are attributed once (to the first call), not
+        # once per call in the turn.
+        assert [step.budget_spent for step in result.steps] == [5, 0]
+        assert result.total_budget_spent == 5
+
+    async def test_a_disallowed_second_call_stops_without_a_dangling_return(self) -> None:
+        def fn(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
+            return ModelResponse(
+                parts=[ToolCallPart("a", "x"), ToolCallPart("shell", "rm -rf /")],
+                usage=RequestUsage(output_tokens=4),
+            )
+
+        result = await run_autonomous_agent(
+            "task",
+            model=FunctionModel(fn),
+            max_iterations=3,
+            allowed_tools=[StubTool(name="a", observation="A")],
+            approval_hook=_approve_all,
+            budget=100,
+        )
+
+        assert result.stop_reason == "disallowed_tool"
+        assert [step.tool for step in result.steps] == ["a", "shell"]
+        assert result.steps[0].observation == "A"
+        assert "not in allowed_tools" in result.steps[1].observation
+        assert result.total_budget_spent == 4
