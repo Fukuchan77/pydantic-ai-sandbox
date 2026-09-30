@@ -22,7 +22,7 @@ dependencies = [
     # (Spec 006-2a Req 1.4). Wired as a path dependency below; the lane no
     # longer carries a duplicate contracts.py (Req 1.5, NFR-3).
     "patterns-contracts",
-    "llama-index-core>=0.14.24",
+    "llama-index-core>=0.14.25",
     # Ollama backend for the gated integration lane (Req 5).
     "llama-index-llms-ollama",
     # `llama-index-llms-ollama` imports the `ollama` client, whose 0.6.x line
