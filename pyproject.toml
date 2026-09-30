@@ -12,8 +12,8 @@ dependencies = [
     # import works, but requires-python still admits 3.14 interpreters, so the
     # floor stays on the fixed line, and is raised on each refresh to match the
     # version uv.lock resolves and the suite is verified against (1.6.0 when
-    # this note was written; 1.7.2 as of 2026-09-19).
-    "ibm-watsonx-ai>=1.7.2",
+    # this note was written; 1.8.0 as of 2026-09-30).
+    "ibm-watsonx-ai>=1.8.0",
     "logfire[fastapi,httpx]",
     # Use pydantic-ai-slim with explicit extras instead of the full `pydantic-ai`
     # meta-package, so only what the app actually uses is installed:
@@ -29,11 +29,11 @@ dependencies = [
 # footprint; the builder import-guards on it and SDK-only deployments never
 # need it. Install via `uv sync --extra litellm`.
 #
-# ADR-2 (2026-08-22 dependency refresh; re-measured 2026-09-19): openai is
+# ADR-2 (2026-08-22 dependency refresh; re-measured 2026-09-30): openai is
 # capped below 3.0.0 here. litellm has not adopted the openai 3.x SDK — every
-# release from 1.83.1 up to and including the current latest (1.101.0) declares
-# either `openai==2.x` or `openai<3.0.0,>=2.20.0` (1.101.0 re-checked against its
-# PyPI metadata on 2026-09-19: still `openai<3.0.0,>=2.20.0`).
+# release from 1.83.1 up to and including the current latest (1.103.1) declares
+# either `openai==2.x` or `openai<3.0.0,>=2.20.0` (1.103.1 re-checked against its
+# PyPI metadata on 2026-09-30: still `openai<3.0.0,>=2.20.0`).
 # pydantic-ai-slim's `openai` extra raised its floor to `openai>=3.0.0` in
 # 2.32.0 — and to `openai>=3.8.0` by 2.40.0 — so an unconstrained resolve
 # satisfies both by walking litellm BACK to 1.83.0, the one release whose
@@ -41,9 +41,9 @@ dependencies = [
 # compatibility statement). That resolution was measured: pip-audit reports 11
 # known vulnerabilities in litellm 1.83.0 (PYSEC-2026-388/391/2598/2599/2600/
 # 2601/2602/3476/3477/3479, fixed across 1.83.7-1.84.0). Capping openai instead
-# keeps litellm on 1.101.0 (clean) and holds pydantic-ai-slim on the 2.31.x line,
+# keeps litellm on 1.103.1 (clean) and holds pydantic-ai-slim on the 2.31.x line,
 # which supports openai 2.x — hence the `>=2.31.1` floor above rather than the
-# 2.46.0 that the sibling lanes (which carry no litellm) resolve to.
+# 2.52.0 that the sibling lanes (which carry no litellm) resolve to.
 # Remove this cap — and raise the pydantic-ai-slim floor — as soon as litellm
 # ships a release declaring openai>=3.
 [project.optional-dependencies]
