@@ -749,3 +749,39 @@ def test_watsonx_fallback_membership_with_full_creds_constructs(
     assert settings.llm_provider == "fallback"
     assert settings.watsonx_apikey is not None
     assert settings.watsonx_apikey.get_secret_value() == DUMMY_WATSONX_SECRET
+
+
+# --- POST /chat guardrails: usage-limit and timeout validators ------------- #
+
+
+@pytest.mark.parametrize("env_name", ["CHAT_USAGE_REQUEST_LIMIT", "CHAT_USAGE_TOTAL_TOKENS_LIMIT"])
+@pytest.mark.parametrize("bad_value", ["0", "-1"])
+def test_chat_usage_limit_rejects_non_positive(
+    settings_factory: SettingsFactory,
+    env_name: str,
+    bad_value: str,
+) -> None:
+    # A `<= 0` cap would reject every chat request, so it fails at startup.
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            **{env_name: bad_value},
+        )
+    assert env_name in str(exc_info.value)
+
+
+@pytest.mark.parametrize("bad_value", ["0", "-1"])
+def test_chat_request_timeout_rejects_non_positive(
+    settings_factory: SettingsFactory,
+    bad_value: str,
+) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        settings_factory(
+            LLM_PROVIDER="ollama",
+            OLLAMA_BASE_URL=DUMMY_OLLAMA_URL,
+            OLLAMA_MODEL_NAME=DUMMY_OLLAMA_MODEL,
+            CHAT_REQUEST_TIMEOUT=bad_value,
+        )
+    assert "CHAT_REQUEST_TIMEOUT" in str(exc_info.value)

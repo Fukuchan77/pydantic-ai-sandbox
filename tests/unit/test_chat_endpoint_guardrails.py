@@ -21,14 +21,19 @@ the per-test ``CHAT_*`` env vars alongside the fixture's own
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from pydantic_ai_sandbox.api.routes.chat import (
+    _grounded_sources,  # pyright: ignore[reportPrivateUsage]
+)
 from pydantic_ai_sandbox.schemas.chat import ChatResponse
 
 if TYPE_CHECKING:
+    from pydantic_ai.agent import AgentRunResult
     from pydantic_ai.messages import ModelMessage
 
     from tests.conftest import AppWithOverrides
@@ -150,3 +155,17 @@ class TestSourcesGrounding:
         assert response.status_code == 200, response.text
         parsed = ChatResponse.model_validate(response.json())
         assert parsed.sources == [_REAL_SOURCE_ID]
+
+    def test_a_scalar_search_kb_return_is_still_a_grounding_source(self) -> None:
+        # The live ``search_kb`` returns ``list[str]``, but a tool return is
+        # ``object`` to the grounding code: a scalar content must count as one
+        # returned id rather than be ignored (which would force sources empty).
+        messages: list[ModelMessage] = [
+            ModelRequest(parts=[ToolReturnPart("search_kb", _REAL_SOURCE_ID, tool_call_id="c1")])
+        ]
+        output = ChatResponse(answer="here", sources=[_REAL_SOURCE_ID, "totally-invented-source"])
+        fake_result = SimpleNamespace(all_messages=lambda: messages, output=output)
+
+        grounded = _grounded_sources(cast("AgentRunResult[ChatResponse]", fake_result))
+
+        assert grounded == [_REAL_SOURCE_ID]
