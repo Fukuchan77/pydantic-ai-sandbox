@@ -29,7 +29,7 @@ from patterns_deep_research.notes import distill_notes
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from patterns_contracts import SearchResult, SubQuestion
+    from patterns_contracts import ResearchBrief, SearchResult, SubQuestion
     from pydantic_ai.models import Model
     from pydantic_ai.models.instrumented import InstrumentationSettings
 
@@ -76,6 +76,41 @@ def _results_digest(results: Sequence[SearchResult]) -> str:
     )
 
 
+def _scope_block(brief: ResearchBrief | None) -> str:
+    """Render the lead's brief as a scope-reminder prompt prefix.
+
+    ``orchestrator.py``'s module docstring names ``ResearchBrief.out_of_scope``
+    "the explicit-exclusion seam that keeps the parallel sub-researchers from
+    drifting onto each other's ground" -- but ``run_subquestion`` previously
+    received only ``SubQuestion.description``, never the brief itself, so that
+    seam was declared but never actually wired to any sub-researcher prompt.
+    Each researcher runs in its own isolated context (Anthropic
+    separate-context principle) and only sees its own subquestion; without the
+    overall objective and exclusion list, nothing stops two researchers from
+    converging on the same ground, or one drifting onto territory another
+    subquestion (or the brief itself) already excludes.
+
+    Args:
+        brief: The lead's scoped brief, or ``None`` when the caller runs a
+            sub-researcher standalone, outside ``run_deep_research`` (existing
+            direct callers/tests). ``None`` renders as ``""`` so a caller that
+            doesn't pass a brief sees byte-identical prompts to before this
+            parameter existed.
+
+    Returns:
+        A prompt-ready block ending in a blank line, or ``""`` when ``brief``
+        is ``None``.
+    """
+    if brief is None:
+        return ""
+    exclusions = "\n".join(f"- {item}" for item in brief.out_of_scope) or "(none)"
+    return (
+        f"Overall research objective: {brief.objective}\n"
+        f"Explicitly out of scope for this research -- do not cover, even if "
+        f"the gathered results touch on it:\n{exclusions}\n\n"
+    )
+
+
 async def run_subquestion(
     subquestion: SubQuestion,
     *,
@@ -85,6 +120,7 @@ async def run_subquestion(
     top_k: int = 5,
     instrumentation: InstrumentationSettings | None = None,
     digest_fn: Callable[[Sequence[SearchResult]], str] = _results_digest,
+    brief: ResearchBrief | None = None,
 ) -> Finding:
     """Run the bounded search→read→reflect loop for one subquestion (Req 4.2-4.4).
 
@@ -103,6 +139,13 @@ async def run_subquestion(
             behaviour); inject ``notes.compact_digest`` to opt into note-based
             compaction (Spec 010 Req 1.1-1.2). The compression turn always uses the
             full ``_results_digest`` to preserve citation grounding (ADR-A).
+        brief: The lead's ``ResearchBrief`` (objective + ``out_of_scope``),
+            prefixed onto both the reflect and compression prompts via
+            :func:`_scope_block` so this researcher stays aligned with the
+            overall run and doesn't drift onto excluded ground.
+            ``run_deep_research`` always passes its ``plan.brief``; ``None``
+            (the default, for a sub-researcher run standalone) renders no
+            scope block, byte-identical to before this parameter existed.
 
     Returns:
         A :class:`~patterns_contracts.Finding` with the grounded summary, the
@@ -130,6 +173,7 @@ async def run_subquestion(
         deps_type=type(None),
     )
 
+    scope = _scope_block(brief)
     collected: list[SearchResult] = []
     iterations = 0
     truncated = True  # flipped to False the moment the agent judges the evidence enough
@@ -137,7 +181,8 @@ async def run_subquestion(
         iterations = index + 1
         action = (
             await action_agent.run(
-                f"Subquestion: {subquestion.description}\n\nResults so far:\n{digest_fn(collected)}"
+                f"{scope}Subquestion: {subquestion.description}\n\n"
+                f"Results so far:\n{digest_fn(collected)}"
             )
         ).output
         if action.query.strip():
@@ -154,7 +199,7 @@ async def run_subquestion(
     )
     draft = (
         await compress_agent.run(
-            f"Subquestion: {subquestion.description}\n\n"
+            f"{scope}Subquestion: {subquestion.description}\n\n"
             f"Gathered results:\n{_results_digest(collected)}"
         )
     ).output

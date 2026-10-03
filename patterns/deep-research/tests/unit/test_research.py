@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from patterns_contracts import SearchResult
+from patterns_contracts import ResearchBrief, SearchResult
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RequestUsage
@@ -25,7 +25,10 @@ from patterns_deep_research.notes import compact_digest
 
 # White-box import to build the default-seam expected string from the same source the
 # researcher's reflect loop uses (Req 1.3); the leading-underscore name is intentional.
-from patterns_deep_research.researcher import _results_digest  # pyright: ignore[reportPrivateUsage]
+from patterns_deep_research.researcher import (
+    _results_digest,  # pyright: ignore[reportPrivateUsage]
+    _scope_block,  # pyright: ignore[reportPrivateUsage]
+)
 from tests.support.fake_search import FakeSearchProvider
 from tests.support.model_fakes import plan_payload
 
@@ -34,6 +37,15 @@ if TYPE_CHECKING:
     from pydantic_ai.models.function import AgentInfo
 
 _SUBQ = "How does the lead orchestrator decompose a query?"
+
+# Matches ``plan_payload([_SUBQ])``'s defaults exactly, so the scope block
+# ``_reflect_prompt`` prefixes below is the one ``run_deep_research`` actually
+# sends -- it always forwards ``plan.brief`` to every sub-researcher.
+_BRIEF = ResearchBrief(
+    query="the research query",
+    objective="Cover the trade-offs of multi-agent research systems.",
+    out_of_scope=[],
+)
 
 # A tiny pre-sorted corpus (descending score, then source) so the FakeSearchProvider
 # returns it unchanged and the second reflect turn's ``collected`` is byte-predictable.
@@ -101,8 +113,13 @@ class _PipelineCapture:
 
 
 def _reflect_prompt(digest: str) -> str:
-    """Reconstruct the sub-researcher reflect prompt independently of production."""
-    return f"Subquestion: {_SUBQ}\n\nResults so far:\n{digest}"
+    """Reconstruct the sub-researcher reflect prompt independently of production.
+
+    Includes ``_BRIEF``'s scope block: ``run_deep_research`` always forwards
+    ``plan.brief`` to every sub-researcher (Spec 009 orchestrator.py's
+    documented, now actually-wired, explicit-exclusion seam).
+    """
+    return f"{_scope_block(_BRIEF)}Subquestion: {_SUBQ}\n\nResults so far:\n{digest}"
 
 
 async def _run_pipeline(capture: _PipelineCapture, *, digest_fn: Any = None) -> None:
