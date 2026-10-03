@@ -1,6 +1,6 @@
 # pydantic-ai-sandbox
 
-A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + multi-provider LLM routing**. The design lives in [specs/inputs/idea0.md](specs/inputs/idea0.md); the binding rules live in `.sdd/memory/constitution.md`.
+A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + multi-provider LLM routing**. The design lives in [specs/inputs/idea0.md](specs/inputs/idea0.md). Local SDD governance lives in `.sdd/memory/constitution.md`; enforceable repository rules live in tests, `mise.toml`, CI configuration, and `AGENTS.md`.
 
 ## Role: the Python beta-verification lane
 
@@ -156,10 +156,10 @@ the budget fails the suite.
 Non-trivial features flow through the SDD pipeline:
 
 ```
-/sdd-init → /sdd-spec → /sdd-design → /sdd-tasks → /sdd-impl
+/sdd-init → /sdd-spec → /sdd-plan → /sdd-tasks → /sdd-impl
          → /sdd-validate-impl → /sdd-reflect
 ```
 
 Specifications live under `specs/{feature}/`; reviews under `.sdd/reviews/`;
 the active feature is [001-agentic-platform](specs/001-agentic-platform/). For
-small, contained changes use `/dev-discovery` instead.
+small, contained changes use `/dev` instead.
