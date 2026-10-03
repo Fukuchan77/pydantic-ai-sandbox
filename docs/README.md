@@ -21,6 +21,12 @@
 |--------|------|
 | [slowapi-replacement-plan.md](./slowapi-replacement-plan.md) | `vaz-agentic-ai-next/services/api` の 3 つの据え置き(`fastapi<0.137` / `starlette<1.0` / Python 3.13)を一括で外すための slowapi 置き換え計画と、本リポジトリでの検証レーン |
 
+## ハブへの取り込み
+
+| ガイド | 内容 |
+|--------|------|
+| [hub-intake-2026-10.md](./hub-intake-2026-10.md) | 本リポジトリで検証した変更のうち `vaz-agentic-ai-next/services/api` へ取り込めるもの。slowapi 置き換えの PR チェックリストと罠、starlette の `--ignore-vuln` 5 件、Python 3.14 / 3.15 の判断、ブランチ `claude/laughing-ritchie-87q19c` の差分の仕分け(取り込む / 考え方だけ / 取り込まない) |
+
 ## 横断レビュー
 
 | ガイド | 内容 |

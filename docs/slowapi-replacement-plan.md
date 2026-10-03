@@ -84,6 +84,8 @@ A は「slowapi という薄い層を剥がす」変更であって、新しい�
 1〜4 は [`patterns/rate-limit/`](../patterns/rate-limit/README.md) で実施した。記録（版・コマンド・結果）と、
 slowapi との意図的な差分（既定の上限のバケットが全ルート共通になる点など）は同 README の「検証記録」と
 「slowapi との意図的な差分」にある。
+ハブの PR で行う作業のチェックリスト、再実装で踏みやすい罠、starlette の `--ignore-vuln` 5 件の特定結果は
+[hub-intake-2026-10.md](./hub-intake-2026-10.md) §2 にまとめた。
 
 ## 5. ハブへの取り込み条件
 
@@ -96,6 +98,8 @@ slowapi との意図的な差分（既定の上限のバケットが全ルート
     `test_config_dependency_bounds.py` が上限の存在自体を要求する
   - `.github/dependabot.yml` の `fastapi` / `starlette` の ignore を見直す
   - `mise run api:audit` の starlette グループ（5 件）を、生の `pip-audit` で再評価する
+    → 2026-10-03 に再評価済み。5 件とも修正版は 1.x 系にしかなく、`starlette>=1.3.1` を直接依存に宣言すれば
+    すべて閉じる（[hub-intake-2026-10.md](./hub-intake-2026-10.md) §2.4）
   - `services/api/CLAUDE.md` の「Dependency pins that are load-bearing」と
     「A fourth coupling」（`_inject_headers`）の節を更新する。`AGENTS.md` とペアで
 - **Python の版上げは別 PR にする。** slowapi の置き換えが main で安定してから
@@ -110,5 +114,6 @@ slowapi との意図的な差分（既定の上限のバケットが全ルート
   `services/api` の依存一式を 3.15 で `uv sync` できるかも確認する。
 
   **2026-10-03 確認結果**: 3.15 では解決しない。`chromadb>=0.6.3,<1.0` が要求する `onnxruntime` に
-  cp315 の wheel がまだ無い。3.14 では `uv lock` が解決する（`uv sync` とテストは未実施）。詳細は
+  cp315 の wheel がまだ無い（`sentence-transformers` が引く `torch` も同じく cp315 の wheel も sdist も無い）。
+  3.14 では `uv lock` が解決する（`uv sync` とテストは未実施）。詳細は
   [`patterns/rate-limit/README.md`](../patterns/rate-limit/README.md) の検証記録。
