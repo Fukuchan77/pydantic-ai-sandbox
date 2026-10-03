@@ -15,7 +15,7 @@
 #
 # CI optimization (Actions usage-limit control): the `push: branches: [main]`
 # trigger is retired. Everything reaches main through a pull request and the PR
-# run — same commit, same eight jobs — already gated it, so the merge-push run
+# run — same commit, same nine jobs — already gated it, so the merge-push run
 # was a duplicate. `workflow_dispatch` covers the occasional manual re-run.
 
 name: patterns-ci
@@ -45,6 +45,9 @@ on:
       # patterns/hitl/ with its own dedicated job below. `patterns/**` already
       # matches it, but it is listed explicitly as a first-class CI surface.
       - 'patterns/hitl/**'
+      # The rate-limit lane (docs/slowapi-replacement-plan.md §4) is an
+      # independent lane at patterns/rate-limit/ with its own dedicated job below.
+      - 'patterns/rate-limit/**'
       - 'mise.toml'
       - '.github/workflows/patterns-ci.yml'
   workflow_dispatch: {}
@@ -424,5 +427,70 @@ jobs:
         run: uv run pytest --cov --cov-report=term
 
       # Spec 012 Req 1.6: per-lockfile dependency CVE scan.
+      - name: pip-audit
+        run: uv run pip-audit
+
+  # patterns/rate-limit/ — depth 1 under patterns/, NOT an entry in the lane
+  # matrix above. It verifies the hub's slowapi replacement
+  # (docs/slowapi-replacement-plan.md §4) on Python 3.15 with fastapi/starlette
+  # uncapped, so it is the one lane whose interpreter uv provisions as 3.15.
+  # Unlike the Ollama lanes, its live dependency (Redis) is cheap and fast, so
+  # the live suite runs here per PR against a service container instead of in
+  # a dispatch-only workflow. EXPECT_LIVE_TESTS makes a run where Redis was
+  # unreachable or every live test skipped fail instead of passing.
+  rate-limit:
+    name: rate-limit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: patterns/rate-limit
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # uv reads patterns/rate-limit/.python-version (3.15) and provisions the
+      # matching interpreter — no mise needed (plan AD-5).
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: patterns/rate-limit/uv.lock
+
+      # P4 lock-drift gate (rationale on the lane job above).
+      - name: uv lock --check (no drift)
+        run: uv lock --check
+
+      - name: Sync rate-limit dependencies (locked)
+        run: uv sync --all-groups --locked
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: pyright (strict)
+        run: uv run pyright
+
+      # Unit + live Redis in one pass, under error::DeprecationWarning with no
+      # ignore entries (pyproject.toml). The unit half is hermetic
+      # (block_network); the integration half reaches the service container.
+      - name: pytest (unit + live Redis, coverage floor 98)
+        env:
+          RATE_LIMIT_REDIS_URL: redis://localhost:6379/0
+          EXPECT_LIVE_TESTS: "3"
+        run: uv run pytest --cov --cov-report=term
+
       - name: pip-audit
         run: uv run pip-audit
