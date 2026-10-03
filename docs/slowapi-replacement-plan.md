@@ -79,6 +79,12 @@ A は「slowapi という薄い層を剥がす」変更であって、新しい�
    Python 3.15 下で 1 件も出ないことを確認する。
 4. Redis レーン（B4）は `redis:7-alpine` のサービスコンテナで、メモリ縮退を含めて確認する。
 
+### 検証状況（2026-10-03）
+
+1〜4 は [`patterns/rate-limit/`](../patterns/rate-limit/README.md) で実施した。記録（版・コマンド・結果）と、
+slowapi との意図的な差分（既定の上限のバケットが全ルート共通になる点など）は同 README の「検証記録」と
+「slowapi との意図的な差分」にある。
+
 ## 5. ハブへの取り込み条件
 
 ハブ `docs/dependency-policy.md` §8.2 の手順に従う。この件に固有の条件は次のとおり。
@@ -102,3 +108,7 @@ A は「slowapi という薄い層を剥がす」変更であって、新しい�
   `sentence-transformers`、`litellm`）の 3.15 対応は**まだ調べていない**。slowapi は 3 つの据え置きの
   共通原因だが、3.15 へ上げる上での唯一の障害とは限らない。第 4 節の検証レーンでは
   `services/api` の依存一式を 3.15 で `uv sync` できるかも確認する。
+
+  **2026-10-03 確認結果**: 3.15 では解決しない。`chromadb>=0.6.3,<1.0` が要求する `onnxruntime` に
+  cp315 の wheel がまだ無い。3.14 では `uv lock` が解決する（`uv sync` とテストは未実施）。詳細は
+  [`patterns/rate-limit/README.md`](../patterns/rate-limit/README.md) の検証記録。

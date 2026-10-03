@@ -106,6 +106,16 @@ pydantic-ai v2 公式の **deferred-tools** 機構（`ApprovalRequired` → `Def
 > リスク、`safe_download` 経路）の設計ノートは正本 [hitl/README.md](hitl/README.md) を参照
 > （実装は [013-agentic-ai-security](../specs/013-agentic-ai-security/) のスコープ）。
 
+## 検証レーン（ハブの依存据え置きを外すための先行検証）
+
+エージェントのパターンではなく、ハブ `vaz-agentic-ai-next/services/api` の依存を上げる前に、その変更を
+本リポジトリで先に通しておくためのレーン。計画は
+[`docs/slowapi-replacement-plan.md`](../docs/slowapi-replacement-plan.md)。
+
+| 検証レーン | 構成 | レーン | 状態 |
+|---|---|---|---|
+| **レート制限（slowapi 置き換え）** | `limits` 直結の純 ASGI ミドルウェア（全ルート）＋ルート依存関数（厳しい上限）→ 単一の 429 実装 → Redis / メモリ縮退 | `patterns/rate-limit/`（`frameworks/` 外の独立 uv レーン, **Python 3.15**, fastapi / starlette 上限なし） | ✅ [rate-limit/](rate-limit/README.md) |
+
 ## 横断レイヤー（評価グレーダ / outcome+behavior 多軸採点）
 
 RAG・SSE・Deep Research が個別の応用レイヤであるのに対し、**評価グレーダは

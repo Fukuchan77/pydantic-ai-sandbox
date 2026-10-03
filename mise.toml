@@ -125,6 +125,14 @@ run = "bash scripts/pre-push-ollama.sh"
 # (matching the sse/pydantic-ai lanes; pydantic-ai v2 deferred-tools mechanism), so
 # it likewise carries an explicit `(cd patterns/hitl && …)` line after the
 # deep-research line in each task.
+#
+# The rate-limit lane (docs/slowapi-replacement-plan.md §4) lives at
+# `patterns/rate-limit/` — also depth 1, NOT under the frameworks glob. It is
+# the only lane on Python 3.15 and carries no fastapi/starlette upper bound on
+# purpose (it verifies the hub's slowapi replacement against them), so it
+# likewise carries an explicit `(cd patterns/rate-limit && …)` line after the
+# hitl line in each task. Its live suite is Redis, not Ollama: see
+# `patterns:test:integration:rate-limit` below.
 # ---------------------------------------------------------------------------
 
 [tasks."patterns:setup"]
@@ -139,6 +147,7 @@ echo "== setup patterns/rag"; (cd patterns/rag && uv sync --all-groups)
 echo "== setup patterns/sse"; (cd patterns/sse && uv sync --all-groups)
 echo "== setup patterns/deep-research"; (cd patterns/deep-research && uv sync --all-groups)
 echo "== setup patterns/hitl"; (cd patterns/hitl && uv sync --all-groups)
+echo "== setup patterns/rate-limit"; (cd patterns/rate-limit && uv sync --all-groups)
 """
 
 [tasks."patterns:lint"]
@@ -153,6 +162,7 @@ echo "== lint patterns/rag"; (cd patterns/rag && uv run ruff check .)
 echo "== lint patterns/sse"; (cd patterns/sse && uv run ruff check .)
 echo "== lint patterns/deep-research"; (cd patterns/deep-research && uv run ruff check .)
 echo "== lint patterns/hitl"; (cd patterns/hitl && uv run ruff check .)
+echo "== lint patterns/rate-limit"; (cd patterns/rate-limit && uv run ruff check .)
 """
 
 [tasks."patterns:format"]
@@ -167,6 +177,7 @@ echo "== format patterns/rag"; (cd patterns/rag && uv run ruff format --check .)
 echo "== format patterns/sse"; (cd patterns/sse && uv run ruff format --check .)
 echo "== format patterns/deep-research"; (cd patterns/deep-research && uv run ruff format --check .)
 echo "== format patterns/hitl"; (cd patterns/hitl && uv run ruff format --check .)
+echo "== format patterns/rate-limit"; (cd patterns/rate-limit && uv run ruff format --check .)
 """
 
 [tasks."patterns:typecheck"]
@@ -181,6 +192,7 @@ echo "== typecheck patterns/rag"; (cd patterns/rag && uv run pyright)
 echo "== typecheck patterns/sse"; (cd patterns/sse && uv run pyright)
 echo "== typecheck patterns/deep-research"; (cd patterns/deep-research && uv run pyright)
 echo "== typecheck patterns/hitl"; (cd patterns/hitl && uv run pyright)
+echo "== typecheck patterns/rate-limit"; (cd patterns/rate-limit && uv run pyright)
 """
 
 [tasks."patterns:test"]
@@ -195,6 +207,7 @@ echo "== test patterns/rag"; (cd patterns/rag && uv run pytest --cov)
 echo "== test patterns/sse"; (cd patterns/sse && uv run pytest --cov)
 echo "== test patterns/deep-research"; (cd patterns/deep-research && uv run pytest --cov)
 echo "== test patterns/hitl"; (cd patterns/hitl && uv run pytest --cov)
+echo "== test patterns/rate-limit"; (cd patterns/rate-limit && uv run pytest --cov)
 """
 
 [tasks."patterns:audit"]
@@ -245,6 +258,7 @@ echo "== audit patterns/rag"; (cd patterns/rag && uv run pip-audit --ignore-vuln
 echo "== audit patterns/sse"; (cd patterns/sse && uv run pip-audit)
 echo "== audit patterns/deep-research"; (cd patterns/deep-research && uv run pip-audit)
 echo "== audit patterns/hitl"; (cd patterns/hitl && uv run pip-audit)
+echo "== audit patterns/rate-limit"; (cd patterns/rate-limit && uv run pip-audit)
 """
 
 [tasks."patterns:check"]
@@ -311,6 +325,15 @@ run = "cd patterns/deep-research && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS
 [tasks."patterns:test:integration:hitl"]
 description = "Gated live-Ollama integration for the hitl lane only (EXPECT_LIVE_TESTS=2: approval-path e2e + denial-path e2e, Task 8.1)."
 run = "cd patterns/hitl && RUN_INTEGRATION_PATTERNS=1 EXPECT_LIVE_TESTS=2 uv run pytest tests/integration"
+
+# Not an Ollama lane, so it is not in the nightly patterns-integration-ollama
+# matrix: patterns-ci.yml's rate-limit job runs it per PR against a
+# redis:7-alpine service container. Locally, point RATE_LIMIT_REDIS_URL at any
+# Redis (default below: localhost). EXPECT_LIVE_TESTS turns "no Redis, all
+# skipped" into a red instead of a green.
+[tasks."patterns:test:integration:rate-limit"]
+description = "Live-Redis suite for the rate-limit lane (EXPECT_LIVE_TESTS=3; RATE_LIMIT_REDIS_URL defaults to localhost)."
+run = "cd patterns/rate-limit && RATE_LIMIT_REDIS_URL=${RATE_LIMIT_REDIS_URL:-redis://localhost:6379/0} EXPECT_LIVE_TESTS=3 uv run pytest tests/integration"
 
 [tasks.dev]
 description = "Run the FastAPI app via uvicorn with hot reload (development)."
