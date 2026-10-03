@@ -2,6 +2,21 @@
 
 A sandbox repository for experimenting with **Pydantic AI V2 (Beta) + FastAPI + multi-provider LLM routing**. The design lives in [specs/inputs/idea0.md](specs/inputs/idea0.md); the binding rules live in `.sdd/memory/constitution.md`.
 
+## Role: the Python beta-verification lane
+
+As of 2026-10-03 this repository is the **Python beta-verification lane** for the
+[`vaz-agentic-ai-next`](https://github.com/Fukuchan77/vaz-agentic-ai-next) hub, whose
+`services/api/` is the single source of truth for the production FastAPI + Pydantic AI
+lane (hub ADR-0007). New Python versions (3.15), pydantic-ai beta features, and dependency
+majors the hub holds back are tried **here first**. Results reach the hub only through the
+intake procedure in the hub's `docs/dependency-policy.md` §8 — never by copying files over.
+
+- Current verification plan: [docs/slowapi-replacement-plan.md](docs/slowapi-replacement-plan.md)
+  (lifts the hub's `fastapi<0.137` / `starlette<1.0` / Python 3.13 holds in one change).
+- The pattern catalog under [`patterns/`](patterns/README.md) stays here as reference material.
+  Its BeeAI Framework and LlamaIndex lanes (`patterns/frameworks/{beeai,llamaindex}`) are
+  **frozen for comparison only**: keep them green, but do not extend them.
+
 > **Note:** `.sdd/` and `CLAUDE.md` are git-ignored, locally-generated SDD
 > artifacts (see [.gitignore](.gitignore)) — they are not present in a fresh
 > clone. References to them below point at these local-only files.
