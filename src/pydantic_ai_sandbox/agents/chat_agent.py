@@ -64,31 +64,30 @@ would trip the Req 3.4 5xx path.
 
 
 def search_kb(_ctx: RunContext[None], query: str) -> list[str]:
-    """Stub knowledge-base lookup returning a deterministic placeholder.
+    """Look up knowledge-base entries relevant to a query.
 
-    The MVP does not ship a real retrieval backend (out of scope per
-    spec.md "Out of Scope"). Returning a single-element list with the
-    query echoed back keeps the contract fixed for the integration test
-    (T11.1) which asserts ``sources`` is non-empty when the agent
-    invokes the tool, while making it obvious in logs that the
-    response is synthetic.
+    Returns a list of knowledge-base identifiers; cite any you use in the
+    `sources` field of your reply.
 
     Args:
-        _ctx: Pydantic AI run context. Unused in the stub but required
-            so the V2 ``@agent.tool`` registration path (which detects
-            ``RunContext`` as the first parameter) routes correctly —
-            the alternative ``@agent.tool_plain`` form would skip the
-            ``RunContext`` parameter and would cost us the future seam
-            for threading deps through.
-        query: Search string the model produced for retrieval. Echoed
-            into the placeholder result for log readability.
+        _ctx: Pydantic AI run context (unused by this tool's own logic).
+        query: The search string to look up.
 
     Returns:
-        A list with a single placeholder identifier. Real retrieval
-        lands in a follow-up spec; the shape of the return type is
-        load-bearing because ``test_chat_agent_tool.py`` asserts
-        ``list[str]`` directly via :mod:`inspect`.
+        A list of matching knowledge-base identifiers.
     """
+    # DEV-ONLY STUB (not sent to the model - this comment, unlike the
+    # docstring above, never becomes part of the tool's model-facing
+    # description; see "Writing tools for agents" on keeping a tool's
+    # description limited to its actual behavior): the MVP ships no real
+    # retrieval backend (out of scope per spec.md "Out of Scope"), so this
+    # returns a single deterministic placeholder id echoing `query` back,
+    # rather than performing a real lookup. The `RunContext` first-parameter
+    # form (vs. `@agent.tool_plain`) is required for the `@agent.tool`
+    # registration path to route correctly, and is the future seam for
+    # threading real deps through once retrieval ships. The `list[str]`
+    # return shape is load-bearing: `test_chat_agent_tool.py` asserts it
+    # directly via `inspect`.
     return [f"kb-stub:{query}"]
 
 
