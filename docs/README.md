@@ -15,6 +15,12 @@
 | [tool-design.md](./tool-design.md) | ツール設計: namespacing / トークン効率(pagination・filter・truncation)/ `response_format`(concise・detailed) | Anthropic "Writing tools for agents" | `patterns/frameworks/pydantic-ai/src/patterns_pydantic_ai/tool_design.py` |
 | [context-engineering.md](./context-engineering.md) | コンテキスト工学: structured note-taking / compaction /「最小の高信号トークン集合」 | Anthropic "Effective context engineering" | `patterns/deep-research/src/patterns_deep_research/notes.py` |
 
+## 計画
+
+| ガイド | 内容 |
+|--------|------|
+| [slowapi-replacement-plan.md](./slowapi-replacement-plan.md) | `vaz-agentic-ai-next/services/api` の 3 つの据え置き(`fastapi<0.137` / `starlette<1.0` / Python 3.13)を一括で外すための slowapi 置き換え計画と、本リポジトリでの検証レーン |
+
 ## 横断レビュー
 
 | ガイド | 内容 |
