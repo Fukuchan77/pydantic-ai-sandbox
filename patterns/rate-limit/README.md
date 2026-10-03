@@ -90,6 +90,10 @@ RATE_LIMIT_REDIS_URL=redis://localhost:6379/0 \
   `RATE_LIMIT_REDIS_URL` を付けて 30 passed。`error::DeprecationWarning`（ignore なし）の下で警告 0 件。
   `ruff check` / `ruff format --check` / `pyright`（strict）/ `pip-audit` はすべて clean
 
+ハブの PR で使うチェックリスト、再実装で踏みやすい罠（依存関数の `Request` を `TYPE_CHECKING` 下に
+置くと上限が黙って効かなくなる、starlette 1.7 の `TestClient` の警告が `error::DeprecationWarning` で捕まらない等）、
+starlette の `--ignore-vuln` 5 件の特定結果は [`docs/hub-intake-2026-10.md`](../../docs/hub-intake-2026-10.md) §2 にある。
+
 ### `services/api` の依存一式は 3.15 で解決するか（計画 §6）
 
 slowapi を外し、fastapi / starlette の上限を外した `services/api` の `pyproject.toml` で `uv lock` を試した。
