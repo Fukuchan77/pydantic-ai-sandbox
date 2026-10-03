@@ -54,7 +54,7 @@ That makes one shared workspace structurally impossible, not merely
 inconvenient (`specs/005-cross-platform/research.md` R-3).
 
 Each lane (`contracts`, `frameworks/{beeai,llamaindex,pydantic-ai}`, `rag`, `sse`,
-`deep-research`, `hitl`) is therefore its own independent `uv` project with its
+`deep-research`, `hitl`, and the Python 3.15 `rate-limit` verification lane) is therefore its own independent `uv` project with its
 own lockfile, its own `.python-version`, and its own CI job. Do not try to
 collapse them into one workspace or one lockfile "for consistency" — that
 reintroduces the exact conflict this split exists to avoid. Cross-lane sharing
