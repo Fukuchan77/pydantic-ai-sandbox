@@ -104,6 +104,12 @@ beeai レーンのロック版は **0.39.1** のまま（`beeai-framework==0.1.3
 `--ignore-vuln GHSA-xf7x-x43h-rpqh` 付きで clean。抑止は現状維持。期限まで 2 週間を
 切ったため、次回の依存更新（または 2026-10-14 当日）で期限の延長可否を判断すること。
 
+**再検証（2026-10-03 セキュリティ監査）**: 期限 2026-10-14 は未到来。beeai レーンの
+ロック版は引き続き **0.39.1** で、再評価トリガの 0.56.0–0.60.0 には入っていない。
+抑止なしの `pip-audit` は同 advisory 1 件のみを報告し、レーン限定抑止付きの
+`mise run patterns:audit` は clean。脆弱コード不在の判定と抑止を現状維持し、期限日に
+撤去または期限延長を再判断する。
+
 **Worked example (suppression applied 2026-09-05, no fix available)**: nltk 3.10.3 (a
 transitive dependency of `patterns/frameworks/llamaindex` / `patterns/rag` via
 llama-index-core) had **PYSEC-2026-3740** (GHSA-8mgp-746c-j5xp / CVE-2026-81726, a
@@ -167,6 +173,13 @@ an nltk import, so the step (b) reachability argument is unchanged. Raw
 `pip-audit` reports exactly this one advisory per lane; with `--ignore-vuln
 PYSEC-2026-3740` both lanes are clean. Suppression retained as-is; the tracking
 issue is still to be filed.
+
+**Re-verified (2026-10-03 security audit)**: the 2026-11-05 review deadline
+has not lapsed. PyPI still lists **3.10.3** as the latest nltk release, and raw
+`pip-audit` still reports PYSEC-2026-3740 with no fix version in both lanes.
+Neither lane's source imports nltk, while `mise run patterns:audit` is clean with
+the existing lane-scoped suppression. Suppression retained; the tracking issue
+remains to be filed before the review deadline.
 
 ## 抑止ポリシーの階梯（cross-repo、2026-09-08 記録）
 
