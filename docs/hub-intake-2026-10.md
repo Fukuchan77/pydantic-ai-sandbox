@@ -1,7 +1,7 @@
 # ハブへの取り込み候補（2026-10-03）
 
 - **作成日**: 2026-10-03
-- **最終更新日**: 2026-10-04
+- **最終更新日**: 2026-10-04（§7 追記）
 - **宛先**: `vaz-agentic-ai-next/services/api`（FastAPI + Pydantic AI レーンの正本。ハブ ADR-0007）
 - **取り込み手順**: ハブの `docs/dependency-policy.md` §8。ファイルのコピーではなく、ハブ側で再実装する
   （本リポジトリの Constitution III「ベンダリング禁止」とも同じ考え方）
@@ -30,7 +30,7 @@ status は `landed` / `verified` / `proposed` / `already-present` / `waiting` / 
 |---|---|---|---|
 | H1 | slowapi を `limits` 直結の自前実装へ置換 | `landed` | hub `3646b47` の `services/api/app/middleware/rate_limit.py` と `services/api/pyproject.toml`。PR #76 で反映済み |
 | H2 | starlette の audit suppression 5 件を版上げで解消 | `landed` | hub `3646b47` は `starlette>=1.3.1,<2.0` / resolved 1.7.0、旧 starlette 5 件の suppression を削除済み |
-| H3 | hub `services/api` を Python 3.14 へ移行 | `proposed` | §6 の immutable-commit verification が §8.1 satisfied のときだけ `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
+| H3 | hub `services/api` を Python 3.14 へ移行 | `proposed` | §6（`3646b47`）と §7.1（`afbe6eb`）は failed。§7.2 の候補 commit `966becc`（hub branch `claude/project-thread-583dhe`）は 3.14 で §8.1 satisfied。hub `main` に入った commit で同じ runner が green になった時点で `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
 | L1 | `UsageLimits` と request / stream timeout | `already-present` | hub `3646b47` の `services/api/app/api/v1/agent.py` と `_stream.py` に `UsageLimits`、request timeout、stream event timeout が存在 |
 | L2 | 生成された `sources` を実ツール結果と照合 | `waiting` | hub spec `009` R6 の確認結果待ち。受領時に hub の RAG node ID 照合有無を記録する |
 | L3 | tool docstring をモデル向け説明だけに限定 | `waiting` | hub spec `009` R6 の tool docstring audit 結果待ち |
@@ -160,6 +160,8 @@ chromadb 3 件と nltk 1 件はこの変更と無関係なので残す。
   `asyncio.iscoroutinefunction` の `DeprecationWarning` を error として 58 件失敗したため、H3 は `proposed` のまま。
 - H3 の hub PR は `services/api/.python-version`、`pyproject.toml` の Python floor / Ruff target、
   `test_python_version_pin.py` を同時に更新し、§6 の blocker を解消して同じ immutable-commit runner を再実行する。
+- **2026-10-04 追記**: §6 の 2 blocker は、3.13 のまま入れられる前段の修正で解消できることを §7.2 で確認した。
+  H3 PR は「前段の修正（§7.3）→ 版上げ（§6.3 の migration diff + `uv lock` の再生成）」の 2 段にできる。
 
 ---
 
@@ -242,9 +244,9 @@ chromadb 3 件と nltk 1 件はこの変更と無関係なので残す。
 
 | 順 | 作業 | 場所 |
 |---|---|---|
-| 1 | H3 の Python 3.14 migration PR で Ruff `UP037` 4 件を修正する | ハブ |
-| 2 | `llama-index-workflows` / Chroma telemetry が Python 3.14 で呼ぶ `asyncio.iscoroutinefunction` の対応版を取り込み、warning-as-error の 58 failures を解消する | ハブ |
-| 3 | immutable commit を §6 と同じ runner で再検証し、required 3 phases が全て exit 0 の場合だけ H3 を `verified` へ移す | sandbox → ハブ |
+| 1 | §7.3 の前段修正（`UP037` 4 件を `typing.Self` へ、`asyncio.iscoroutinefunction` の emitter 限定 ignore 2 件）を hub `main` へ入れる。候補は hub branch `claude/project-thread-583dhe`（`966becc`）。対応版の upstream release は 2026-10-04 時点で無い（§7.3） | ハブ |
+| 2 | 1 が入った hub `main` の commit を §6 と同じ runner で再検証し、required 3 phases が全て exit 0 の場合だけ H3 を `verified` へ移す | sandbox |
+| 3 | H3 本体（§6.3 の migration diff と `uv lock` の再生成）を hub で別 PR にする | ハブ |
 | 4 | hub spec `009` R6 の L2–L4 確認結果を受領し、ledger の行を削除せず status を更新する | ハブ → sandbox |
 | 5 | 月次 refresh で LiteLLM OpenAI 3 metadata と cp315 blocker を §1.2 の手順で再確認する | sandbox |
 
@@ -337,3 +339,81 @@ artifact は一時的な参照物であり正本ではない。以下は
 §1.1 の 3 blocker が必要 platform の `cp315` wheel-ready になった時点で、同じ runner を
 `--python 3.15` にして反復する。3.14 が failed の間に 3.15 を成功扱いへ飛び越えず、各 series の
 required phases と blocker を別 record として残す。
+
+---
+
+## 7. Re-verification on hub `afbe6eb` and a candidate fix（Python 3.14、2026-10-04）
+
+§6 と同じ runner（PR #44 の `scripts/verify-hub-python.sh`）を、§6 以後に進んだ hub `main` と、
+§6 の 2 blocker だけを直した候補 commit に対して実行した。artifact は一時物で、要点だけをここへ転記する。
+
+- **環境**: Linux x86_64、CPython 3.14.8（uv 管理）、uv 0.12.23（hub `mise.toml` の `uv = "0.12"`）、mise 2026.10.1。
+  Redis / Docker daemon / Ollama / Hugging Face model は無く、該当 test は §6 と同じ理由で skip した（25 件）。
+- **migration**: runner の scratch migration は §6.3 と同じ 4 行（`.python-version`、`requires-python`、Ruff target、
+  `_EXPECTED_SERIES`）。
+
+### 7.1 hub `main`@`afbe6eb`（依存更新 #77、spec 009 #78 の後）— failed、§6 と同じ
+
+| stage | role | exit | 結果 |
+|---|---|---:|---|
+| `uv lock` | required | 0 | 204 packages |
+| `uv sync` | required | 0 | |
+| `mise run api:check` | required | 1 | Ruff `UP037` 4 件（§6.1 と同じ 4 箇所） |
+| `mise run api:lint` | diagnostic | 1 | 同上 |
+| `mise run api:test:ci` | diagnostic | 1 | 1624 total / 1541 passed / **58 failed** / 25 skipped。58 件すべてが `asyncio.iscoroutinefunction` の `DeprecationWarning`（warning-as-error） |
+| `mise run api:audit` | diagnostic | 0 | No known vulnerabilities found, 4 ignored |
+
+#77 の依存更新は 2 blocker のどちらも解消していない。PyPI の最新版でも未解消である（2026-10-04 確認）。
+
+- `llama-index-workflows` 2.25.0 は最新版で、`workflows/runtime/types/step_function.py:227` と `:286` が
+  `asyncio.iscoroutinefunction` を呼ぶ。
+- `chromadb` は hub の `<1.0` 上限で 0.6.3 に固定され、`chromadb/telemetry/opentelemetry/__init__.py:128` が同じ呼び出しをする。
+  0.x 系に修正版は無い。
+
+Python 3.14 の `asyncio.iscoroutinefunction` は `warnings._deprecated(..., remove=(3, 16))` を `stacklevel=3` で出すため、
+warning は呼び出し元モジュールに帰属する。したがって pytest の `module` 欄で emitter を限定できる。
+
+### 7.2 候補 commit `966becc`（hub branch `claude/project-thread-583dhe`）— green、§8.1 satisfied
+
+| stage | role | exit | 結果 |
+|---|---|---:|---|
+| `uv lock` | required | 0 | 204 packages、§7.1 と同じ解決結果 |
+| `uv sync` | required | 0 | |
+| `mise run api:check` | required | 0 | ruff / ty green、1624 total / **1599 passed / 0 failed** / 25 skipped、coverage 96.68%、audit green |
+| `mise run api:lint` | diagnostic | 0 | |
+| `mise run api:test:ci` | diagnostic | 0 | 1599 passed / 0 failed / 25 skipped |
+| `mise run api:audit` | diagnostic | 0 | No known vulnerabilities found, 4 ignored |
+
+- **Overall verdict**: green。**Hub dependency-policy §8.1（Python 3.14）: satisfied**（この候補 commit に対して）。
+- **3.13 での回帰確認**: 同じ commit を migration なしの Python 3.13.14 で実行し、ruff / ty green、
+  1599 passed / 25 skipped、coverage 96.73%。候補の修正は 3.13 では何も変えない。
+- **主な resolved versions**: `pydantic-ai-slim==2.54.0`、`pydantic-core==2.46.5`、`litellm==1.103.2`、`openai==2.54.0`、
+  `fastapi==0.142.2`、`starlette==1.7.0`、`chromadb==0.6.3`、`llama-index-core==0.14.25`、`llama-index-workflows==2.25.0`、
+  `onnxruntime==1.30.0`、`torch==2.14.1`、`redis==8.1.0`、`ruff==0.16.10`、`ty==0.0.84`。
+- **残る warning（7 件、いずれも DeprecationWarning ではない）**: `LogfireNotConfiguredWarning` 5、
+  `PytestUnknownMarkWarning`（`pytest.mark.integration`）1、file-size policy の `UserWarning` 1。§6.2 と同じ内訳。
+- §2.3 の罠 2・3 は §6.2 と同じく発火しない（Redis live test は未到達）。
+
+### 7.3 候補の修正内容（hub `966becc`、4 files、+21 / −4）
+
+1. **`UP037` 4 件**: `app/workflows/exceptions.py`（`RAGTransientError` / `RAGPermanentError` の `from_exception`）、
+   `tests/benchmarks/utils.py`（`BenchmarkResults.from_latencies`）、`tests/unit/api/v1/test_stream_lifecycle.py`
+   （`_TrackingAsyncGen.__aiter__`）の、自クラスを指す引用符付き戻り値型を `typing.Self` にした。
+   Ruff の自動修正どおり引用符を外すだけでは、3.13 ではクラス定義中の名前解決で `NameError` になる（PEP 649 は 3.14 から）。
+   `Self` なら 3.13 と 3.14 の両方で正しく、版上げ PR より先に入れられる。
+2. **`asyncio.iscoroutinefunction` の 58 failures**: `services/api/pyproject.toml` の `filterwarnings` に、
+   メッセージと emitter モジュールの両方で限定した ignore を 2 件足した。
+   ```toml
+   "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:workflows.runtime.types.step_function",
+   "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:chromadb.telemetry.opentelemetry",
+   ```
+   既存の `ignore::DeprecationWarning:chromadb.types` と同じく emitter を名指しする形で、同じモジュールが出す別の
+   deprecation と、他のモジュールが出す同じ deprecation はどちらも引き続き error になる。3.13 はこの warning を出さないので
+   無害。`llama-index-workflows` が `inspect.iscoroutinefunction` へ移った版を出した時点で 1 件目を、
+   `chromadb<1.0` の上限を外す時点で 2 件目を外す。
+
+### 7.4 H3 の扱い
+
+ledger の規則（§1、immutable hub commit に対する検証だけを根拠にする）に従い、H3 は `proposed` のままにする。
+`966becc` は hub の push 済み branch 上の commit で再現はできるが、hub `main` ではない。§4 の 1 が hub `main` に入った後、
+その commit で §7.2 と同じ結果になれば `verified` へ移す。
