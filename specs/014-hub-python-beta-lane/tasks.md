@@ -33,6 +33,9 @@ _Traces:_ REQ-009, REQ-010, DES-2.1, DES-2.3, DES-3.1
 
 ### Implementation Notes
 
+- Python 3.14 の root pin、CI/tooling、Watsonx import contract を同期し、Task 1 は commit `34b8888` で ship 済み。
+- root gate、coverage 98% ratchet、audit、独立 pattern lanes の green を PDCA evidence に保存した。
+
 ---
 
 ## 2. pydantic-ai / OpenAI dependency compatibility baseline
@@ -42,18 +45,21 @@ _Depends:_ 1（1.2 の完了 gate を測った後に 2.1 の赤を置く）
 _Requirements:_ 2.1, 2.2, 2.3, 2.4, 5.1
 _Traces:_ REQ-006, REQ-007, REQ-008, REQ-009, REQ-019, DES-2.1, DES-2.2, DES-3.1, DES-3.3
 
-- [ ] 2.1 OpenAI-compatible request path の失敗テストを先行作成する。lock 済み `openai<3` を使って `OllamaProvider → OpenAIChatModel → Agent.run()` の通常応答、timeout forwarding、model/messages payload を respx で検証し、同じ契約で installed `pydantic-ai-slim` がテストモジュール定数 `HUB_VERIFIED_PYDANTIC_AI_FLOOR`（値・確認したハブ commit SHA・確認日をコメントで併記。ハブ repository は参照しない）以上、`openai` が 3 未満であることを assert する。定数の更新契機（月次 refresh と `hub:verify` 実行時）をモジュール docstring に書く。現行 dependency floor で版条件が赤になることを確認する。
+- [x] 2.1 OpenAI-compatible request path の失敗テストを先行作成する。lock 済み `openai<3` を使って `OllamaProvider → OpenAIChatModel → Agent.run()` の通常応答、timeout forwarding、model/messages payload を respx で検証し（※当初の respx 実装は task 2.2 で `httpx2.MockTransport` へ書き換えられた——pydantic-ai-slim の OpenAI-compatible provider が httpx2.AsyncClient をデフォルト採用するため respx が効かないことが判明した経緯は `tests/unit/test_ollama_openai_compat.py` の docstring 参照）、同じ契約で installed `pydantic-ai-slim` がテストモジュール定数 `HUB_VERIFIED_PYDANTIC_AI_FLOOR`（値・確認したハブ commit SHA・確認日をコメントで併記。ハブ repository は参照しない）以上、`openai` が 3 未満であることを assert する。定数の更新契機（月次 refresh と `hub:verify` 実行時）をモジュール docstring に書く。現行 dependency floor で版条件が赤になることを確認する。
   _Boundary:_ `tests/unit/test_ollama_openai_compat.py`
   _Depends:_ 1.2
   _Requirements:_ 2.1, 2.2, 2.4
   _Traces:_ REQ-006, REQ-007, REQ-009, DES-2.2
-- [ ] 2.2 option (c) の dependency / ADR contract を適用して 2.1 を緑化する。`pydantic-ai-slim` の OpenAI extra を外して hub lock 版以上へ上げ、safe な `openai>=2.20.0,<3.0.0` と LiteLLM line を共存させ、脆弱な LiteLLM 版への rollback を拒否する lock を確定する。ADR-2 には公式サポート外の組合せ、実行可能 contract、LiteLLM が OpenAI 3 対応を宣言した後の cap 撤去条件を残す。root の check・coverage・audit を完了条件とし、compatibility contract が失敗した場合は option (a) を暗黙実装せず plan amendment で停止する。merge 前に Root baseline run 節へ dependency 変更の 1 行（resolved `pydantic-ai-slim`・`openai`・`litellm` と各 gate の exit・件数）を記録する（憲法 Principle 6）。
-  _Boundary:_ `pyproject.toml`, `uv.lock`, `docs/hub-intake-2026-10.md`（Root baseline run 節のみ）
+- [x] 2.2 option (c) の dependency / ADR contract を適用して 2.1 を緑化する。`pydantic-ai-slim` の OpenAI extra を外して hub lock 版以上へ上げ、safe な `openai>=2.47.0,<3.0.0`（当初は `>=2.20.0,<3.0.0` としたが、独立 VDD review の 1st pass で httpx2 対応下限の不足を指摘され、再検証の上で訂正——`pdca/do.md` 2026-10-04 03:00/03:15 のエントリ）と LiteLLM line を共存させ、脆弱な LiteLLM 版（1.83.0、および `openai` を安全下限より古い版へ exact pin する patch release）への rollback を拒否する lock を確定する。ADR-2 には公式サポート外の組合せ、実行可能 contract、LiteLLM が OpenAI 3 対応を宣言した後の cap 撤去条件を残す。root の check・coverage・audit を完了条件とし、compatibility contract が失敗した場合は option (a) を暗黙実装せず plan amendment で停止する。merge 前に Root baseline run 節へ dependency 変更の 1 行（resolved `pydantic-ai-slim`・`openai`・`litellm` と各 gate の exit・件数）を記録する（憲法 Principle 6）。
+  _Boundary:_ `pyproject.toml`, `uv.lock`, `docs/hub-intake-2026-10.md`（Root baseline run 節のみ）, `tests/unit/test_ollama_openai_compat.py`（2.1 の既存 boundary、VDD review 対応で version floor/ceiling contract に httpx2 下限テストを追加）, `tests/unit/test_litellm_dependency_floor.py`（2nd-pass VDD review 対応で新設——manifest の litellm floor denylist 不備を contract 化）, `tests/support/version_compare.py`（上記 2 モジュールが共有する `release_tuple` helper の抽出先、plan.md §2.10 境界）
   _Depends:_ 1.2, 2.1
   _Requirements:_ 2.1, 2.2, 2.3, 2.4, 5.1
   _Traces:_ REQ-006, REQ-007, REQ-008, REQ-009, REQ-019, DES-2.1, DES-2.2, DES-3.1, DES-3.3
 
 ### Implementation Notes
+
+- `pydantic-ai-slim==2.54.0` と `openai>=2.47.0,<3.0.0` の組合せを、実際の Ollama OpenAI-compatible request path で固定した。
+- `httpx2.MockTransport` を使用し、`litellm>=1.96.2` の manifest/resolved floor も rules-as-tests で保護した。
 
 ---
 
@@ -64,23 +70,26 @@ _Depends:_ 2（2.2 の完了 gate を測った後に 3.1 の赤を置く。3.3 �
 _Requirements:_ 1.1, 1.2, 1.3, 1.5, 3.3
 _Traces:_ REQ-001, REQ-002, REQ-003, REQ-005, REQ-013, DES-1.1, DES-1.2
 
-- [ ] 3.1 runner / summarizer の hermetic contract tests を先行作成する。fake hub repository に `services/api/` 外の sentinel を含め、immutable full archive、source 非書き込み、source 外 output、scratch 限定 mise trust、tool auto-install 抑止（fake `mise` が受け取る環境で `MISE_AUTO_INSTALL`・`MISE_EXEC_AUTO_INSTALL`・`MISE_NOT_FOUND_AUTO_INSTALL`・`MISE_TASK_RUN_AUTO_INSTALL` がすべて `0`）、Python 3.14/3.15 migration、required phases（standalone `uv lock`・`uv sync`・`api:check`）のいずれかの失敗による non-zero、verdict 失敗後も non-gating diagnostics 継続、diagnostic divergence の記録、interrupt cleanup を固定する。sample JUnit / logs から pass・fail・skip reason・`DeprecationWarning`・`StarletteDeprecationWarning` の origin package を区別して集計する赤を確認する。`uv lock` と `uv sync` が `api:check` とは別に記録されること、`summary.md` に R1.2 の各コマンドと実行タスクの対応表が出ること、および ledger へ転記する要点（commit・Python・command 別 exit と件数・skip 理由・warning 表・audit 結果）が `summary.md` 冒頭の 1 節にまとまることも固定する。subprocess 起動の Ruff `S603`/`S607` は per-line `# noqa` に理由を付けて抑止する。
+- [x] 3.1 runner / summarizer の hermetic contract tests を先行作成する。fake hub repository に `services/api/` 外の sentinel を含め、immutable full archive、source 非書き込み、source 外 output、scratch 限定 mise trust、tool auto-install 抑止（fake `mise` が受け取る環境で `MISE_AUTO_INSTALL`・`MISE_EXEC_AUTO_INSTALL`・`MISE_NOT_FOUND_AUTO_INSTALL`・`MISE_TASK_RUN_AUTO_INSTALL` がすべて `0`）、Python 3.14/3.15 migration、required phases（standalone `uv lock`・`uv sync`・`api:check`）のいずれかの失敗による non-zero、verdict 失敗後も non-gating diagnostics 継続、diagnostic divergence の記録、interrupt cleanup を固定する。sample JUnit / logs から pass・fail・skip reason・`DeprecationWarning`・`StarletteDeprecationWarning` の origin package を区別して集計する赤を確認する。`uv lock` と `uv sync` が `api:check` とは別に記録されること、`summary.md` に R1.2 の各コマンドと実行タスクの対応表が出ること、および ledger へ転記する要点（commit・Python・command 別 exit と件数・skip 理由・warning 表・audit 結果）が `summary.md` 冒頭の 1 節にまとまることも固定する。subprocess 起動の Ruff `S603`/`S607` は per-line `# noqa` に理由を付けて抑止する。
   _Boundary:_ `tests/unit/test_hub_verification_runner.py`
   _Depends:_ 2.2
   _Requirements:_ 1.1, 1.2, 1.3, 1.5, 3.3
   _Traces:_ REQ-001, REQ-002, REQ-003, REQ-005, REQ-013, DES-1.2
-- [ ] 3.2 stdlib-only summarizer を実装して、各 command の role / exit、JUnit 件数、service/marker 別 skip、warning category と origin、audit 結果を原ログ参照付き `summary.md` に変換し、3.1 の集計 contract を緑化する。required phases の一つでも非ゼロなら `green` や §8.1 satisfied を生成しない。diagnostics は non-gating とし、required verdict と結果が食い違う場合は `diagnostic divergence` を生成する。
+- [x] 3.2 stdlib-only summarizer を実装して、各 command の role / exit、JUnit 件数、service/marker 別 skip、warning category と origin、audit 結果を原ログ参照付き `summary.md` に変換し、3.1 の集計 contract を緑化する。required phases の一つでも非ゼロなら `green` や §8.1 satisfied を生成しない。diagnostics は non-gating とし、required verdict と結果が食い違う場合は `diagnostic divergence` を生成する。
   _Boundary:_ `scripts/summarize_hub_verification.py`
   _Depends:_ 3.1
   _Requirements:_ 1.2, 1.3, 1.5, 3.3
   _Traces:_ REQ-002, REQ-003, REQ-005, REQ-013, DES-1.1, DES-1.2
-- [ ] 3.3 検証 runner と `mise run hub:verify` entry point を実装して 3.1 を緑化する。hub path / commit / Python series / output を検証し、full `git archive` scratch に Python series migration を適用して `migration.diff` を保存し、`uv lock` → `uv sync` を個別に記録したうえで upstream `api:check` を verdict として実行する。失敗時も `api:lint`・`api:test:ci`・`api:audit` diagnostics を最後まで記録し（対象 commit のハブ `mise.toml` で `ty check` を含むタスクを特定し、`api:lint` に含まれなければそのタスクを diagnostics に加える）、scratch cleanup 後も確定済み artifact を保持する。同じ CLI が blocker 解消後の 3.15 再検証にも使えるようにする。
+- [x] 3.3 検証 runner と `mise run hub:verify` entry point を実装して 3.1 を緑化する。hub path / commit / Python series / output を検証し、full `git archive` scratch に Python series migration を適用して `migration.diff` を保存し、`uv lock` → `uv sync` を個別に記録したうえで upstream `api:check` を verdict として実行する。失敗時も `api:lint`・`api:test:ci`・`api:audit` diagnostics を最後まで記録し（対象 commit のハブ `mise.toml` で `ty check` を含むタスクを特定し、`api:lint` に含まれなければそのタスクを diagnostics に加える）、scratch cleanup 後も確定済み artifact を保持する。同じ CLI が blocker 解消後の 3.15 再検証にも使えるようにする。
   _Boundary:_ `scripts/verify-hub-python.sh`, `mise.toml`
   _Depends:_ 3.2
   _Requirements:_ 1.1, 1.2, 1.3, 1.5, 3.3
   _Traces:_ REQ-001, REQ-002, REQ-003, REQ-005, REQ-013, DES-1.1, DES-1.2
 
 ### Implementation Notes
+
+- immutable commit の full archive、scratch-only migration、required/diagnostic phase 分離、interrupt cleanup を hermetic fake hub tests で検証した。
+- summarizer は stdlib-only とし、JUnit、skip reason、warning origin、audit、diagnostic divergence を ledger-ready Markdown に集約する。
 
 ---
 
@@ -91,13 +100,16 @@ _Depends:_ none
 _Requirements:_ 3.4
 _Traces:_ REQ-014, DES-3.2
 
-- [ ] 4.1 公開済みの最新 Python 3.15 rc / final を実装開始日に再確認し（PEP 790 の予定では 3.15.0 final は 2026-10-01。final が出ていれば final を対象にする）、`patterns/rate-limit` の既存 lane-local sync・lint・format・typecheck・pytest/cov・audit をその exact interpreter で実測する。レーンの Python 3.15 series は維持し、README の環境・日付・gate 結果を更新する。final が未公開なら rc 検証であることを明記し、公開後の再実行条件を残す。更新前の README の検証記録（3.15.0rc2）を代替の失敗証拠として PDCA ログに引用する。
+- [x] 4.1 公開済みの最新 Python 3.15 rc / final を実装開始日に再確認し（PEP 790 の予定では 3.15.0 final は 2026-10-01。final が出ていれば final を対象にする）、`patterns/rate-limit` の既存 lane-local sync・lint・format・typecheck・pytest/cov・audit をその exact interpreter で実測する。レーンの Python 3.15 series は維持し、README の環境・日付・gate 結果を更新する。final が未公開なら rc 検証であることを明記し、公開後の再実行条件を残す。更新前の README の検証記録（3.15.0rc2）を代替の失敗証拠として PDCA ログに引用する。
   _Boundary:_ `patterns/rate-limit/README.md`
   _Depends:_ none
   _Requirements:_ 3.4
   _Traces:_ REQ-014, DES-3.2
 
 ### Implementation Notes
+
+- `patterns/rate-limit` を Python 3.15.0rc3 で再検証し、lane-local lint/format/typecheck/test/coverage/audit の結果を README に記録した。
+- final 未公開時の sentinel として、公開後に同じ lane gate を再実行する条件を維持した。
 
 ---
 
@@ -108,15 +120,18 @@ _Depends:_ task-specific dependencies below（5.1: 2.2, 4.1 / 5.2: 3.3, 5.1）
 _Requirements:_ 1.1, 1.2, 1.3, 1.4, 1.5, 2.3, 3.1, 3.2, 3.3, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 5.3
 _Traces:_ REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-008, REQ-011, REQ-012, REQ-013, REQ-015, REQ-016, REQ-017, REQ-018, REQ-019, REQ-020, REQ-021, DES-3.1, DES-3.2, DES-3.3
 
-- [ ] 5.1 単一 evidence ledger の正規化表を更新する。月次 dependency refresh の手順には、CP315 release files と LiteLLM の release metadata による OpenAI SDK 3.x support 宣言の確認を同じチェックリストとして含める。LiteLLM が対応を宣言した場合は R2.3 の cap 撤去を試行し、compatibility test / root gates の結果、blocker、再試行条件を dated evidence として残す。cp315 blocker は `onnxruntime`・`torch`・`pydantic-core` の hub lock 版、必要 wheel tag、sdist、確認日、状態、根拠を実装日の外部状態で再確認し、月次 refresh の追記手順を明示する。intake status は H1/H2=`landed`、H3=`proposed`（5.2 の結果で遷移）、L1=`already-present` と hub file 根拠、L2–L4=`waiting` または受領済み結果、L5/L6=`rejected` を行削除なしで保持する。L4 は現行文書で「取り込まない（確認だけする）」だが、ハブ spec `009` R6 の確認が済むまでは `waiting` とし、確認結果を受けて `rejected` へ移すと注記する。更新前の各行を代替の失敗証拠として PDCA ログに引用する。beta-trial 表には最初の record として task 2 の dependency 変更（date、feature/API =「pydantic-ai-slim 2.54 系 + OpenAI SDK 2.x の非ストリーミング Chat Completions」、sandbox test = `tests/unit/test_ollama_openai_compat.py`、hub affected file = `services/api/pyproject.toml`、`pydantic-ai-slim`・`openai` の版、result、`adopt/reject/wait` recommendation）を記録する。個別の新機能 trial は、ハブより新しい pydantic-ai release がその機能を含んだ時に 1 件ずつ test と record を同じ変更で足す運用として記述し（DES-3.3）、BeeAI/LlamaIndex を凍結したまま root を今後の実験場所とする境界を明記する。
+- [x] 5.1 単一 evidence ledger の正規化表を更新する。月次 dependency refresh の手順には、CP315 release files と LiteLLM の release metadata による OpenAI SDK 3.x support 宣言の確認を同じチェックリストとして含める。LiteLLM が対応を宣言した場合は R2.3 の cap 撤去を試行し、compatibility test / root gates の結果、blocker、再試行条件を dated evidence として残す。cp315 blocker は `onnxruntime`・`torch`・`pydantic-core` の hub lock 版、必要 wheel tag、sdist、確認日、状態、根拠を実装日の外部状態で再確認し、月次 refresh の追記手順を明示する。intake status は H1/H2=`landed`、H3=`proposed`（5.2 の結果で遷移）、L1=`already-present` と hub file 根拠、L2–L4=`waiting` または受領済み結果、L5/L6=`rejected` を行削除なしで保持する。L4 は現行文書で「取り込まない（確認だけする）」だが、ハブ spec `009` R6 の確認が済むまでは `waiting` とし、確認結果を受けて `rejected` へ移すと注記する。更新前の各行を代替の失敗証拠として PDCA ログに引用する。beta-trial 表には最初の record として task 2 の dependency 変更（date、feature/API =「pydantic-ai-slim 2.54 系 + OpenAI SDK 2.x の非ストリーミング Chat Completions」、sandbox test = `tests/unit/test_ollama_openai_compat.py`、hub affected file = `services/api/pyproject.toml`、`pydantic-ai-slim`・`openai` の版、result、`adopt/reject/wait` recommendation）を記録する。個別の新機能 trial は、ハブより新しい pydantic-ai release がその機能を含んだ時に 1 件ずつ test と record を同じ変更で足す運用として記述し（DES-3.3）、BeeAI/LlamaIndex を凍結したまま root を今後の実験場所とする境界を明記する。
   _Boundary:_ `docs/hub-intake-2026-10.md`
   _Depends:_ 2.2, 4.1
   _Requirements:_ 2.3, 3.1, 3.2, 4.1, 4.2, 4.3, 4.4, 5.1, 5.2, 5.3
   _Traces:_ REQ-008, REQ-011, REQ-012, REQ-015, REQ-016, REQ-017, REQ-018, REQ-019, REQ-020, REQ-021, DES-3.1, DES-3.2, DES-3.3
-- [ ] 5.2 immutable hub commit に対して runner を Python 3.14 で実行し、日付・commit・Python・migration diff・resolved versions・全 command・pass/fail/skip と理由・warning origin・audit を ledger に記録する。artifact はリポジトリ外の一時的な置き場なので、ledger には `summary.md` 冒頭の要点節と `migration.diff` の内容を転記し、artifact path は参考情報としてだけ添える。warning table には §2.3 の罠 2（`TestClient` → `StarletteDeprecationWarning`）と罠 3（redis-py の `asyncio.iscoroutinefunction`）の 3.14 での観測結果を、発火した／発火しない（経路未通過を含む）として 1 行ずつ載せる。required phases（standalone `uv lock`・`uv sync`・`api:check`）がすべて exit 0 の場合だけ hub dependency-policy §8.1 satisfied と判定し、失敗または blocked の場合はその状態と再実行条件を記録する。同じ変更で H3 の status を、§8.1 satisfied なら `verified`、それ以外なら `proposed` のまま失敗段と再実行条件を併記する形に更新する。将来 cp315 blocker が全て wheel-ready になった場合は同じ手順を 3.15 で反復する運用リンクも残す。
+- [x] 5.2 immutable hub commit に対して runner を Python 3.14 で実行し、日付・commit・Python・migration diff・resolved versions・全 command・pass/fail/skip と理由・warning origin・audit を ledger に記録する。artifact はリポジトリ外の一時的な置き場なので、ledger には `summary.md` 冒頭の要点節と `migration.diff` の内容を転記し、artifact path は参考情報としてだけ添える。warning table には §2.3 の罠 2（`TestClient` → `StarletteDeprecationWarning`）と罠 3（redis-py の `asyncio.iscoroutinefunction`）の 3.14 での観測結果を、発火した／発火しない（経路未通過を含む）として 1 行ずつ載せる。required phases（standalone `uv lock`・`uv sync`・`api:check`）がすべて exit 0 の場合だけ hub dependency-policy §8.1 satisfied と判定し、失敗または blocked の場合はその状態と再実行条件を記録する。同じ変更で H3 の status を、§8.1 satisfied なら `verified`、それ以外なら `proposed` のまま失敗段と再実行条件を併記する形に更新する。将来 cp315 blocker が全て wheel-ready になった場合は同じ手順を 3.15 で反復する運用リンクも残す。
   _Boundary:_ `docs/hub-intake-2026-10.md`
   _Depends:_ 3.3, 5.1
   _Requirements:_ 1.1, 1.2, 1.3, 1.4, 1.5, 3.3, 4.4, 5.2
   _Traces:_ REQ-001, REQ-002, REQ-003, REQ-004, REQ-005, REQ-013, REQ-018, REQ-020, DES-1.1, DES-3.1, DES-3.3
 
 ### Implementation Notes
+
+- intake を canonical status table、CPython 3.15 blocker table、monthly refresh checklist、beta-trial ledger に正規化した。
+- hub `3646b47` の Python 3.14 実測は required `api:check` が失敗したため、§8.1 は未充足、H3 は正しく `proposed` のまま保持した。

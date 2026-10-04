@@ -1,6 +1,7 @@
 # ハブへの取り込み候補（2026-10-03）
 
 - **作成日**: 2026-10-03
+- **最終更新日**: 2026-10-04
 - **宛先**: `vaz-agentic-ai-next/services/api`（FastAPI + Pydantic AI レーンの正本。ハブ ADR-0007）
 - **取り込み手順**: ハブの `docs/dependency-policy.md` §8。ファイルのコピーではなく、ハブ側で再実装する
   （本リポジトリの Constitution III「ベンダリング禁止」とも同じ考え方）
@@ -19,19 +20,58 @@
 
 ---
 
-## 1. 結論
+## 1. Evidence ledger（正規化表）
 
-| # | 変更 | 出所 | ハブへ | 一言 |
-|---|---|---|---|---|
-| H1 | slowapi を `limits` 直結の自前実装に置き換え、`fastapi<0.137` / `starlette<1.0` を外す | `patterns/rate-limit/` | **取り込む**（検証済み） | 計画 §4 の 1〜4 がすべて green。1 PR で入れる |
-| H2 | starlette の `--ignore-vuln` 5 件を削除 | 同上 | **取り込む**（H1 と同じ PR） | 5 件とも修正版は 1.x 系にしかなく、最も新しいものが 1.3.1。`starlette>=1.3.1` で閉じる |
-| H3 | Python の版上げ | 同上 | **3.14 なら取り込む。3.15 はまだ不可** | 3.15 では onnxruntime / torch の wheel が無く、依存一式が解決できない。H1 とは別 PR |
-| L1 | `agent.run()` に `UsageLimits` と全体のタイムアウトを付ける | laughing-ritchie `src/…/api/routes/chat.py`、`config.py` | **取り込む（要修正）** | 本番 API に必要なガードレール。ただし 429 の使い方をハブの契約に合わせて変える（§3.2） |
-| L2 | モデルが出した `sources` を、実際のツール結果と照合する | laughing-ritchie `chat.py::_grounded_sources` | **考え方だけ取り込む** | コードはサンドボックスの `search_kb` スタブ専用。ハブの RAG の引用検証と比較して判断する |
-| L3 | ツールの docstring にはモデル向けの説明だけを書き、開発者向けメモはコメントへ移す | laughing-ritchie `agents/chat_agent.py` | **規約として取り込む** | コード変更ではなく、ハブのツール docstring の監査項目 |
-| L4 | 自前のモデル呼び出しループで `function_tools` を送り、1 ターン内の全ツール呼び出しに応答する | laughing-ritchie `patterns/frameworks/pydantic-ai/…/autonomous_agent.py` | **取り込まない（確認だけする）** | パターン集のレーンの修正。ハブが `Agent.run` を使っていれば pydantic-ai が処理するので関係ない |
-| L5 | deep-research のサブ研究者に brief（目的と対象外）を渡す | laughing-ritchie `patterns/deep-research/…` | **取り込まない** | パターン集のレーンの修正。ハブに相当機能があるときだけ参照する |
-| L6 | テスト基盤（`tests/conftest.py` の環境変数上書き） | laughing-ritchie | **取り込まない** | 本リポジトリのフィクスチャ専用 |
+status は `landed` / `verified` / `proposed` / `already-present` / `waiting` / `rejected` のいずれかで管理する。
+完了・不採用になった行も削除せず、判断履歴として保持する。確認対象の immutable hub commit は
+`3646b473db41d853380d7088bf381f1f6ce1e08c`（2026-10-03、PR #76）である。
+
+| ID | 変更 | status | 2026-10-04 の根拠・次の条件 |
+|---|---|---|---|
+| H1 | slowapi を `limits` 直結の自前実装へ置換 | `landed` | hub `3646b47` の `services/api/app/middleware/rate_limit.py` と `services/api/pyproject.toml`。PR #76 で反映済み |
+| H2 | starlette の audit suppression 5 件を版上げで解消 | `landed` | hub `3646b47` は `starlette>=1.3.1,<2.0` / resolved 1.7.0、旧 starlette 5 件の suppression を削除済み |
+| H3 | hub `services/api` を Python 3.14 へ移行 | `proposed` | §6 の immutable-commit verification が §8.1 satisfied のときだけ `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
+| L1 | `UsageLimits` と request / stream timeout | `already-present` | hub `3646b47` の `services/api/app/api/v1/agent.py` と `_stream.py` に `UsageLimits`、request timeout、stream event timeout が存在 |
+| L2 | 生成された `sources` を実ツール結果と照合 | `waiting` | hub spec `009` R6 の確認結果待ち。受領時に hub の RAG node ID 照合有無を記録する |
+| L3 | tool docstring をモデル向け説明だけに限定 | `waiting` | hub spec `009` R6 の tool docstring audit 結果待ち |
+| L4 | direct `Model.request()` loop の tool contract | `waiting` | 現行判断は「取り込まない（確認だけする）」。hub spec `009` R6 で direct call を確認後、影響なしなら行を残したまま `rejected` へ移す。`3646b47` では health probe に direct call が 1 件あるが agent tool loop ではない |
+| L5 | deep-research の sub-researcher brief | `rejected` | hub intake 対象外の pattern-lane 固有変更。相当機能が将来できる場合だけ新規 trial として再評価 |
+| L6 | sandbox 固有 test fixture | `rejected` | hub へコピーしない。sandbox の fixture 専用 |
+
+### 1.1 Python 3.15 blocker ledger
+
+必要 wheel tag は macOS / Linux の実 runner を含む `cp315`。版は hub `3646b47` の
+`services/api/uv.lock` に固定されたものを使い、最新 upstream 版へ読み替えない。
+
+| package | hub lock 版 | 必要 artifact | sdist | 確認日 | 状態 | 根拠 |
+|---|---:|---|---|---|---|---|
+| `onnxruntime` | 1.30.0 | `cp315` wheel | なし | 2026-10-04 | blocked | PyPI release files に `cp315` wheel / sdist ともに無し |
+| `torch` | 2.14.0 | `cp315` wheel | なし | 2026-10-04 | blocked | PyPI release files に `cp315` wheel / sdist ともに無し |
+| `pydantic-core` | 2.46.5 | `cp315` wheel | `pydantic_core-2.46.5.tar.gz` あり | 2026-10-04 | source-only | `cp315` wheel は無く、Rust source build になる |
+
+### 1.2 月次 dependency refresh checklist
+
+`chore/dependency-security-refresh` の各月次作業で、同じ PR / evidence 更新として次を実施する。
+
+1. hub の当月対象 commit と `services/api/uv.lock` から上表 3 package の **lock 版**を取り直す。
+2. PyPI release files で lock 版の `cp315` wheel tag と sdist の有無を確認し、日付・状態・file name を上表へ追記する。
+   3 package がすべて必要 platform の `cp315` wheel-ready になった場合だけ、§6 と同じ runner を `--python 3.15` で反復する。
+3. PyPI の最新 LiteLLM release metadata で OpenAI SDK 3.x support 宣言を確認する。2026-10-04 の最新
+   `litellm 1.104.0` は `openai>=2.20.0,<3.0.0` のため未対応。
+4. LiteLLM が `openai>=3` を宣言した月は、R2.3 に従い root の direct `openai>=2.47.0,<3.0.0` と cap を撤去し、
+   `pydantic-ai-slim` の `openai` extra へ戻す trial を行う。`tests/unit/test_ollama_openai_compat.py`、
+   `tests/unit/test_litellm_dependency_floor.py`、`mise run check`、`mise run cov`、`uv run pip-audit` の結果、
+   blocker、再試行条件を日付付きで本 ledger と Root baseline run に残す。失敗時は cap を保持し、暗黙に別構成へ移行しない。
+5. L2–L4 は hub spec `009` R6 の受領結果を確認し、行を削除せず status と根拠を更新する。
+
+### 1.3 pydantic-ai beta trial ledger
+
+BeeAI / LlamaIndex lane は比較用として凍結し、今後の pydantic-ai beta trial は root を既定の実験場所とする。
+hub より新しい pydantic-ai release が対象機能を含んだ時に、**1 機能につき 1 test + 1 record** を同じ変更で追加する。
+
+| date | feature / API | sandbox test | hub affected file | versions | result | recommendation |
+|---|---|---|---|---|---|---|
+| 2026-10-04 | `pydantic-ai-slim` 2.54 系 + OpenAI SDK 2.x の非ストリーミング Chat Completions | `tests/unit/test_ollama_openai_compat.py` | `services/api/pyproject.toml` | `pydantic-ai-slim==2.54.0`; `openai==2.54.0`; `litellm==1.103.2` | normal response、timeout forwarding、request payload、error mapping が green。root gates / coverage / audit も green | `adopt`: 2.54 系は OpenAI 2.x compatibility contract を伴って採用可。`pydantic-ai-slim[openai]` の復帰と OpenAI 3.x は LiteLLM 対応まで `wait` |
 
 ---
 
@@ -111,16 +151,15 @@ chromadb 3 件と nltk 1 件はこの変更と無関係なので残す。
 
 ### 2.5 Python の版上げ（H3）は別 PR、上げ先は 3.14
 
-- **3.15: 解決できない。** ハブの `services/api` の `pyproject.toml`（slowapi 削除・上限解除済み）で `uv lock` が失敗する
-  （#40 で確認）。原因は `chromadb>=0.6.3,<1.0` → `onnxruntime`。加えて `sentence-transformers` → `torch` も同じ状態で、
-  2026-10-03 時点の PyPI で onnxruntime 1.30.0・torch 2.14.1 とも cp315 の wheel も sdist も無い（回避策がない）。
-- **3.14: 解決する**（#40 で `uv lock` まで確認。`uv sync` とテストは未実施）。wonderful-johnson の別実装は
-  3.14.8 の venv で unit + Redis が green だったと記録しているが、#40 の実装は `requires-python = ">=3.15"` のため
-  3.14 では実行していない。H3 の PR で `uv sync` とテストを 3.14 で通すこと。
-- 3.15 では pydantic 2.13.5 が要求する pydantic-core 2.46.5 に cp315 wheel が無く、Rust のソースビルドになる
-  （CI で約 3 分。キャッシュが効けば 2 回目以降は不要）。
-
-H1 が main で安定した後に、`.python-version` / `mise.toml` / `test_python_version_pin.py` を 3.14 へ上げる。
+- **3.15: まだ解決できない。** 2026-10-04 に hub `3646b47` の lock 版を再確認した結果は §1.1 のとおり。
+  `onnxruntime==1.30.0` と `torch==2.14.0` には `cp315` wheel / sdist が無く、
+  `pydantic-core==2.46.5` は sdist のみで `cp315` wheel が無い。3 package が必要 platform の wheel-ready に
+  なるまで 3.15 verification は開始しない。
+- **3.14: lock / sync は解決するが、gate は未達。** §6 の実測では standalone `uv lock` と `uv sync` は exit 0。
+  ただし `api:check` は Ruff の Python 3.14 `UP037` 4 件で exit 1。独立 test diagnostic も
+  `asyncio.iscoroutinefunction` の `DeprecationWarning` を error として 58 件失敗したため、H3 は `proposed` のまま。
+- H3 の hub PR は `services/api/.python-version`、`pyproject.toml` の Python floor / Ruff target、
+  `test_python_version_pin.py` を同時に更新し、§6 の blocker を解消して同じ immutable-commit runner を再実行する。
 
 ---
 
@@ -203,10 +242,11 @@ H1 が main で安定した後に、`.python-version` / `mise.toml` / `test_pyth
 
 | 順 | 作業 | 場所 |
 |---|---|---|
-| 1 | H1 + H2 を 1 PR で取り込む（§2.2 のチェックリストと §2.3 の罠） | ハブ |
-| 2 | L1 を §3.2 の修正を加えて取り込む。H1 の 429 の形が決まった後のほうが、ステータスと `code` を揃えやすい | ハブ |
-| 3 | L2・L3 をハブの現状と突き合わせる（§3.3・§3.4 の「ハブで確認すること」） | ハブ |
-| 4 | H1 が安定した後、Python を 3.14 へ上げる（H3）。`uv sync` とテストを 3.14 で通す | ハブ |
+| 1 | H3 の Python 3.14 migration PR で Ruff `UP037` 4 件を修正する | ハブ |
+| 2 | `llama-index-workflows` / Chroma telemetry が Python 3.14 で呼ぶ `asyncio.iscoroutinefunction` の対応版を取り込み、warning-as-error の 58 failures を解消する | ハブ |
+| 3 | immutable commit を §6 と同じ runner で再検証し、required 3 phases が全て exit 0 の場合だけ H3 を `verified` へ移す | sandbox → ハブ |
+| 4 | hub spec `009` R6 の L2–L4 確認結果を受領し、ledger の行を削除せず status を更新する | ハブ → sandbox |
+| 5 | 月次 refresh で LiteLLM OpenAI 3 metadata と cp315 blocker を §1.2 の手順で再確認する | sandbox |
 
 ---
 
@@ -218,3 +258,82 @@ H1 が main で安定した後に、`.python-version` / `mise.toml` / `test_pyth
 | 日付 | Python | 主な resolved versions | `uv lock` | `uv sync` | `mise run check` | `mise run cov` | `uv run pip-audit` | `mise run patterns:check` |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-04 | 3.14（3.14.5 interpreter / mise 3.14.8 tool） | `ibm-watsonx-ai` 1.8.0+ 系（ModelInference import 済み green、ADR-1 再測定）、`pydantic-ai-slim` 2.31.1、`pydantic-core` 2.46.5 | 変更なし（既存 lock を再利用、`uv sync` のみ実施） | exit 0（`uv sync --all-groups`） | exit 0（lint/format/typecheck/test: 323 passed, 4 skipped） | exit 0（98.51% ≥ 98% ratchet） | exit 0（No known vulnerabilities found） | exit 0（deep-research 3.13.7 / hitl 3.14.5 / rate-limit 3.15.0rc2、各レーン green、root 変更の影響なし） |
+| 2026-10-04（spec 014 task 2.2, option (c)） | 3.14（3.14.5 interpreter / mise 3.14.8 tool） | `pydantic-ai-slim` 2.31.1→2.54.0（hub-verified floor、`afbe6eb`/2026-10-03 確認）、`openai` を `pydantic-ai-slim[openai]` extra 経由から root 直接依存 `>=2.47.0,<3.0.0`（当初は `>=2.20.0,<3.0.0` としたが、独立 VDD review を契機に httpx2 対応下限へ訂正——下記参照）へ変更（resolve 後 2.54.0、変化なし）、`litellm` 1.103.2（resolve 結果は変化なし。ただし 3rd pass VDD review を契機に `litellm>=1.96.2` という明示的な version floor を `[project.optional-dependencies] litellm` と `[dependency-groups] dev` の両方に追加——root `openai` 下限だけでは litellm 1.83.0 の rollback を拒否できない（1.83.0 は `openai>=2.8.0` を無上限で宣言し、訂正後の root range 内でも trivially 満たされてしまう）ため、`tests/unit/test_litellm_dependency_floor.py` で manifest 宣言・installed 版の両方を contract 化した）。副次発見: この floor から `OpenAICompatibleProvider`（Ollama 含む）が既定で `httpx2.AsyncClient` を使うようになり、`respx` では mock できないため `tests/unit/test_ollama_openai_compat.py` の request-path テストを `httpx2.MockTransport` へ移行（`respx` dev 依存は task 2.1 の respx 版が唯一の消費者で、task 2.2 の書き換えでゼロになった——削除はせず pyproject.toml にコメントで記録）。**訂正（2026-10-04、独立 VDD review）**: 当初 `openai>=2.20.0,<3.0.0` を宣言したが、`openai` が `httpx2.AsyncClient` を `http_client=` として受理できるのは `2.47.0` 以降のみ（2.46.0 以前は provider 構築時に `TypeError`、連番 venv install で実測確認）。litellm の一部 patch release（1.83.2→`openai==2.30.0`、1.83.14→`openai==2.24.0`、いずれも PyPI JSON API で確認）はこの安全下限より古い openai を exact pin しており、当初の下限ではこれらへの resolve を防げなかった。`>=2.47.0,<3.0.0` へ訂正し、`test_installed_openai_sdk_meets_httpx2_transport_floor` を追加（PROVE evidence 済み）。`httpx2` は dev 依存として明示宣言（test が直接 import するため、PyYAML と同じ理由）。 | 変更あり（`mise exec -- uv lock`: Resolved 138 packages、pydantic-ai-slim/pydantic-graph を 2.31.1→2.54.0 に更新。`httpx2`/`httpcore2` 2.13.1 は本 task 以前から既に lock に存在——`genai-prices` 経由——していたことを `git show HEAD:uv.lock` で確認済み。新規に resolve されたのではなく、`pydantic-ai-slim` の provider 実装が既存の httpx2 を実際に使い始めた。`litellm>=1.96.2` floor 追加後も resolve 結果は 1.103.2 のまま不変） | exit 0（`uv sync --all-groups --all-extras`: 3 packages 入れ替え。openai floor 訂正後の再 sync でも resolve 結果は不変） | exit 0（lint/format/typecheck/test: 328 passed, 4 skipped → `litellm>=1.96.2` floor の contract test（`tests/unit/test_litellm_dependency_floor.py`、3 件）追加後、最終的に **332 passed, 4 skipped**） | exit 0（98.51% ≥ 98% ratchet） | exit 0（No known vulnerabilities found） | exit 0（deep-research（68 passed, 1 skipped, coverage 100%） / hitl（73 passed, 2 skipped, coverage 100%） / rate-limit（27 passed, 3 skipped, coverage 100%）各レーン green、root 変更の影響なし） |
+
+---
+
+## 6. Immutable hub commit verification（Python 3.14）
+
+artifact は一時的な参照物であり正本ではない。以下は
+`/private/tmp/spec014-hub-3646b47-py314-20261004-v3` の `summary.md` 冒頭と
+`migration.diff` を本 ledger へ転記したもの。artifact path は再確認の便宜だけに記す。
+
+### 6.1 Ledger essentials
+
+- **実行日**: 2026-10-04
+- **Hub commit**: `3646b473db41d853380d7088bf381f1f6ce1e08c`
+- **Python**: 3.14（実 interpreter 3.14.5）
+- **Overall verdict**: `failed`
+- **Hub dependency-policy §8.1**: **not satisfied**
+- **Resolved versions**: 204 packages。主要版は `pydantic-ai-slim==2.52.0`、`pydantic-core==2.46.5`、
+  `litellm==1.103.1`、`openai==2.54.0`、`chromadb==0.6.3`、`llama-index-workflows==2.25.0`、
+  `onnxruntime==1.30.0`、`torch==2.14.0`、`starlette==1.7.0`、`redis==8.1.0`。
+- **Commands**: `uv lock` exit 0; `uv sync` exit 0; `mise run api:check` exit 1;
+  diagnostic `api:lint` exit 1; diagnostic `api:test:ci` exit 1; diagnostic `api:audit` exit 0。
+- **Test diagnostic**: 1624 total / 1542 passed / 58 failed / 24 skipped / 0 errors、coverage 92.94%（下限 80%）。
+- **Skip reasons**: Chroma model download 6、Docker daemon unavailable 7、Redis unavailable 9、Ollama live 1、
+  optional `LOGFIRE_TOKEN` empty 1。これらは skip として記録し、service を自動 provision していない。
+- **Audit**: `No known vulnerabilities found, 4 ignored`。ignore は hub 自身の `api:audit` policy による。
+- **Required failure**: `api:check` は Python 3.14 Ruff `UP037` 4 件で停止した
+  （`app/workflows/exceptions.py` 2 件、`tests/benchmarks/utils.py` 1 件、
+  `tests/unit/api/v1/test_stream_lifecycle.py` 1 件）。そのため typecheck / pytest / audit は required gate 内では未到達。
+- **Test failure blocker**: diagnostic pytest は warning-as-error により
+  `asyncio.iscoroutinefunction` の `DeprecationWarning` で 58 件失敗。origin は主に
+  `workflows/runtime/types/step_function.py:227`（`llama-index-workflows`）と
+  `chromadb/telemetry/opentelemetry/__init__.py:128`。
+- **再実行条件**: Ruff 4 件を Python 3.14 形式へ直し、上記 2 dependency path の
+  `asyncio.iscoroutinefunction` 呼び出しを対応版へ更新した immutable hub commit を作る。その commit に対して
+  `uv lock` / `uv sync` / `api:check` の全てが exit 0 になるまで H3 は `proposed` のままにする。
+
+### 6.2 Warning observations
+
+| Trap / warning | Python 3.14 observation | origin / reason |
+|---|---|---|
+| §2.3 trap 2: `TestClient` → `StarletteDeprecationWarning` | **発火しない** | diagnostic log に category / `testclient.py` occurrence なし。resolved `starlette==1.7.0` / `httpx2==2.13.1` の test path で未観測 |
+| §2.3 trap 3: redis-py `asyncio.iscoroutinefunction` | **発火しない（経路未通過）** | Redis live tests 9 件は service unavailable で skip。`limits` は `redis_connect_func` を渡さず、log に `redis/.../connection.py` origin なし |
+| additional blocker: `asyncio.iscoroutinefunction` | **発火して test failure** | `llama-index-workflows` step wrapper と Chroma telemetry が warning-as-error に抵触。58 failures の主因 |
+| non-deprecation warnings | 7 warnings | `LogfireNotConfiguredWarning` 5、`PytestUnknownMarkWarning` 1、file-size policy `UserWarning` 1 |
+
+### 6.3 Migration diff（転記）
+
+```diff
+--- a/services/api/.python-version
++++ b/services/api/.python-version
+@@ -1 +1 @@
+-3.13
++3.14
+--- a/services/api/pyproject.toml
++++ b/services/api/pyproject.toml
+@@ -3,7 +3,7 @@
+ readme = "README.md"
+-requires-python = ">=3.13"
++requires-python = ">=3.14"
+@@ -105,7 +105,7 @@
+ [tool.ruff]
+ line-length = 100
+-target-version = "py313"
++target-version = "py314"
+--- a/services/api/tests/unit/test_python_version_pin.py
++++ b/services/api/tests/unit/test_python_version_pin.py
+@@ -36,7 +36,7 @@
+ PYPROJECT = _REPO_ROOT / "pyproject.toml"
+
+-_EXPECTED_SERIES = "3.13"
++_EXPECTED_SERIES = "3.14"
+```
+
+### 6.4 Python 3.15 follow-up
+
+§1.1 の 3 blocker が必要 platform の `cp315` wheel-ready になった時点で、同じ runner を
+`--python 3.15` にして反復する。3.14 が failed の間に 3.15 を成功扱いへ飛び越えず、各 series の
+required phases と blocker を別 record として残す。

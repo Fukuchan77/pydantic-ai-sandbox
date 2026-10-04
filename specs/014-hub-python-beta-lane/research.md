@@ -23,7 +23,7 @@
 
 - **Question**: Python 3.14 でコマンドを実行するだけで「all green」になるか。
 - **Findings**: ならない。ハブの interpreter pin test は 3.13 を正しく固定しているため、scratch に
-  spec 009 R7.2 相当の `.python-version`、期待 series、Ruff target の差分を当てた後に判定する。
+  spec 009 R7.2 相当の `services/api/.python-version`、期待 series、Ruff target の差分を当てた後に判定する。
   元 commit と適用差分は evidence に併記する。
 - **Evidence**: `spec.md:55-58`; hub `specs/009-agent-ui-and-beta-intake/tasks.md:191-208`。
 
@@ -38,6 +38,10 @@
   通常応答と timeout 指定を処理した。ただし 2.54.0 の公式 `openai` extra は `openai>=3.19.0` であり、
   この組合せは upstream の公式サポート範囲外である。従って request-path 回帰テストを継続保守し、
   lock された OpenAI SDK 版を evidence に残す必要がある。
+- **Note (2026-10-04, task 2.2 第 2 回 VDD review 対応)**: 上記 `openai>=2.20.0,<3.0.0` の
+  下限は訂正済み（`>=2.47.0,<3.0.0`、httpx2 transport 対応下限）。AD-2 下の
+  Amendment ブロックに訂正の全文と、`litellm` 側に独立 floor（`>=1.96.2`）が
+  必要と判明した理由を記録する。
 - **Evidence**: `gap-analysis.md:157-190`; `pyproject.toml:18-60`;
   `src/pydantic_ai_sandbox/llm/providers/ollama.py:45-84`;
   `https://pypi.org/pypi/pydantic-ai-slim/2.54.0/json`;
@@ -108,8 +112,8 @@
 |---|---|---|---|
 | CPython | root 3.14; rate-limit 3.15 prerelease | beta baseline / 3.15 smoke | root scratch 3.14 green; 3.15 rc3 は正式版延期を確認 |
 | `pydantic-ai-slim` | hub 以上（計画時 2.54.0） | beta API と Ollama model integration | dependency resolve と既存 suite は green; HTTP path test は実装フェーズの採用ゲート |
-| `openai` | `>=2.20.0,<3.0.0`（実測 2.54.0） | Ollama-compatible client + litellm coexistence | 2.54.0 request path は確認、upstream 公式範囲外 |
-| `litellm` | vulnerable 1.83.0 への rollback 禁止 | optional Watsonx transport | 1.103.2 resolve を scratch で確認 |
+| `openai` | `>=2.47.0,<3.0.0`（実測 2.54.0。当初 `>=2.20.0` としたが httpx2 transport 対応下限不足で訂正、AD-2 amendment 1 参照） | Ollama-compatible client + litellm coexistence | 2.54.0 request path は確認、upstream 公式範囲外 |
+| `litellm` | `>=1.96.2`（PYSEC-2026-4066 の fix 版。`openai` 下限単独では vulnerable 1.83.0 への rollback を拒否できないため独立 floor が必要、AD-2 amendment 2 参照） | optional Watsonx transport | 1.96.2・現行 lock 1.103.2 とも pip-audit clean を確認（2026-10-04） |
 | `ibm-watsonx-ai` | 現行 floor を維持 | Python 3.14 import contract | import test を実装フェーズで固定 |
 | `uv`, `mise` | 既存宣言 | reproducible lock/sync/gates | repository と hub の既存 task を再利用 |
 
@@ -139,6 +143,66 @@ hub `services/api/uv.lock`。版は implementation 時の lock 結果を正本�
   transport 削除は既存 capability を失うため採らない。
 - **Consequences**: ADR-2 は「pydantic-ai を古く保つ」から「SDK extra を分離し、安全な litellm を保つ」へ更新する。
   litellm が OpenAI 3 を宣言した時の撤去条件は残す。
+
+- **Amendment (2026-10-04, task 2.2 実装後、独立 VDD review を契機に追記)**:
+  - **httpx2 既定 transport の発見と openai 下限の訂正**: `pydantic-ai-slim>=2.54.0` の
+    `OpenAICompatibleProvider._get_http_client()` は、呼び出し側が `http_client=` を渡さない場合に
+    `httpx2.AsyncClient`（legacy `httpx` とは別の、ecosystem 移行期に共存する独立パッケージ）を既定で
+    構築する。root の `OllamaProvider` 構築はこれを渡さないため、常に httpx2 を使う。openai SDK が
+    `httpx2.AsyncClient` を `http_client=` として受理できるのは `openai>=2.47.0`（2.46.0 以前は
+    `openai._httpx2` モジュール自体が無く、provider 構築時に `TypeError` を raise — 連番 venv install で実測確認）
+    であるため、当初の `openai>=2.20.0,<3.0.0` 下限は不十分だった。下限を `>=2.47.0,<3.0.0` へ訂正し、
+    実行可能契約（`tests/unit/test_ollama_openai_compat.py`）に `test_installed_openai_sdk_meets_httpx2_transport_floor`
+    を追加した（pyproject.toml ADR-2 に詳細）。
+  - **respx → `httpx2.MockTransport` への mocking 機構変更は本 AD の設計を変えない**:
+    上記 httpx2 既定 transport の発見により、当初計画していた respx ベースの request-path test は
+    実際には一度も意図通り動いていなかった（respx は legacy `httpx` しか patch できず、httpx2 経由の
+    request を素通りさせる）。これは `research.md` の「Risks & open questions」に記した stop rule
+    （compatibility test が failing なら plan amendment で option (a) へ）が想定した「openai SDK が
+    pydantic-ai-slim の lock 版と動かない」という事態ではなく、*test 側の mock 機構が対象の HTTP stack を
+    捉えていなかった* という、テスト実装の不備である。検証対象の性質（レスポンス透過・request body・
+    `ModelSettings.timeout` 転送）は変わらず、mock 機構を httpx2 自身の `MockTransport`
+    （`httpx.MockTransport` の httpx2 版、追加依存不要）に差し替えただけで全て green になった。
+    よって stop rule は発火条件（SDK バージョン組み合わせの実行不能）に該当せず、plan amendment は不要と
+    判断する。この判断自体を本追記として記録する。
+
+- **Amendment 2 (2026-10-04, task 2.2 第 2 回 VDD review を契機に追記)**:
+  - **`openai` 下限単独では litellm rollback を拒否できないと判明**: 上記 amendment で `openai` 下限を
+    `>=2.47.0,<3.0.0` へ訂正したが、これは `litellm` の脆弱な巻き戻りを防ぐ目的の防御として機能しない。
+    litellm 1.83.0 の宣言は `requires-python<4.0,>=3.9`（この project の 3.14 floor を排除しない）、
+    `openai>=2.8.0`（上限なし——upstream 側の記載漏れ）であり、訂正後の range 内でも trivially 満たされる。
+    pip-audit（2026-10-04、scratch venv）で 1.83.0 が 14 件の既知脆弱性
+    （PYSEC-2026-388/391/2598/2599/2600/2601/2602/3476/3477/3479/3861/4066/4067/4070）を持つことを確認した
+    （独立 2nd-pass VDD review の指摘と一致）。
+  - **訂正（2026-10-04, task 2.2 第 3 回 VDD review を契機に再訂正）**: 直前の記述（本 Amendment 初版）は
+    「reviewer が例示した `litellm 1.85.0` は PyPI 上に存在せず、reviewer の誤りだった」としていたが、これは
+    *この記録自体の誤り* だったと判明したため訂正する。独立に再現したところ、`litellm 1.85.0` は PyPI の
+    simple index（`https://pypi.org/simple/litellm/`）に yank されずに実在する——`uv lock`／
+    `uv pip install --dry-run` のいずれも `litellm==1.85.0`（および `1.84.0`）を明示指定すれば解決・install
+    対象として受理する（scratch repro, 2026-10-04）。先に「存在しない」と結論した根拠（
+    `pip install litellm==1.85.0` の失敗、および `pip index versions litellm` の出力が `1.83.7` から
+    `1.93.0` へ直接飛ぶように見えたこと）は、どちらも *この project を Python 3.14 で実行した pip 自身が
+    `requires-python>=3.10,<3.14` と宣言するバージョンを「対象外」としてリストから除外する*
+    という、実行環境依存のフィルタリングの副作用であって、PyPI 上の非存在を意味しない
+    （`pip-audit` の `Ignored the following versions that require a different python version:` 出力に
+    `1.85.0 Requires-Python >=3.10,<3.14` が明示的に列挙されているのが直接の証拠）。reviewer の指摘は
+    正しく、本記録の以前の版が誤っていた。
+  - **1.84.0〜1.92.x は「除外されている」のではなく「range 解決では到達しない」**: この中間系列
+    （`PYSEC-2026-4066` の fix progression を一部含むが完全ではない）は `requires-python<3.14` を宣言するため、
+    *この project の実際の依存グラフでの範囲（`>=`）解決* ではこの project の 3.14 floor から選ばれることは
+    ない——実際、`litellm` floor を外した状態で project 全体の scratch copy を `uv lock` した再現では、
+    bare `"litellm"` が直接 `1.103.2`（最新に近い clean 版）へ解決され、1.84.0〜1.92.x 系列には一度も
+    触れなかった（2026-10-04 確認）。しかし *明示的な exact pin*（`litellm==1.84.0` のような手動指定や、
+    手で編集された lockfile）であれば `uv` はこの requires-python 不一致を無視して受理する——これは
+    `tests/unit/test_litellm_dependency_floor.py` の `test_installed_litellm_meets_vulnerability_floor` が
+    「lock drift / 手動編集された lockfile」への defense-in-depth として既に想定していたまさにそのシナリオで
+    あり、この floor test の存在理由を変えるものではない。
+  - **採用した fix**: `litellm` の独立した version floor を明示的に宣言する——
+    `litellm>=1.96.2`（14 件の脆弱性のうち最も fix が遅かった `PYSEC-2026-4066` の、litellm の並行
+    maintenance branch 群における最早 fix 版。pip-audit で `1.96.2`・現行 lock の `1.103.2` 共に
+    clean と確認済み、2026-10-04）。`pyproject.toml` の `[project.optional-dependencies] litellm` と
+    `[dependency-groups] dev` の両方に反映し、`tests/unit/test_litellm_dependency_floor.py` で
+    manifest 宣言と installed 版の両方を contract 化した。
 
 ### AD-3: ルート Python 3.14 化はハブ evidence と独立して同 feature で行う
 

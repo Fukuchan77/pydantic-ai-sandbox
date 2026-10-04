@@ -74,6 +74,10 @@ run = "uv run pre-commit run --all-files --hook-stage manual"
 description = "Validate .pre-commit-config.yaml parses and its hooks are well-formed (Req 8.4, CI-cheap form)."
 run = "uv run pre-commit validate-config .pre-commit-config.yaml"
 
+[tasks."hub:verify"]
+description = "Verify an immutable hub commit under Python 3.14/3.15 and emit evidence artifacts."
+run = "bash scripts/verify-hub-python.sh"
+
 [tasks."test:integration"]
 description = "Run the Ollama integration lane; gated by RUN_INTEGRATION_OLLAMA=1 inside the suite."
 run = "RUN_INTEGRATION_OLLAMA=1 uv run pytest tests/integration"
