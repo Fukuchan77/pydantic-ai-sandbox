@@ -79,7 +79,7 @@ Python 3.15 series] --> RATECHECK[Lane-local check]
   fake hub repository と fake `mise` executable で hermetic に固定する。
 - **Public interface**:
   - pytest contract tests; network、real hub、real package install は使わない。
-  - fake repository には `services/api/` 以外の sentinel (`evals/`, workflow, generated schema) を置き、
+  - fake repository には `services/api/` 以外の sentinel (`packages/evals/`, workflow, generated schema) を置き、
     scratch に存在することを assert する。
   - fake `mise` は受け取った argv と環境変数を記録する。`MISE_TRUSTED_CONFIG_PATHS` が scratch パスだけを含み、
     ツール自動インストール抑止の設定が渡り、ユーザーの mise state ディレクトリ（`HOME` を tmp に差し替えて観測）へ
@@ -100,6 +100,13 @@ Python 3.15 series] --> RATECHECK[Lane-local check]
 - **Public interface**:
   - `pyproject.toml`: `requires-python >=3.14`, `pydantic-ai-slim[logfire]>=2.54.0`（target hub commit が更新された場合はその lock 版以上）,
     runtime `openai>=2.20.0,<3.0.0`, optional/dev `litellm`。
+    _Amendment (2026-10-04, task 2.2 第 2 回 VDD review 対応)_: `openai` の下限は
+    `>=2.47.0,<3.0.0` に訂正済み（httpx2 transport 対応下限、research.md AD-2 の
+    amendment 参照）。optional/dev `litellm` も bare 宣言ではなく `litellm>=1.96.2`
+    （PYSEC-2026-4066 の fix 版、pip-audit 確認済み）に訂正済み——`litellm` 単体の
+    宣言は root の `openai` 下限だけでは脆弱な `1.83.0` への rollback を拒否できない
+    （`1.83.0` は `openai>=2.8.0` と無上限宣言のため corrected range 内で満たされる）
+    ため、独立した floor が必要と判明した。
   - `.python-version`, `mise.toml`, Ruff, Pyright, pre-commit, CI, README の baseline を 3.14 に同期。
   - `uv.lock` が resolved versions の正本。
   - baseline 変更（Python 3.14 化と pydantic-ai/OpenAI dependency 変更）ごとに、憲法 Principle 6 に従い
@@ -119,6 +126,12 @@ Python 3.15 series] --> RATECHECK[Lane-local check]
   Ollama provider から `/v1/chat/completions` までの実 request path を hermetic に検証する。
 - **Public interface**:
   - respx mock の OpenAI-compatible endpoint。
+    _Amendment (2026-10-04, task 2.2 実装中の発見)_: 実装は respx ではなく
+    `httpx2.MockTransport` を使う。pydantic-ai-slim 2.54.0 の OpenAI-compatible
+    provider（Ollama 含む）は明示的な `http_client` 未指定時に `httpx2.AsyncClient`
+    をデフォルト構築するため、legacy `httpx` のみを patch する respx のモック route
+    が素通りされ、実接続を試みて失敗する（`tests/unit/test_ollama_openai_compat.py`
+    の docstring に発見の経緯を記録）。
   - `OllamaProvider → OpenAIChatModel → Agent.run()` の通常応答、timeout forwarding、request body の
     model/messages を検証する。テストは実際に lock された OpenAI SDK 版を report する。
   - 同じファイルに「installed `pydantic-ai-slim` ≥ 検証対象 hub の lock 版」かつ「installed `openai` < 3」を
@@ -306,7 +319,7 @@ mise run hub:verify -- \
 | Validate | hub path は Git repository、commit は解決可能、Python は `3.14` または trigger 後の `3.15`、output は source/hub tree 外 |
 | Archive | `git -C <hub> archive <commit>` のみを入力にし、dirty worktree を読まない |
 | Assert scope | `services/api`, `evals`, `.github/workflows/api.yml`, `packages/schemas/src/generated` の存在を検査 |
-| Migrate | scratch 内だけで `.python-version`、interpreter expectation、Ruff target を指定 series へ変更し、`migration.diff` を保存。期待文字列不一致なら fail closed |
+| Migrate | scratch 内だけで `services/api/.python-version`、interpreter expectation、Ruff target を指定 series へ変更し、`migration.diff` を保存。期待文字列不一致なら fail closed |
 | Resolve | `services/api` で指定 Python を使い `uv lock` → `uv sync` を個別に実行し、それぞれの exit・ログ、lock diff、resolved versions を保存する。`api:check` 内の sync が失敗しても R1.2 の `uv lock`・`uv sync` 結果が独立に残るようにする。`uv lock` 失敗時は `blocked` |
 | Environment | gate 呼び出しにだけ `MISE_TRUSTED_CONFIG_PATHS=<scratch>` とツール自動インストール抑止の 4 変数 `MISE_AUTO_INSTALL=0`・`MISE_EXEC_AUTO_INSTALL=0`・`MISE_NOT_FOUND_AUTO_INSTALL=0`・`MISE_TASK_RUN_AUTO_INSTALL=0` を渡す（mise 2026.9.16 で、4 つの設定 `auto_install`・`exec_auto_install`・`not_found_auto_install`・`task.run_auto_install` がこの環境変数で `false` になることを `mise settings get` で確認、2026-10-03）。`mise trust` は実行せず、ユーザーの mise state へ書き込まない。必要ツール（uv 等）が未導入なら `blocked` として停止する |
 | Gate (verdict) | hub root から `mise run api:check` を 1 回実行。これは `uv sync`, Ruff, `ty check`, pytest unit+integration+e2e, `api:audit` の正本。standalone `uv lock`・`uv sync` とこの gate を required phases とし、3 段階がすべて exit 0 の場合だけ runner exit 0 / §8.1 satisfied とする |
@@ -328,6 +341,24 @@ script は network credential、hub URL、GitHub token を扱わない。reposit
   - `pydantic-ai-slim >= hub services/api locked version`
   - `openai < 3`
   - `litellm != 1.83.0` かつ audit green
+
+_Amendment (2026-10-04, task 2.2 第 2 回 VDD review 対応)_: 上記 3 項目は訂正済み——
+`openai < 3` だけでは `litellm` の rollback を拒否できない（`litellm==1.83.0` は
+`openai>=2.8.0` と無上限宣言のため、どの corrected `openai` range でも trivially
+満たされる）。`litellm != 1.83.0` という denylist も同様に不十分で、
+`1.83.1`〜`1.83.13`（これらは `openai` を安全下限未満へ exact pin するため実際には
+別の仕組みで排除されるが、記述としての acceptance criterion 自体は空いている）等
+個々のバージョンを除外しきれない。正しい acceptance は:
+
+- runtime: `openai>=2.47.0,<3.0.0`（httpx2 transport 対応下限、research.md AD-2
+  amendment 参照）
+- optional/dev: `litellm>=1.96.2`（PYSEC-2026-4066 の fix 版。pip-audit 確認済み、
+  2026-10-04）
+- `uv.lock` の acceptance:
+  - `pydantic-ai-slim >= hub services/api locked version`
+  - `openai` が `[2.47.0, 3.0.0)` 内
+  - `litellm >= 1.96.2` かつ audit green（`tests/unit/test_litellm_dependency_floor.py`
+    が manifest 宣言と installed 版の両方を contract 化）
 - removal trigger: litellm の release metadata が OpenAI SDK 3.x support を宣言したら、direct cap の撤去と
   upstream extra の復元を試行する。compatibility test と root gates が 3.x で green の場合だけ変更を確定し、
   失敗時は cap を維持して blocker・検証版・再試行条件を intake ledger に記録する。release metadata は月次
@@ -390,7 +421,7 @@ script は network credential、hub URL、GitHub token を扱わない。reposit
 
 - hub path が repository でない / commit が解決できない → archive 前に exit non-zero、output に入力エラーのみを記録する（1.1）。
 - output が sandbox または hub source tree 内 → source 汚染を避けるため拒否する（1.1）。
-- archive に `evals/`、workflow、generated schema のいずれかが無い → partial-copy と判定して gate を実行しない（1.1）。
+- archive に `packages/evals/`、workflow、generated schema のいずれかが無い → partial-copy と判定して gate を実行しない（1.1）。
 - migration target の期待文字列が hub commit で変わっている → silent replacement をせず fail closed。最新 hub spec 009 と runner を同期する（1.5）。
 - `uv lock` が解決不能 → `blocked`。後続 gate を走らせず、resolver output と package chain を evidence に残す（1.2, 3.3）。
 - warning-as-error で pytest が失敗 → warning class、origin package、file/line を `WarningRecord` にし、warning filter を弱めない（1.3）。

@@ -50,11 +50,19 @@ with the hub commit verified, the versions, and the commands。
 2.1 [U] ルートの `pydantic-ai-slim` SHALL resolve to a version equal to or newer than the hub's `services/api`。
 ベータレーンがハブより古い版で検証しても、ハブの版上げの証拠にならない。
 2.2 [U] litellm の経路（`WATSONX_TRANSPORT=litellm`、`src/pydantic_ai_sandbox/llm/providers/litellm.py`）が 2.1 を妨げる間は、
-次のどちらかを ADR として決める。
+次のいずれかを ADR として決める。
+- (c) `pydantic-ai-slim` 自身の `openai` extra を外し、root から `openai` を直接宣言する。範囲は litellm が要求する
+  `<3.0.0` と、pydantic-ai-slim の OpenAI-compatible provider が既定で構築する httpx2.AsyncClient を openai SDK が
+  `http_client=` として受理できる下限の両方を満たす値にする（2026-10 時点の実測では `>=2.47.0,<3.0.0`；下限は
+  openai SDK のリリースで httpx2 対応が入った版に追従して見直す）。採用条件は実行可能契約
+  （`tests/unit/test_ollama_openai_compat.py` の request-path テストと version floor/ceiling テストが green）。
 - (a) litellm 経路を独立した uv プロジェクト（`patterns/` のレーンと同じ形）へ分離し、ルートから `openai<3.0.0` を外す
 - (b) litellm 経路を削除し、watsonx は SDK 経路だけにする
-既定は (a)。litellm の脆弱版（1.83.0）へ巻き戻る解決を許さないという ADR-2 の制約は、分離先でも維持する。
-2.3 [E] WHEN litellm ships a release declaring `openai>=3`, the separation SHALL be reconsidered and the cap removed（ADR-2 の既存の条件）。
+既定は (c)。(c) の実行可能契約が failing になった場合に限り、plan amendment を経て (a) を次善として採る（(c) が
+failing のまま暗黙に (a) 相当へフォールバックすることは禁じる）。litellm の脆弱版（1.83.0 や、openai を安全な下限より
+古い版へ exact pin する patch release）へ巻き戻る解決を許さないという ADR-2 の制約は、いずれの選択でも維持する。
+2.3 [E] WHEN litellm ships a release declaring `openai>=3`, the direct `openai` dependency and version cap in 2.2(c) SHALL be reconsidered and removed, letting `pydantic-ai-slim`'s own `openai` extra take over again（ADR-2 の既存の条件。文言は 2026-10-04、option (c) が既定になった時点で「separation」という
+option (a)/(b) 由来の表現から、(c) の実態——litellm を分離せず direct dependency と cap だけを管理する——に合わせて訂正）。
 2.4 [U] 2.1〜2.2 の変更後も、ルートの `mise run check` とカバレッジの下限（`fail_under` 98）SHALL pass。
 2.5 [U] ルートの Python SHALL be raised from 3.13 to 3.14 after Requirement 1 is green
 （`.python-version`・`mise.toml`・`pyproject.toml` の pyright 設定・CI）。`ibm-watsonx-ai` の 3.14 での import（ADR-1 の 1.5.12 の不具合）が

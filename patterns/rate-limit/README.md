@@ -13,7 +13,7 @@ import しない（`patterns-contracts` は live suite の空振り検知のた�
 
 | 項目 | 本レーンの値 | ハブの現状 | 理由 |
 |---|---|---|---|
-| Python | **3.15**（`.python-version`、検証時点は 3.15.0rc2） | 3.13 固定 | 3.14 以降の `asyncio.iscoroutinefunction` 非推奨が slowapi と starlette 0.52 でハードエラーになる |
+| Python | **3.15**（`.python-version`、検証時点は 3.15.0rc3） | 3.13 固定 | 3.14 以降の `asyncio.iscoroutinefunction` 非推奨が slowapi と starlette 0.52 でハードエラーになる |
 | fastapi | `>=0.142.2`、上限なし | `<0.137` | 0.137 の `_IncludedRouter` で slowapi のグローバル制限が黙って無効になる |
 | starlette | `>=1.7.0`、上限なし | `<1.0` | slowapi 0.1.10 が 1.x と非互換 |
 | `filterwarnings` | `error::DeprecationWarning`、ignore なし | ignore 1 件（`starlette.testclient`） | 計画 §4 手順 3 |
@@ -83,7 +83,31 @@ RATE_LIMIT_REDIS_URL=redis://localhost:6379/0 \
 
 計画 §5 の取り込み条件「第 4 節の 1〜4 の記録を残す」に対応する。
 
-- **日付**: 2026-10-03
+### 2026-10-04 — CPython 3.15.0rc3
+
+Python.org の公開情報を当日に再確認した。3.15.0rc3 は 2026-10-02 公開の最新 3.15 release で、
+3.15.0 final は release blocker 対応のため 2026-10-09 へ延期されている。したがって、本記録は
+正式版ではなく最新 RC の sentinel 検証である。
+
+- **環境**: macOS arm64、CPython 3.15.0rc3、fastapi 0.142.2、starlette 1.7.0、limits 5.8.0、
+  redis-py 7.4.1
+- **exact interpreter**: `mise exec python@3.15.0rc3`。`.python-version` は series pin の `3.15` を維持
+- **検証結果**:
+
+  | 段階 | コマンド | 結果 |
+  |---|---|---|
+  | sync | `uv sync --python "$(command -v python)" --all-groups` | 57 packages resolved、56 packages installed、exit 0 |
+  | lint | `uv run ruff check .` | `All checks passed!`、exit 0 |
+  | format | `uv run ruff format --check .` | 13 files already formatted、exit 0 |
+  | typecheck | `uv run pyright` | 0 errors / 0 warnings / 0 informations、exit 0 |
+  | test / coverage | `uv run pytest --cov` | 27 passed / 3 skipped（Redis integration）、100% coverage、警告 0、exit 0 |
+  | audit | `uv run pip-audit` | known vulnerability 0。ローカル 2 package は PyPI 非公開のため audit 対象外、exit 0 |
+
+正式版の release page と配布 file が公開された時点（予定: 2026-10-09 以降）で、同じ exact-interpreter
+手順を 3.15.0 final に対して再実行し、本節を更新する。予定日だけを根拠に final 検証済みとは扱わない。
+
+### 2026-10-03 — CPython 3.15.0rc2（前回記録）
+
 - **環境**: CPython 3.15.0rc2、fastapi 0.142.2、starlette 1.7.0、limits 5.8.0、redis-py 7.4.1、
   Redis 7.0.15（ローカル）
 - **結果**: `uv run pytest --cov` で 27 passed / 3 skipped、カバレッジ 100%。

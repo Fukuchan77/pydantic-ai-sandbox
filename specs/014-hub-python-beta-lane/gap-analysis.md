@@ -159,6 +159,10 @@ R2.5 はルートの 3.14 化を「R1（ハブの 3.14 検証）が green にな
 sandbox `HEAD` を `git archive` で展開し、`pyproject.toml` の
 `"pydantic-ai-slim[logfire,openai]>=2.31.1"` を `"pydantic-ai-slim[logfire]>=2.54.0"` + `"openai>=2.20.0,<3.0.0"` に置き換えた。
 dev グループの `litellm` / `openai<3.0.0` と extra の `litellm` はそのまま。
+（Note, 2026-10-04: この実測時点の `openai>=2.20.0,<3.0.0` と bare `litellm` は、task 2.2 実装中・および
+その 2nd-pass VDD review を経て、それぞれ `openai>=2.47.0,<3.0.0`（httpx2 transport 対応下限）、
+`litellm>=1.96.2`（PYSEC-2026-4066 の fix 版）へ訂正済み。この §5.1 自体は 2026-10-03 時点の実測記録として
+そのまま残し、現行値は `pyproject.toml` ADR-2 と `research.md` AD-2 amendment を正本とする。）
 
 | 手順 | 結果 |
 |---|---|
@@ -217,6 +221,12 @@ R3.2（月次の再確認）のトリガー候補: (1) intake 文書または `d
 2. **ADR-2 の書き換え範囲**: (c) を採る場合、ADR-2 のコメントの「cap を外すには litellm の対応待ち」という結論と、
    `pydantic-ai-slim` の下限（`>=2.31.1`）の理由付けを書き直す。dev グループの `openai<3.0.0` の再掲も残すか
 3. ~~requirements の見直し~~ → **spec.md に反映済み（2026-10-03）**: R2.2 に (c) を既定として追加（条件付き、次善は (a)）、R2.5 を R1 から独立させた。あわせて R1.1（ハブのコミットを丸ごと展開）、R1.2（スキップ件数）、R1.3（失敗から一覧化）、R1.5（版固定の差分を当てて判定）、R2.4（pip-audit）、R3.4（3.15.0 正式版）、R5.1（試す場所の版）を修正
+   （**Correction, 2026-10-04**: この「spec.md に反映済み（2026-10-03）」という記述は誤り——VDD review
+   （`pdca/do.md` 該当日エントリ）が独立に再検証し、2026-10-03 時点の `spec.md` R2.2 は option (a)/(b) のみを
+   列挙し既定は (a) のままだったことを確認した。option (c) は当時 plan.md/research.md/tasks.md にのみ存在し、
+   spec.md には存在しなかった。spec.md の R2.2 が実際に option (c) を既定として反映したのは、本 feature の
+   task 2.2 実装フェーズ、2026-10-04 である。この §7 の記述はその時点の意図（見直し事項として挙げた）の記録
+   として残すが、「反映済み」の日付は参照しないこと。）
 4. **R1.1 の scratch の取り方**: `git archive` と `git worktree` のどちらにするか。ハブの checkout がステージ済みの変更を持つので、
    検証するのは**ハブの `main` のコミット**（2026-10-03 時点 `afbe6eb`）であって作業ツリーではないことを手順に明記する（§4.2）
 5. **R1.5 の「green」の定義**: `test_python_version_pin.py` の扱い（ハブ R7.2 の差分を scratch に当てるか）。integration / e2e の
