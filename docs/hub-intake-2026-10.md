@@ -207,3 +207,14 @@ H1 が main で安定した後に、`.python-version` / `mise.toml` / `test_pyth
 | 2 | L1 を §3.2 の修正を加えて取り込む。H1 の 429 の形が決まった後のほうが、ステータスと `code` を揃えやすい | ハブ |
 | 3 | L2・L3 をハブの現状と突き合わせる（§3.3・§3.4 の「ハブで確認すること」） | ハブ |
 | 4 | H1 が安定した後、Python を 3.14 へ上げる（H3）。`uv sync` とテストを 3.14 で通す | ハブ |
+
+---
+
+## 5. Root baseline run
+
+本リポジトリ（Python beta-verification lane）側で Root baseline を上げた際の実行証拠を 1 行ずつ記録する
+（憲法 Principle 6）。ハブへはこの表の行を evidence として intake 手順経由で渡す。
+
+| 日付 | Python | 主な resolved versions | `uv lock` | `uv sync` | `mise run check` | `mise run cov` | `uv run pip-audit` | `mise run patterns:check` |
+|---|---|---|---|---|---|---|---|---|
+| 2026-10-04 | 3.14（3.14.5 interpreter / mise 3.14.8 tool） | `ibm-watsonx-ai` 1.8.0+ 系（ModelInference import 済み green、ADR-1 再測定）、`pydantic-ai-slim` 2.31.1、`pydantic-core` 2.46.5 | 変更なし（既存 lock を再利用、`uv sync` のみ実施） | exit 0（`uv sync --all-groups`） | exit 0（lint/format/typecheck/test: 323 passed, 4 skipped） | exit 0（98.51% ≥ 98% ratchet） | exit 0（No known vulnerabilities found） | exit 0（deep-research 3.13.7 / hitl 3.14.5 / rate-limit 3.15.0rc2、各レーン green、root 変更の影響なし） |

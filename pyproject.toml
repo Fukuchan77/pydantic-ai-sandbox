@@ -3,14 +3,15 @@ name = "pydantic-ai-sandbox"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
     "fastapi",
-    # ADR-1 (spec 002-watsonx-provider): 1.5.12 could not import
-    # foundation_models.ModelInference on Python 3.14 (StrEnum/utils.py:1191
-    # TypeError). The root project has since moved to Python 3.13, where the
-    # import works, but requires-python still admits 3.14 interpreters, so the
-    # floor stays on the fixed line, and is raised on each refresh to match the
+    # ADR-1 (spec 002-watsonx-provider, re-measured for spec 014 2026-10):
+    # 1.5.12 could not import foundation_models.ModelInference on Python 3.14
+    # (StrEnum/utils.py:1191 TypeError). The root project moved to Python 3.13
+    # at the time, then back to Python 3.14 once the floor below imported
+    # cleanly there (tests/unit/test_python_baseline.py pins the import as an
+    # executable contract). The floor is raised on each refresh to match the
     # version uv.lock resolves and the suite is verified against (1.6.0 when
     # this note was written; 1.8.0 as of 2026-09-30).
     "ibm-watsonx-ai>=1.8.0",
@@ -85,7 +86,7 @@ build-backend = "hatchling.build"
 packages = ["src/pydantic_ai_sandbox"]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 100
 # patterns/ lanes are independent uv projects with their own interpreters,
 # dependency sets, and ruff/pyright configs (Spec 005 AD-1/AD-5). Excluding
@@ -145,7 +146,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pyright]
-pythonVersion = "3.13"
+pythonVersion = "3.14"
 typeCheckingMode = "strict"
 venvPath = ".venv"
 venv = "."
