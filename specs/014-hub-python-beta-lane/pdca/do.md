@@ -1133,3 +1133,5 @@ Tasks 5.1 / 5.2 を verified evidence と final repository gate の green 後に
 - `git diff --check`: clean.
 
 **Decision**: GO. Requirements, design, task boundaries, TDD RED/GREEN/PROVE records, and regression gates are traceable. The immutable hub itself remains a recorded failed verification target; that expected result keeps H3 `proposed` and does not make the sandbox runner implementation incomplete.
+
+**Feature commit**: `8692e91 feat(hub): add Python beta verification lane`.
