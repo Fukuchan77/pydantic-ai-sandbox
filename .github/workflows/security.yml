@@ -193,10 +193,11 @@ jobs:
           # still ships the unfixed loop, cycle detection lands in 0.60.1);
           # the suppression exists only because pip-audit matches declared
           # ranges, not reachability. beeai-framework caps json-repair<0.40.0
-          # (==0.1.39 pin) and <0.53.0 even at latest 0.1.82, so no reachable
-          # version crosses 0.56.0. SECURITY-NOTES.md runbook (Spec 013
-          # R8.1/8.2); re-evaluate only if locked json-repair enters
-          # 0.56.0-0.60.0. Review by 2026-10-14. Tracking: #30.
+          # (==0.1.39 pin); the latest 0.1.85 needs >=0.60.1,<0.61.0 (already
+          # fixed), so no reachable version enters 0.56.0-0.60.0.
+          # SECURITY-NOTES.md runbook (Spec 013 R8.1/8.2); re-evaluate only if
+          # locked json-repair enters 0.56.0-0.60.0. Review by 2027-01-14.
+          # Tracking: #30.
           - { lane: beeai,         dir: patterns/frameworks/beeai, audit_args: '--ignore-vuln GHSA-xf7x-x43h-rpqh' }
           # PYSEC-2026-3740 (GHSA-8mgp-746c-j5xp / CVE-2026-81726, nltk
           # 3.10.3, pulled in by llama-index-core): NLTK's model-artifact
