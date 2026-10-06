@@ -44,3 +44,14 @@ The implementation commit for Tasks 2–5 is `8692e91`; Task 1 shipped earlier a
 - Unmapped requirements: None.
 - Orphan tasks: None.
 - Conditional outcome: REQ-005 is correctly **not satisfied for hub adoption** because the immutable hub `api:check` failed; the sandbox implementation requirement is satisfied by recording the failure and retaining H3 as `proposed`.
+
+## Post-ship evidence updates
+
+Rows above stay as shipped on 2026-10-04. Later evidence lands here and in `docs/hub-intake-2026-10.md`.
+
+- **2026-10-06, REQ-005 / REQ-013**: the 3.14 runner was re-run on hub `main`@`e26f6fe` after hub PR #81 merged the
+  §7.3 pre-fix. All three required phases exited 0 and §8.1 is satisfied, so H3 moved from `proposed` to `verified`
+  (`docs/hub-intake-2026-10.md` §8). The Conditional outcome above no longer holds for hub `main`.
+- **2026-10-06, REQ-017 / REQ-018**: hub spec `009` R6 delivered its L2–L4 audit
+  (hub `services/api/docs/python-beta-intake-2026-10.md`, PR #80). The ledger rows were updated in place and none was
+  removed: L2 `already-present`, L3 `landed`, L4 `rejected` (`docs/hub-intake-2026-10.md` §1).
