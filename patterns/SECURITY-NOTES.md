@@ -110,6 +110,18 @@ beeai レーンのロック版は **0.39.1** のまま（`beeai-framework==0.1.3
 `mise run patterns:audit` は clean。脆弱コード不在の判定と抑止を現状維持し、期限日に
 撤去または期限延長を再判断する。
 
+**期限再判断（2026-10-06）: 期限を 2027-01-14 へ延長**。upstream 制約が変わった:
+最新 beeai-framework **0.1.85** は `json-repair>=0.60.1,<0.61.0` を要求し、修正版に届く。
+旧撤去条件 (d) の文言は形式上満たされたが、バンプはしない。scratch で
+`beeai-framework==0.1.85` に上げると `uv lock` は json-repair 0.60.1 に解決するが、
+offline fake（`tests/support/fake_chat_model.py`）が依存する
+`beeai_framework.backend.types.ChatModelStructureOutput` が削除されており、
+レーンの unit test 8 件が collection error になる。BeeAI レーンは比較用として凍結中
+（`docs/hub-intake-2026-10.md` §1.3）で、ロック版 0.39.1 は脆弱コードを含まないため、
+fake の書き直しはリスクを減らさない。到達しうる版は 0.39.x（現ピン）か 0.60.1 以上
+（最新）のどちらかで、再評価トリガ（ロック版が 0.56.0–0.60.0）は依然として起きない。
+抑止は維持し、コメントの upstream 制約記述と期限だけを更新した。
+
 **Worked example (suppression applied 2026-09-05, no fix available)**: nltk 3.10.3 (a
 transitive dependency of `patterns/frameworks/llamaindex` / `patterns/rag` via
 llama-index-core) had **PYSEC-2026-3740** (GHSA-8mgp-746c-j5xp / CVE-2026-81726, a
