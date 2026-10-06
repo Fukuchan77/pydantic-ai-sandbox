@@ -1,7 +1,7 @@
 # ハブへの取り込み候補（2026-10-03）
 
 - **作成日**: 2026-10-03
-- **最終更新日**: 2026-10-04（§7 追記）
+- **最終更新日**: 2026-10-06（§8 追記、§1 の H3・L2〜L4 を更新）
 - **宛先**: `vaz-agentic-ai-next/services/api`（FastAPI + Pydantic AI レーンの正本。ハブ ADR-0007）
 - **取り込み手順**: ハブの `docs/dependency-policy.md` §8。ファイルのコピーではなく、ハブ側で再実装する
   （本リポジトリの Constitution III「ベンダリング禁止」とも同じ考え方）
@@ -24,17 +24,18 @@
 
 status は `landed` / `verified` / `proposed` / `already-present` / `waiting` / `rejected` のいずれかで管理する。
 完了・不採用になった行も削除せず、判断履歴として保持する。確認対象の immutable hub commit は
-`3646b473db41d853380d7088bf381f1f6ce1e08c`（2026-10-03、PR #76）である。
+`3646b473db41d853380d7088bf381f1f6ce1e08c`（2026-10-03、PR #76）である。2026-10-06 の更新（H3・L2〜L4）は
+hub `main`@`e26f6fef92f074278f1d2a5a057f362d5c6560f4`（PR #80 の merge）を根拠にする。
 
-| ID | 変更 | status | 2026-10-04 の根拠・次の条件 |
+| ID | 変更 | status | 根拠・次の条件（日付は根拠を確認した日） |
 |---|---|---|---|
 | H1 | slowapi を `limits` 直結の自前実装へ置換 | `landed` | hub `3646b47` の `services/api/app/middleware/rate_limit.py` と `services/api/pyproject.toml`。PR #76 で反映済み |
 | H2 | starlette の audit suppression 5 件を版上げで解消 | `landed` | hub `3646b47` は `starlette>=1.3.1,<2.0` / resolved 1.7.0、旧 starlette 5 件の suppression を削除済み |
-| H3 | hub `services/api` を Python 3.14 へ移行 | `proposed` | §6（`3646b47`）と §7.1（`afbe6eb`）は failed。§7.2 の候補 commit `966becc`（hub branch `claude/project-thread-583dhe`）は 3.14 で §8.1 satisfied。hub `main` に入った commit で同じ runner が green になった時点で `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
+| H3 | hub `services/api` を Python 3.14 へ移行 | `verified` | **2026-10-06**: §7.3 の前段修正が hub PR #81 で `main` に入り、hub `main`@`e26f6fe` に対する同じ runner が 3.14 で green、§8.1 satisfied（§8）。次は hub 側の版上げ PR（§6.3 の migration diff と `uv lock` の再生成）で、それが入った時点で `landed` へ移す。**2026-10-04 までの経緯**: §6（`3646b47`）と §7.1（`afbe6eb`）は failed。§7.2 の候補 commit `966becc`（hub branch `claude/project-thread-583dhe`）は 3.14 で §8.1 satisfied。hub `main` に入った commit で同じ runner が green になった時点で `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
 | L1 | `UsageLimits` と request / stream timeout | `already-present` | hub `3646b47` の `services/api/app/api/v1/agent.py` と `_stream.py` に `UsageLimits`、request timeout、stream event timeout が存在 |
-| L2 | 生成された `sources` を実ツール結果と照合 | `waiting` | hub spec `009` R6 の確認結果待ち。受領時に hub の RAG node ID 照合有無を記録する |
-| L3 | tool docstring をモデル向け説明だけに限定 | `waiting` | hub spec `009` R6 の tool docstring audit 結果待ち |
-| L4 | direct `Model.request()` loop の tool contract | `waiting` | 現行判断は「取り込まない（確認だけする）」。hub spec `009` R6 で direct call を確認後、影響なしなら行を残したまま `rejected` へ移す。`3646b47` では health probe に direct call が 1 件あるが agent tool loop ではない |
+| L2 | 生成された `sources` を実ツール結果と照合 | `already-present` | **2026-10-06**: hub spec `009` R6 の audit（hub `services/api/docs/python-beta-intake-2026-10.md` L2）で既充足。hub は `RetrievedHit.chunk_id` から引用を組み、`app/workflows/citation.py::validate_citations` が集合外の ID を `DanglingCitationError` → 502 で拒否する。sandbox の `_grounded_sources`（集合外を捨てて続行）より厳しい fail-closed で、取り込む差分は無い。旧条件: hub spec `009` R6 の確認結果待ち |
+| L3 | tool docstring をモデル向け説明だけに限定 | `landed` | **2026-10-06**: hub `d07a8b8`（PR #80）で `app/agents/chat_agent.py` の `ChatOutput` docstring をモデル向けの 1 文にし、開発者向けの注記をコメントへ移した。`tests/unit/agents/test_chat_output_description.py` を追加。`mock_web_search` は hub `a3ca95e`（2026-09-24）で対応済みで `test_tools_mock.py::TestMockToolDescriptionSentToModel` が固定。旧条件: hub spec `009` R6 の tool docstring audit 結果待ち |
+| L4 | direct `Model.request()` loop の tool contract | `rejected` | **2026-10-06**: hub spec `009` R6 の inventory で、direct call は `app/api/health.py::_probe_llm_provider`（readiness probe、`max_tokens: 1`、ツールを意図的に渡さない）の 1 件だけで agent tool loop ではなく、影響なし。hub `tests/unit/test_model_request_inventory.py` が新しい direct call の追加を検出する。下記の旧判断どおり `rejected` へ移した。**旧判断**: 「取り込まない（確認だけする）」。hub spec `009` R6 で direct call を確認後、影響なしなら行を残したまま `rejected` へ移す。`3646b47` では health probe に direct call が 1 件あるが agent tool loop ではない |
 | L5 | deep-research の sub-researcher brief | `rejected` | hub intake 対象外の pattern-lane 固有変更。相当機能が将来できる場合だけ新規 trial として再評価 |
 | L6 | sandbox 固有 test fixture | `rejected` | hub へコピーしない。sandbox の fixture 専用 |
 
@@ -244,10 +245,10 @@ chromadb 3 件と nltk 1 件はこの変更と無関係なので残す。
 
 | 順 | 作業 | 場所 |
 |---|---|---|
-| 1 | §7.3 の前段修正（`UP037` 4 件を `typing.Self` へ、`asyncio.iscoroutinefunction` の emitter 限定 ignore 2 件）を hub `main` へ入れる。候補は hub branch `claude/project-thread-583dhe`（`966becc`）。対応版の upstream release は 2026-10-04 時点で無い（§7.3） | ハブ |
-| 2 | 1 が入った hub `main` の commit を §6 と同じ runner で再検証し、required 3 phases が全て exit 0 の場合だけ H3 を `verified` へ移す | sandbox |
-| 3 | H3 本体（§6.3 の migration diff と `uv lock` の再生成）を hub で別 PR にする | ハブ |
-| 4 | hub spec `009` R6 の L2–L4 確認結果を受領し、ledger の行を削除せず status を更新する | ハブ → sandbox |
+| 1 | ~~§7.3 の前段修正を hub `main` へ入れる~~ — **完了**（hub PR #81、2026-10-06） | ハブ |
+| 2 | ~~1 が入った hub `main` の commit を §6 と同じ runner で再検証する~~ — **完了**（§8、hub `e26f6fe` で green。H3 を `verified` へ） | sandbox |
+| 3 | H3 本体（§6.3 の migration diff と `uv lock` の再生成）を hub で別 PR にする。入ったら H3 を `landed` へ移す | ハブ |
+| 4 | ~~hub spec `009` R6 の L2–L4 確認結果を受領し、ledger の status を更新する~~ — **完了**（2026-10-06、§1） | ハブ → sandbox |
 | 5 | 月次 refresh で LiteLLM OpenAI 3 metadata と cp315 blocker を §1.2 の手順で再確認する | sandbox |
 
 ---
@@ -417,3 +418,44 @@ warning は呼び出し元モジュールに帰属する。したがって pytes
 ledger の規則（§1、immutable hub commit に対する検証だけを根拠にする）に従い、H3 は `proposed` のままにする。
 `966becc` は hub の push 済み branch 上の commit で再現はできるが、hub `main` ではない。§4 の 1 が hub `main` に入った後、
 その commit で §7.2 と同じ結果になれば `verified` へ移す。
+
+**2026-10-06 追記**: 条件を満たした。hub PR #81 で `966becc` 相当の修正が `main` に入り、§8 の再検証が green になったので
+H3 を `verified` へ移した。
+
+---
+
+## 8. Re-verification on hub `main`@`e26f6fe`（Python 3.14、2026-10-06）— green、H3 `verified`
+
+§7.4 の条件（§7.3 の前段修正が hub `main` に入った commit での再実行）を満たす run。§6・§7 と同じ runner
+（`scripts/verify-hub-python.sh`）を使い、artifact の要点だけをここへ転記する。
+
+- **Hub commit**: `e26f6fef92f074278f1d2a5a057f362d5c6560f4`（PR #80 の merge。その直前の first-parent が PR #81 の merge
+  `93301a0` で、§7.3 の 4 files がそのまま入っている）
+- **環境**: Linux x86_64、CPython 3.14.8（uv 管理）、uv 0.12.23、mise 2026.10.3。§7 と同じく Redis / Docker daemon /
+  Ollama / Hugging Face model は無い。今回は IPv6 の無い host のため 1 件増えて 25 件 skip（Chroma model 6、Docker 7、
+  Redis 9、IPv6 1、Ollama 1、`LOGFIRE_TOKEN` 1）。service は自動 provision していない
+- **migration**: §6.3 と同じ 4 行（`.python-version`、`requires-python`、Ruff target、`_EXPECTED_SERIES`）
+
+| stage | role | exit | 結果 |
+|---|---|---:|---|
+| `uv lock` | required | 0 | 204 packages |
+| `uv sync` | required | 0 | |
+| `mise run api:check` | required | 0 | ruff / ty green、1630 total / **1605 passed / 0 failed** / 25 skipped、coverage 96.68%、audit green |
+| `mise run api:lint` | diagnostic | 0 | |
+| `mise run api:test:ci` | diagnostic | 0 | 1605 passed / 0 failed / 25 skipped |
+| `mise run api:audit` | diagnostic | 0 | No known vulnerabilities found, 4 ignored |
+
+- **Overall verdict**: green。**Hub dependency-policy §8.1（Python 3.14）: satisfied**（hub `main` の commit に対して）。
+- **test 数の差**: §7.2 の 1624 total から 1630 total へ 6 件増えた。hub PR #80 の L3・L4 inspection test の追加分。
+- **主な resolved versions**: §7.2 と同じ。`pydantic-ai-slim==2.54.0`、`pydantic-core==2.46.5`、`litellm==1.103.2`、
+  `openai==2.54.0`、`fastapi==0.142.2`、`starlette==1.7.0`、`chromadb==0.6.3`、`llama-index-core==0.14.25`、
+  `llama-index-workflows==2.25.0`、`onnxruntime==1.30.0`、`torch==2.14.1`、`redis==8.1.0`、`ruff==0.16.10`、`ty==0.0.84`。
+  hub-locked `pydantic-ai-slim` は 2.54.0 のままなので、`tests/unit/test_ollama_openai_compat.py` の
+  `HUB_VERIFIED_PYDANTIC_AI_FLOOR` は変更不要。
+- **warning**: DeprecationWarning は 0 件。残るのは §6.2 と同じ種類（`LogfireNotConfiguredWarning`、
+  `PytestUnknownMarkWarning`（`pytest.mark.integration`）、file-size policy の `UserWarning`）だけ。
+- **`uv lock` の差分**: `requires-python` を上げたため lock の marker が書き換わる（`lock.diff` 713 行）。
+  H3 の hub PR では lock を手で直さず、`uv lock` で再生成する。
+
+H3 の次の段は hub 側の版上げ PR（§4 の 3）。sandbox で 3.15 を試すのは §1.1 の blocker が解けてから（§6.4）。
+
