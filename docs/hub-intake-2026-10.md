@@ -1,7 +1,7 @@
 # ハブへの取り込み候補（2026-10-03）
 
 - **作成日**: 2026-10-03
-- **最終更新日**: 2026-10-06（§8 追記、§1 の H3・L2〜L4 を更新）
+- **最終更新日**: 2026-10-07（§9 追記、§1 の H3 を `landed` へ更新）
 - **宛先**: `vaz-agentic-ai-next/services/api`（FastAPI + Pydantic AI レーンの正本。ハブ ADR-0007）
 - **取り込み手順**: ハブの `docs/dependency-policy.md` §8。ファイルのコピーではなく、ハブ側で再実装する
   （本リポジトリの Constitution III「ベンダリング禁止」とも同じ考え方）
@@ -25,13 +25,14 @@
 status は `landed` / `verified` / `proposed` / `already-present` / `waiting` / `rejected` のいずれかで管理する。
 完了・不採用になった行も削除せず、判断履歴として保持する。確認対象の immutable hub commit は
 `3646b473db41d853380d7088bf381f1f6ce1e08c`（2026-10-03、PR #76）である。2026-10-06 の更新（H3・L2〜L4）は
-hub `main`@`e26f6fef92f074278f1d2a5a057f362d5c6560f4`（PR #80 の merge）を根拠にする。
+hub `main`@`e26f6fef92f074278f1d2a5a057f362d5c6560f4`（PR #80 の merge）を根拠にする。2026-10-07 の H3 `landed` は
+hub `main`@`6c3416fe3d92a69634e3ca893862b16d0ed787f2`（PR #88 の merge）を根拠にする（§9）。
 
 | ID | 変更 | status | 根拠・次の条件（日付は根拠を確認した日） |
 |---|---|---|---|
 | H1 | slowapi を `limits` 直結の自前実装へ置換 | `landed` | hub `3646b47` の `services/api/app/middleware/rate_limit.py` と `services/api/pyproject.toml`。PR #76 で反映済み |
 | H2 | starlette の audit suppression 5 件を版上げで解消 | `landed` | hub `3646b47` は `starlette>=1.3.1,<2.0` / resolved 1.7.0、旧 starlette 5 件の suppression を削除済み |
-| H3 | hub `services/api` を Python 3.14 へ移行 | `verified` | **2026-10-06**: §7.3 の前段修正が hub PR #81 で `main` に入り、hub `main`@`e26f6fe` に対する同じ runner が 3.14 で green、§8.1 satisfied（§8）。次は hub 側の版上げ PR（§6.3 の migration diff と `uv lock` の再生成）で、それが入った時点で `landed` へ移す。**2026-10-04 までの経緯**: §6（`3646b47`）と §7.1（`afbe6eb`）は failed。§7.2 の候補 commit `966becc`（hub branch `claude/project-thread-583dhe`）は 3.14 で §8.1 satisfied。hub `main` に入った commit で同じ runner が green になった時点で `verified` へ移す。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
+| H3 | hub `services/api` を Python 3.14 へ移行 | `landed` | **2026-10-07**: hub PR #88（merge `6c3416f`、2026-10-06）で `.python-version`・`requires-python`・Ruff target・`_EXPECTED_SERIES` が 3.14 になり、`uv.lock` を `uv lock` で再生成済み（§9）。hub spec `009` Task 7、hub 憲法 2.3.0。**2026-10-06**: hub `main`@`e26f6fe` に対する同じ runner が 3.14 で green、§8.1 satisfied で `verified`（§8）。**2026-10-04 までの経緯**: §6（`3646b47`）と §7.1（`afbe6eb`）は failed、§7.2 の候補 commit `966becc` は 3.14 で §8.1 satisfied。3.15 は下記 blocker が全て wheel-ready になるまで待つ |
 | L1 | `UsageLimits` と request / stream timeout | `already-present` | hub `3646b47` の `services/api/app/api/v1/agent.py` と `_stream.py` に `UsageLimits`、request timeout、stream event timeout が存在 |
 | L2 | 生成された `sources` を実ツール結果と照合 | `already-present` | **2026-10-06**: hub spec `009` R6 の audit（hub `services/api/docs/python-beta-intake-2026-10.md` L2）で既充足。hub は `RetrievedHit.chunk_id` から引用を組み、`app/workflows/citation.py::validate_citations` が集合外の ID を `DanglingCitationError` → 502 で拒否する。sandbox の `_grounded_sources`（集合外を捨てて続行）より厳しい fail-closed で、取り込む差分は無い。旧条件: hub spec `009` R6 の確認結果待ち |
 | L3 | tool docstring をモデル向け説明だけに限定 | `landed` | **2026-10-06**: hub `d07a8b8`（PR #80）で `app/agents/chat_agent.py` の `ChatOutput` docstring をモデル向けの 1 文にし、開発者向けの注記をコメントへ移した。`tests/unit/agents/test_chat_output_description.py` を追加。`mock_web_search` は hub `a3ca95e`（2026-09-24）で対応済みで `test_tools_mock.py::TestMockToolDescriptionSentToModel` が固定。旧条件: hub spec `009` R6 の tool docstring audit 結果待ち |
@@ -247,7 +248,7 @@ chromadb 3 件と nltk 1 件はこの変更と無関係なので残す。
 |---|---|---|
 | 1 | ~~§7.3 の前段修正を hub `main` へ入れる~~ — **完了**（hub PR #81、2026-10-06） | ハブ |
 | 2 | ~~1 が入った hub `main` の commit を §6 と同じ runner で再検証する~~ — **完了**（§8、hub `e26f6fe` で green。H3 を `verified` へ） | sandbox |
-| 3 | H3 本体（§6.3 の migration diff と `uv lock` の再生成）を hub で別 PR にする。入ったら H3 を `landed` へ移す | ハブ |
+| 3 | ~~H3 本体（§6.3 の migration diff と `uv lock` の再生成）を hub で別 PR にする。入ったら H3 を `landed` へ移す~~ — **完了**（hub PR #88、2026-10-06。§9、H3 を `landed` へ） | ハブ |
 | 4 | ~~hub spec `009` R6 の L2–L4 確認結果を受領し、ledger の status を更新する~~ — **完了**（2026-10-06、§1） | ハブ → sandbox |
 | 5 | 月次 refresh で LiteLLM OpenAI 3 metadata と cp315 blocker を §1.2 の手順で再確認する | sandbox |
 
@@ -459,3 +460,22 @@ H3 を `verified` へ移した。
 
 H3 の次の段は hub 側の版上げ PR（§4 の 3）。sandbox で 3.15 を試すのは §1.1 の blocker が解けてから（§6.4）。
 
+---
+
+## 9. H3 landed on hub `main`@`6c3416f`（Python 3.14、2026-10-07 確認）
+
+§4 の 3 が完了した。hub PR #88（`spec 009 Task 7: move services/api to Python 3.14 (constitution 2.3.0)`）が
+2026-10-06 に `main` へ merge され（merge commit `6c3416fe3d92a69634e3ca893862b16d0ed787f2`）、H3 を `landed` へ移した。
+
+- **migration**: §6.3 と同じ 4 行が hub `main` に入っている。`services/api/.python-version` は `3.14`、
+  `pyproject.toml` は `requires-python = ">=3.14"` と Ruff `target-version = "py314"`、
+  `tests/unit/test_python_version_pin.py` の `_EXPECTED_SERIES` は `"3.14"`。
+- **lock**: `uv.lock` は手で直さず `uv lock` で再生成された（hub commit `59fcd60`。marker と cp313 wheel 行だけが変わり、
+  resolved version は動いていない）。hub-locked `pydantic-ai-slim` は 2.54.0 のままなので、
+  `tests/unit/test_ollama_openai_compat.py` の `HUB_VERIFIED_PYDANTIC_AI_FLOOR` は変更不要。
+- **hub 側の検証**（PR #88 の記録。sandbox では再実行していない）: Python 3.14.6 で `uv sync`、ruff、ty が clean、
+  pytest 1605 passed / 25 skipped、coverage 96.68%、pip-audit は既存の 4 ignore で clean。§8 の結果と一致する。
+- **付随変更**: hub は Python 3.15 を Dependabot で抑止した（`services/api` の docker block に `python >=3.15` の ignore）。
+  hub 憲法 2.3.0 で lane ごとの Python pin（`services/api` 3.14、`services/agent` 3.13）が正式化された。
+
+3.15 は引き続き §1.1 の blocker 待ち（§6.4）。
