@@ -1,0 +1,63 @@
+# CodeQL (SAST) — taint/data-flow static analysis, additive to ruff's `S`
+# ruleset (flake8-bandit Py3 superset, enforced via `mise run check`).
+#
+# Why this exists alongside ruff's `S` rules (see security.yml's header):
+# ruff's bandit-equivalent rules are pattern/lint-level checks on a single
+# file at a time. CodeQL builds a whole-program data-flow graph and can
+# trace a tainted value from an untrusted source (e.g. an HTTP request body)
+# through intermediate calls to a dangerous sink (e.g. a shell exec or SQL
+# string). That's the gap ruff cannot close. Proposed as part of the
+# `dependency-security-refresh` skill's Step 10 CI Setup Proposal and added
+# here on the maintainer's explicit go-ahead.
+#
+# Scope: a single `python` analysis over the whole repository tree. CodeQL
+# extracts from source files directly (no build/install step is required for
+# an interpreted language), so one pass covers both the root app
+# (`src/pydantic_ai_sandbox/`) and every independent `patterns/` lane without
+# needing per-lane `uv sync` — unlike pip-audit/pytest, CodeQL doesn't care
+# that each lane has its own venv/lockfile.
+#
+# Triggers: pull_request + workflow_dispatch only — no `schedule:`. This
+# repo's standing CI-usage policy (tests/unit/test_ci_usage_policy.py::
+# test_only_security_jobs_are_scheduled) pins `security.yml` as the *only*
+# scheduled workflow; adding a cron here would both violate that guard and
+# require widening it, which is a separate policy decision from "add CodeQL".
+# PR-time analysis already gates every change that reaches `main`.
+name: codeql
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Independent of ci.yml/security.yml: a PR triggers all three and none should
+# cancel another's job. Per-ref cancellation only inside this workflow.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  security-events: write  # required to upload the SARIF results
+  actions: read           # lets codeql-action read workflow run details
+
+jobs:
+  analyze:
+    name: CodeQL analyze (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: python
+
+      # No build step: CodeQL's Python extractor reads source files directly
+      # and does not need the project installed or its dependencies resolved.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: "/language:python"

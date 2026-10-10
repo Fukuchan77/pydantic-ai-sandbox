@@ -140,6 +140,8 @@ each workflow for the full rationale):
 | `ci.yml`                          | pull request + manual dispatch                       |
 | `patterns-ci.yml`                 | pull request (patterns paths) + manual dispatch      |
 | `security.yml`                    | pull request + **daily** pip-audit + weekly gitleaks |
+| `codeql.yml`                      | pull request + manual dispatch (SAST, no schedule)   |
+| `dependency-review.yml`           | pull request only (diffs added deps against advisories) |
 | `integration-ollama.yml`          | manual dispatch only (runs pre-push locally instead) |
 | `patterns-integration-ollama.yml` | manual dispatch only                                 |
 | `integration-watsonx.yml`         | manual dispatch only (metered SaaS)                  |
