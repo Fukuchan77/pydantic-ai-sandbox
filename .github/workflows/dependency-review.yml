@@ -1,0 +1,43 @@
+# dependency-review-action — fails a PR that introduces a new dependency
+# carrying a known HIGH/CRITICAL advisory, using GitHub's own Dependency
+# Graph diff between the PR's base and head. Complements, rather than
+# duplicates, pip-audit (security.yml): pip-audit scans the lockfiles already
+# on disk on a schedule and on every PR; this action specifically diffs what
+# a PR *adds* and can also flag license changes, catching a newly introduced
+# vulnerable package at review time instead of waiting for the next pip-audit
+# run. Proposed as part of the `dependency-security-refresh` skill's Step 10
+# CI Setup Proposal and added here on the maintainer's explicit go-ahead.
+#
+# PR-only by design: the action diffs base vs. head dependency manifests, so
+# it has nothing to compare on `workflow_dispatch` or a schedule — unlike
+# codeql.yml there is no meaningful non-PR trigger to add.
+name: dependency-review
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write  # comment-summary-in-pr posts/updates a PR comment
+
+jobs:
+  dependency-review:
+    name: dependency-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Matches security.yml's pip-audit `--strict` posture: HIGH/CRITICAL
+      # findings fail the job rather than warn.
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always

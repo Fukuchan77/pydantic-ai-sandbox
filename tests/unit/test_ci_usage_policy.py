@@ -38,6 +38,8 @@ AUTO_WORKFLOWS: tuple[str, ...] = (
     "ci.yml",
     "patterns-ci.yml",
     "security.yml",
+    "codeql.yml",
+    "dependency-review.yml",
 )
 
 # security.yml is the only scheduled workflow, and every one of its jobs must
