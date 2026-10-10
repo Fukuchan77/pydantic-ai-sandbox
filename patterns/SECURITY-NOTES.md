@@ -17,6 +17,38 @@
 ローカル/CI（patterns-ci.yml）で実行。dependabot が3レーンを週次監視
 （pydantic-ai / beeai-framework は個別 PR 化）。
 
+## pydantic-ai-slim 同時実行リーク（GHSA-6fqq-452j-qhrp）の修正（2026-10-10 依存セキュリティ監査）
+
+`osv-scanner scan source -r .`（OSV.dev データベース、pip-audit の PyPI Advisory DB
+とは別経路）が、pip-audit では検知されなかった **GHSA-6fqq-452j-qhrp /
+CVE-2026-107286**（CVSS 7.5 High, CWE-772 Missing Release of Resource）を
+`pydantic-ai-slim` 2.52.0 に対して報告した。
+
+**原因**: `ConcurrencyLimitedModel` / `limit_model_concurrency` が内部で使う
+`anyio.CapacityLimiter` のスロット解放が、ストリーミング中の早期終了
+（consumer 側の例外・キャンセル・`stream_text()` の既定デバウンスでの通常消費
+を含む）でクロスタスク解放に失敗し、スロットがリークする。ストリーム→切断を
+繰り返すと同時実行スロットが枯渇し DoS に至る。エージェントレベルの
+`max_concurrency` や非ストリーミング呼び出しは影響を受けない。**修正版 2.53.0**。
+
+**影響レーン**: `patterns/deep-research`・`patterns/frameworks/pydantic-ai`・
+`patterns/hitl`・`patterns/sse` の4レーンすべてが `pydantic-ai-slim[openai]>=2.52.0`
+という開いた下限（厳密ピンではない）を `pyproject.toml` に宣言していたため、
+`pyproject.toml` の変更は不要で `uv lock --upgrade-package pydantic-ai-slim`
+によるロックファイル更新のみで修正可能と判定した（Clear fix）。
+
+**適用**: 4レーンそれぞれで `uv lock --upgrade-package pydantic-ai-slim` を実行し、
+いずれも `pydantic-ai-slim`/`pydantic-graph` 2.52.0 → **2.55.0**（修正版 2.53.0 超）、
+推移的な `openai` 3.22.1 → 3.28.0 の更新で解決した。
+
+**検証**: `mise run patterns:check`（全9レーンの lint/format/typecheck/test）が
+exit 0 で green（4レーン分の該当テスト: pydantic-ai 69 passed/6 skipped、
+sse 39 passed/1 skipped、deep-research 68 passed/1 skipped、hitl 73 passed/2 skipped）。
+再実行した `mise run patterns:audit`（pip-audit）と `osv-scanner scan source -r .`
+のいずれも GHSA-6fqq-452j-qhrp は非検出で、新規に導入された脆弱性もなし
+（残る検出は既存の抑止対象である json-repair GHSA-xf7x-x43h-rpqh と
+nltk PYSEC-2026-3740/GHSA-8mgp-746c-j5xp の2件のみ、いずれも変更なし）。
+
 ## fix 未提供アドバイザリの運用（Runbook, Spec 013 R8.1/8.2）
 
 nltk / **PYSEC-2026-597**（`nltk/data.py` の `_UNSAFE_NO_PROTOCOL_RE` がパーセントエンコード
