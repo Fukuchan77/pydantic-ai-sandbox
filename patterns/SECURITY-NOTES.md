@@ -225,6 +225,21 @@ Neither lane's source imports nltk, while `mise run patterns:audit` is clean wit
 the existing lane-scoped suppression. Suppression retained; the tracking issue
 remains to be filed before the review deadline.
 
+**Retired (2026-11-14 dependency refresh)**: step (d) has landed. Both lanes now
+lock nltk **3.10.4** (`patterns/frameworks/llamaindex/uv.lock`,
+`patterns/rag/uv.lock`), and raw `uv run pip-audit` — with no `--ignore-vuln` —
+reports "No known vulnerabilities found" in both; `osv-scanner scan -r .` agrees
+(its only remaining hit is the beeai json-repair advisory above). The
+`--ignore-vuln PYSEC-2026-3740` flag and its comments were therefore removed
+from every place it was applied: `mise.toml` (llamaindex branch + rag line of
+`patterns:audit`), `patterns-ci.yml` (llamaindex matrix entry + the rag job's
+pip-audit step) and `security.yml` (llamaindex / rag matrix entries). The
+2026-11-05 review deadline had lapsed by nine days when this was caught, and the
+tracking issue was never filed — the suppression outlived its removal condition
+because nothing forces a re-check when a lockfile refresh silently lands the fix.
+The json-repair suppression (issue #30, review by 2027-01-14) is now the only
+`--ignore-vuln` in the repository.
+
 ## 抑止ポリシーの階梯（cross-repo、2026-09-08 記録）
 
 Agentic AI 系の兄弟 repo 間で、`--ignore-vuln` をどこまで許容するかに 3 段階の差がある:
@@ -235,8 +250,8 @@ Agentic AI 系の兄弟 repo 間で、`--ignore-vuln` をどこまで許容す�
 2. **期限付き抑止（本 repo が採る段）**: 上記 Runbook（Spec 013 R8.1/8.2）の通り、
    `--ignore-vuln` の使用自体は許容するが、**見直し期限**と**追跡 issue への参照**を欠く
    抑止エントリは禁止する（R8.2）。期限が来れば手順 (a)-(d) の再評価が強制される。
-   nltk PYSEC-2026-3740（本節上部）・json-repair GHSA-xf7x-x43h-rpqh（issue #30）は
-   いずれもこの段の実例。
+   nltk PYSEC-2026-3740（本節上部、2026-11-14 に解除済み）・json-repair
+   GHSA-xf7x-x43h-rpqh（issue #30）はいずれもこの段の実例。
 3. **理由付き抑止**（`fastapi-pydantic-ai-agent`）: `--ignore-vuln` 追加時に到達不能性などの
    理由をコメントで残すが、日付付きの見直し期限までは必須としない。
 
